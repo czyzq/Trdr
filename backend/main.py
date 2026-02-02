@@ -317,12 +317,14 @@ async def get_news(symbol: str):
     """
     Get latest news and sentiment for a symbol
     """
+    log_event(f"Fetching news for {symbol}...", "info")
     news_client = get_news_client()
     news = news_client.get_news(symbol, limit=5)
     if not news:
         log_event(f"No news found for {symbol}", "warning")
         return {"symbol": symbol, "news": [], "timestamp": datetime.utcnow().isoformat()}
     
+    log_event(f"Found {len(news)} articles for {symbol}", "success")
     return {
         "symbol": symbol,
         "news": news,

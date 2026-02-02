@@ -40,11 +40,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           const data = await response.json();
           if (data.logs) {
             setLogs(data.logs);
-            // Check if currently scanning
-            const recentLogs = data.logs.slice(-5);
+            // Check if currently scanning (signals or news)
+            const recentLogs = data.logs.slice(-10);
             const scanning = recentLogs.some((log: LogEntry) => 
               log.message.includes('Fetching data') || 
-              log.message.includes('Generating signals')
+              log.message.includes('Generating signals') ||
+              log.message.includes('Fetching news') ||
+              log.message.includes('news for')
             );
             setIsScanning(scanning);
           }
