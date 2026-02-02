@@ -88,6 +88,14 @@ while true; do
     echo "[OK] Frontend showing data" >> $LOG_FILE
   fi
   
+  # 9. Check news health
+  NEWS=$(curl -s http://localhost:8000/api/news/GC=F 2>/dev/null | grep -c "headline")
+  if [ "$NEWS" -eq 0 ]; then
+    echo "[WARNING] News endpoint not returning articles" >> $LOG_FILE
+  else
+    echo "[OK] News integration working (found $NEWS articles)" >> $LOG_FILE
+  fi
+  
   # Push commits to GitHub
   cd $PROJECT_DIR
   PENDING=$(git status --porcelain | wc -l)

@@ -312,6 +312,23 @@ async def get_account():
     """
     return account
 
+@app.get("/api/news/{symbol}")
+async def get_news(symbol: str):
+    """
+    Get latest news and sentiment for a symbol
+    """
+    news_client = get_news_client()
+    news = news_client.get_news(symbol, limit=5)
+    if not news:
+        log_event(f"No news found for {symbol}", "warning")
+        return {"symbol": symbol, "news": [], "timestamp": datetime.utcnow().isoformat()}
+    
+    return {
+        "symbol": symbol,
+        "news": news,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 @app.get("/api/quote/{symbol}")
 async def get_quote(symbol: str):
     """
