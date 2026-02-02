@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface SidebarProps {
   balance?: number;
@@ -7,16 +7,58 @@ interface SidebarProps {
   equity?: number;
   marginUsed?: number;
   winRate?: number;
+  lastScan?: string;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
-  balance = 25000,
-  activePositions = 3,
-  activeSignals = 12,
-  equity = 25300,
-  marginUsed = 45,
-  winRate = 62.5,
+  balance: propBalance,
+  activePositions: propActivePositions,
+  activeSignals: propActiveSignals,
+  equity: propEquity,
+  marginUsed: propMarginUsed,
+  winRate: propWinRate,
+  lastScan: propLastScan,
 }) => {
+  const [balance, setBalance] = useState(propBalance || 1000);
+  const [equity, setEquity] = useState(propEquity || 1000);
+  const [activePositions, setActivePositions] = useState(propActivePositions || 0);
+  const [lastScan, setLastScan] = useState(propLastScan || "Just now");
+  const marginUsed = propMarginUsed || 0;
+  const winRate = propWinRate || 0;
+  const activeSignals = propActiveSignals || 0;
+
+  useEffect(() => {
+    // Fetch account data from backend
+    const fetchAccount = async () => {
+      try {
+        const response = await fetch('/api/account');
+        if (response.ok) {
+          const data = await response.json();
+          setBalance(data.balance || 1000);
+          setEquity(data.equity || 1000);
+          setActivePositions(data.positions || 0);
+          if (data.last_scan) {
+            const scanTime = new Date(data.last_scan);
+            const now = new Date();
+            const diffSecs = Math.floor((now.getTime() - scanTime.getTime()) / 1000);
+            if (diffSecs < 60) {
+              setLastScan("Just now");
+            } else if (diffSecs < 3600) {
+              setLastScan(`${Math.floor(diffSecs / 60)}m ago`);
+            } else {
+              setLastScan(`${Math.floor(diffSecs / 3600)}h ago`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch account:', error);
+      }
+    };
+
+    fetchAccount();
+    const interval = setInterval(fetchAccount, 10000); // Poll every 10 seconds
+    return () => clearInterval(interval);
+  }, []);
   const statItems = [
     { label: 'Balance', value: `$${balance.toLocaleString()}`, highlight: true },
     { label: 'Equity', value: `$${equity.toLocaleString()}` },
@@ -111,7 +153,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
         </div>
         <div className="font-mono text-[9px]" style={{ color: '#666' }}>
-          Last scan: 2m ago
+          Last scan: {lastScan}
         </div>
       </div>
     </div>

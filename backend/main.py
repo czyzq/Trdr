@@ -12,7 +12,7 @@ import os
 from dotenv import load_dotenv
 
 from models import Signal, SignalDirection, Component, ComponentType, SignalResponse
-from finnhub import get_client as get_finnhub_client
+from alpha_vantage import get_client as get_alpha_vantage_client
 from indicators import TechnicalIndicators
 
 load_dotenv()
@@ -34,8 +34,16 @@ app.add_middleware(
 
 # Global state
 signals_cache = {}
-finnhub_client = None
+alpha_client = None
 event_log = []
+account = {
+    "balance": 1000.0,
+    "equity": 1000.0,
+    "positions": 0,
+    "used_margin": 0.0,
+    "available": 1000.0,
+    "last_scan": datetime.utcnow().isoformat()
+}
 
 # Instruments to monitor
 INSTRUMENTS = {
@@ -143,10 +151,13 @@ async def generate_signals() -> List[Signal]:
     """
     Generate trading signals for all instruments
     """
-    global finnhub_client
+    global alpha_client, account
     
-    if finnhub_client is None:
-        finnhub_client = get_finnhub_client()
+    if alpha_client is None:
+        alpha_client = get_alpha_vantage_client()
+    
+    # Update last scan time
+    account["last_scan"] = datetime.utcnow().isoformat()
     
     signals = []
     use_mock_data = False
@@ -156,7 +167,7 @@ async def generate_signals() -> List[Signal]:
             log_event(f"Fetching data for {symbol} ({info['name']})...")
             
             # Get quote
-            quote = finnhub_client.get_quote(symbol)
+            quote = alpha_client.get_quote(symbol)
             if not quote:
                 log_event(f"Failed to fetch quote for {symbol}, using mock data...", "warning")
                 use_mock_data = True
@@ -180,7 +191,7 @@ async def generate_signals() -> List[Signal]:
             current_price = quote["price"]
             
             # Get candles (1 hour resolution, last 100 bars)
-            candles = finnhub_client.get_candles(symbol, resolution="60", count=100)
+            candles = alpha_client.get_candles(symbol, resolution="60", count=100)
             if not candles or len(candles) < 26:
                 log_event(f"Insufficient candle data for {symbol}, using mock data...", "warning")
                 # Generate mock candle data for demonstration
@@ -257,13 +268,17 @@ async def generate_signals() -> List[Signal]:
 async def startup():
     """Initialize on startup"""
     log_event("[CFD TRADING BOT v0.1.0]", "event")
-    log_event("Initializing Finnhub client...", "info")
-    global finnhub_client
-    finnhub_client = get_finnhub_client()
-    if finnhub_client:
-        log_event("✓ Connected to Finnhub API", "success")
+    log_event("Initializing Alpha Vantage client...", "info")
+    global alpha_client, account
+    alpha_client = get_alpha_vantage_client()
+    if alpha_client:
+        log_event("✓ Connected to Alpha Vantage API", "success")
     else:
-        log_event("✗ Failed to connect to Finnhub API", "error")
+        log_event("✗ Failed to connect to Alpha Vantage API", "error")
+    
+    # Initialize account
+    account["last_scan"] = datetime.utcnow().isoformat()
+    log_event(f"✓ Account initialized: Balance ${account['balance']}", "success")
 
 @app.get("/")
 async def root():
@@ -288,6 +303,13 @@ async def get_logs():
     Get event logs for console
     """
     return {"logs": event_log}
+
+@app.get("/api/account")
+async def get_account():
+    """
+    Get account info (balance, equity, positions)
+    """
+    return account
 
 @app.get("/api/quote/{symbol}")
 async def get_quote(symbol: str):

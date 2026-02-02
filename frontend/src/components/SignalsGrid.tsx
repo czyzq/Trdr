@@ -139,8 +139,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
 
     fetchSignals();
 
-    // Refresh signals every 30 seconds
-    const interval = setInterval(fetchSignals, 30000);
+    // Refresh signals every 10 seconds
+    const interval = setInterval(fetchSignals, 10000);
     return () => clearInterval(interval);
   }, [externalSignals]);
 
