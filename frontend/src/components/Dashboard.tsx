@@ -24,7 +24,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [activeTab, setActiveTab] = useState<TabType>('signals');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentTime, setCurrentTime] = useState<string>(new Date().toLocaleTimeString('en-GB'));
-  const [isScanning, setIsScanning] = useState(false);
 
   useEffect(() => {
     // Update current time every second
@@ -40,15 +39,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           const data = await response.json();
           if (data.logs) {
             setLogs(data.logs);
-            // Check if currently scanning (signals or news)
-            const recentLogs = data.logs.slice(-10);
-            const scanning = recentLogs.some((log: LogEntry) => 
-              log.message.includes('Fetching data') || 
-              log.message.includes('Generating signals') ||
-              log.message.includes('Fetching news') ||
-              log.message.includes('news for')
-            );
-            setIsScanning(scanning);
           }
         }
       } catch (error) {
@@ -104,13 +94,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </span>
           </div>
           <div className="flex items-center gap-4 text-xs" style={{ color: '#666' }}>
-            <div className="flex items-center gap-2">
-              <div
-                className={`w-2 h-2 rounded-full ${isScanning ? 'animate-pulse' : ''}`}
-                style={{ backgroundColor: isScanning ? '#ff6b6b' : '#00ff41' }}
-              />
-              <span>{isScanning ? 'SCANNING' : 'LIVE'}</span>
-            </div>
             <span>{currentTime}</span>
           </div>
         </div>

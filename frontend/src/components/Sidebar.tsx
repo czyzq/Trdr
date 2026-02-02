@@ -23,17 +23,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [equity, setEquity] = useState(propEquity || 1000);
   const [activePositions, setActivePositions] = useState(propActivePositions || 0);
   const [lastScan, setLastScan] = useState(propLastScan || "Just now");
+  const [isScanning, setIsScanning] = useState(false);
   const marginUsed = propMarginUsed || 0;
   const winRate = propWinRate || 0;
   const activeSignals = propActiveSignals || 0;
 
   useEffect(() => {
-    // Fetch account data from backend
-    const fetchAccount = async () => {
+    // Fetch account data and check scanning status from backend
+    const fetchData = async () => {
       try {
-        const response = await fetch('/api/account');
-        if (response.ok) {
-          const data = await response.json();
+        // Fetch account
+        const accResponse = await fetch('/api/account');
+        if (accResponse.ok) {
+          const data = await accResponse.json();
           setBalance(data.balance || 1000);
           setEquity(data.equity || 1000);
           setActivePositions(data.positions || 0);
@@ -55,14 +57,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }
           }
         }
+
+        // Fetch logs to check if scanning
+        const logsResponse = await fetch('/api/logs');
+        if (logsResponse.ok) {
+          const logsData = await logsResponse.json();
+          if (logsData.logs && logsData.logs.length > 0) {
+            const recentLogs = logsData.logs.slice(-10);
+            const scanning = recentLogs.some((log: any) =>
+              log.message.includes('Fetching data') ||
+              log.message.includes('Fetching news') ||
+              log.message.includes('Generating signals')
+            );
+            setIsScanning(scanning);
+          }
+        }
       } catch (error) {
-        console.error('Failed to fetch account:', error);
+        console.error('Failed to fetch data:', error);
       }
     };
 
-    fetchAccount();
+    fetchData();
     // Update more frequently to show accurate time difference
-    const interval = setInterval(fetchAccount, 1000); // Poll every second for accurate time
+    const interval = setInterval(fetchData, 1000); // Poll every second
     return () => clearInterval(interval);
   }, []);
   const statItems = [
@@ -151,11 +168,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }}>
         <div className="flex items-center gap-2 mb-1">
           <div 
-            className="w-2 h-2 rounded-full animate-pulse" 
-            style={{ backgroundColor: '#00ff41' }}
+            className={`w-2 h-2 rounded-full ${isScanning ? 'animate-pulse' : ''}`}
+            style={{ backgroundColor: isScanning ? '#00ff41' : '#666' }}
           />
-          <span className="font-mono text-xs" style={{ color: '#00ff41' }}>
-            SCANNING
+          <span 
+            className="font-mono text-xs" 
+            style={{ color: isScanning ? '#00ff41' : '#666' }}
+          >
+            {isScanning ? 'SCANNING' : 'IDLE'}
           </span>
         </div>
         <div className="font-mono text-[9px]" style={{ color: '#666' }}>
