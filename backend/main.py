@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from models import Signal, SignalDirection, Component, ComponentType, SignalResponse
 from alpha_vantage import get_client as get_alpha_vantage_client
 from news_client import get_client as get_news_client
+from realistic_prices import get_feeder as get_realistic_price_feeder
 from indicators import TechnicalIndicators
 
 load_dotenv()
@@ -43,7 +44,9 @@ account = {
     "positions": 0,
     "used_margin": 0.0,
     "available": 1000.0,
-    "last_scan": datetime.utcnow().isoformat()
+    "last_scan": datetime.utcnow().isoformat(),
+    "dry_run": True,  # Simulation mode - no real trades
+    "mode": "simulate"  # "simulate" or "live"
 }
 
 # Instruments to monitor
@@ -154,61 +157,31 @@ async def generate_signals() -> List[Signal]:
     """
     global alpha_client, account
     
-    if alpha_client is None:
-        alpha_client = get_alpha_vantage_client()
-    
     # Update last scan time
     account["last_scan"] = datetime.utcnow().isoformat()
     
+    # Use realistic price feeder for now (Alpha Vantage doesn't support futures properly)
+    price_feeder = get_realistic_price_feeder()
+    
     signals = []
-    use_mock_data = False
     
     for symbol, info in INSTRUMENTS.items():
         try:
             log_event(f"Fetching data for {symbol} ({info['name']})...")
             
-            # Get quote
-            quote = alpha_client.get_quote(symbol)
+            # Get quote from realistic price feeder
+            quote = price_feeder.get_quote(symbol)
             if not quote:
-                log_event(f"Failed to fetch quote for {symbol}, using mock data...", "warning")
-                use_mock_data = True
-                # Use mock data for this symbol
-                mock_prices = {
-                    "GC=F": 2050.00,
-                    "SI=F": 32.50,
-                    "NQ=F": 19500.00
-                }
-                base_price = mock_prices.get(symbol, 1000)
-                quote = {
-                    "symbol": symbol,
-                    "price": base_price,
-                    "high": base_price * 1.02,
-                    "low": base_price * 0.98,
-                    "open": base_price * 0.99,
-                    "volume": 1000000,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                log_event(f"Failed to generate price for {symbol}", "error")
+                continue
             
             current_price = quote["price"]
             
             # Get candles (1 hour resolution, last 100 bars)
-            candles = alpha_client.get_candles(symbol, resolution="60", count=100)
+            candles = price_feeder.get_candles(symbol, resolution="60", count=100)
             if not candles or len(candles) < 26:
-                log_event(f"Insufficient candle data for {symbol}, using mock data...", "warning")
-                # Generate mock candle data for demonstration
-                base_price = quote["price"]
-                candles = []
-                for i in range(100):
-                    price_change = (i - 50) * 0.001  # Slight uptrend
-                    candles.append({
-                        "timestamp": (datetime.utcnow() - timedelta(hours=100-i)).isoformat(),
-                        "open": base_price + price_change - 0.5,
-                        "high": base_price + price_change + 1.0,
-                        "low": base_price + price_change - 1.5,
-                        "close": base_price + price_change,
-                        "volume": 1000000 + i * 1000
-                    })
-                use_mock_data = True
+                log_event(f"Insufficient candle data for {symbol}", "error")
+                continue
             
             # Calculate indicators
             indicators = TechnicalIndicators.calculate_all(candles, period=14)
@@ -311,6 +284,26 @@ async def get_account():
     Get account info (balance, equity, positions)
     """
     return account
+
+@app.post("/api/account/mode")
+async def set_account_mode(mode: str):
+    """
+    Set trading mode: "simulate" or "live"
+    """
+    global account
+    if mode not in ["simulate", "live"]:
+        return {"error": "Invalid mode. Use 'simulate' or 'live'"}
+    
+    account["mode"] = mode
+    account["dry_run"] = (mode == "simulate")
+    
+    log_event(f"Trading mode changed to: {mode.upper()}", "event")
+    
+    return {
+        "mode": account["mode"],
+        "dry_run": account["dry_run"],
+        "message": f"Now in {mode.upper()} mode"
+    }
 
 @app.get("/api/news/{symbol}")
 async def get_news(symbol: str):
