@@ -162,6 +162,7 @@ async def generate_signals() -> List[Signal]:
     
     # Use realistic price feeder for now (Alpha Vantage doesn't support futures properly)
     price_feeder = get_realistic_price_feeder()
+    news_client_instance = get_news_client()
     
     signals = []
     
@@ -189,8 +190,24 @@ async def generate_signals() -> List[Signal]:
                 log_event(f"Failed to calculate indicators for {symbol}", "warning")
                 continue
             
-            # Generate signal
-            score, components = calculate_signal_score(indicators)
+            # Fetch news and calculate sentiment
+            news_score = 0.0
+            try:
+                news = news_client_instance.get_news(symbol, limit=5)
+                if news and len(news) > 0:
+                    # Average sentiment across all news articles
+                    sentiments = [article.get('sentiment', 0) for article in news]
+                    news_score = sum(sentiments) / len(sentiments) if sentiments else 0
+                    log_event(f"News sentiment for {symbol}: {news_score:.2f} ({len(news)} articles)", "info")
+            except Exception as e:
+                log_event(f"Failed to fetch news for {symbol}: {e}", "warning")
+            
+            # Generate signal with news sentiment
+            technical_score, components = calculate_signal_score(indicators)
+            
+            # Weighted composite: 40% technical, 20% price action, 40% news
+            score = (technical_score * 0.4) + (0 * 0.2) + (news_score * 0.4)
+            
             direction = get_signal_direction(score)
             
             # Calculate confidence
@@ -218,9 +235,9 @@ async def generate_signals() -> List[Signal]:
                 direction=direction,
                 score=score,
                 confidence=confidence,
-                technical_score=score,
+                technical_score=technical_score,
                 price_action_score=0,
-                news_score=0,
+                news_score=news_score,
                 components=components,
                 current_price=current_price,
                 time_horizon="1h",

@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { SignalsGrid } from './SignalsGrid';
 import { ConsoleTab } from './ConsoleTab';
+import { NewsTab } from './NewsTab';
 
-type TabType = 'signals' | 'history' | 'console' | 'settings';
+type TabType = 'signals' | 'news' | 'history' | 'console' | 'settings';
 
 interface LogEntry {
   id: string;
@@ -59,6 +60,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const tabs: Array<{ id: TabType; label: string }> = [
     { id: 'signals', label: 'Signals' },
+    { id: 'news', label: 'News' },
     { id: 'history', label: 'History' },
     { id: 'console', label: 'Console' },
     { id: 'settings', label: 'Settings' },
@@ -145,6 +147,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }}
               />
             )}
+
+            {activeTab === 'news' && <NewsTab />}
 
             {activeTab === 'console' && (
               <ConsoleTab logs={logs && logs.length > 0 ? logs : undefined} maxLogs={100} />
