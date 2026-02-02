@@ -24,9 +24,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [activePositions, setActivePositions] = useState(propActivePositions || 0);
   const [lastScan, setLastScan] = useState(propLastScan || "Just now");
   const [isScanning, setIsScanning] = useState(false);
+  const [mode, setMode] = useState<'simulate' | 'live'>('simulate');
   const marginUsed = propMarginUsed || 0;
   const winRate = propWinRate || 0;
   const activeSignals = propActiveSignals || 0;
+
+  const toggleMode = async () => {
+    const newMode = mode === 'simulate' ? 'live' : 'simulate';
+    try {
+      const response = await fetch(`/api/account/mode?mode=${newMode}`, {
+        method: 'POST'
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setMode(data.mode);
+        console.log(`Mode changed to: ${data.mode}`);
+      }
+    } catch (error) {
+      console.error('Failed to toggle mode:', error);
+    }
+  };
 
   useEffect(() => {
     // Fetch account data and check scanning status from backend
@@ -39,6 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           setBalance(data.balance || 1000);
           setEquity(data.equity || 1000);
           setActivePositions(data.positions || 0);
+          setMode(data.mode || 'simulate');
           if (data.last_scan) {
             const scanTime = new Date(data.last_scan);
             const now = new Date();
@@ -107,6 +125,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           Account Stats
         </h2>
+      </div>
+
+      {/* Mode Toggle */}
+      <div className="px-4 py-3 border-b" style={{ borderColor: '#1a1f2e' }}>
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: '#888' }}>
+            Mode
+          </span>
+          <button
+            onClick={toggleMode}
+            className="font-mono text-xs font-bold px-3 py-1 rounded border transition"
+            style={{
+              backgroundColor: mode === 'simulate' ? 'rgba(255, 193, 7, 0.1)' : 'rgba(255, 0, 0, 0.1)',
+              borderColor: mode === 'simulate' ? '#ffc107' : '#ff0000',
+              color: mode === 'simulate' ? '#ffc107' : '#ff0000',
+            }}
+          >
+            {mode === 'simulate' ? '🧪 SIMULATE' : '⚡ LIVE'}
+          </button>
+        </div>
+        <div className="font-mono text-[9px] mt-1" style={{ color: '#666' }}>
+          {mode === 'simulate' ? 'Paper trading - no real money' : 'Real trading - USE CAUTION'}
+        </div>
       </div>
 
       {/* Stats List */}
