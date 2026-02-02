@@ -41,12 +41,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             const scanTime = new Date(data.last_scan);
             const now = new Date();
             const diffSecs = Math.floor((now.getTime() - scanTime.getTime()) / 1000);
-            if (diffSecs < 60) {
-              setLastScan("Just now");
+            if (diffSecs < 10) {
+              setLastScan("Now");
+            } else if (diffSecs < 60) {
+              setLastScan(`${diffSecs}s ago`);
             } else if (diffSecs < 3600) {
-              setLastScan(`${Math.floor(diffSecs / 60)}m ago`);
+              const mins = Math.floor(diffSecs / 60);
+              setLastScan(`${mins}m ${diffSecs % 60}s ago`);
             } else {
-              setLastScan(`${Math.floor(diffSecs / 3600)}h ago`);
+              const hours = Math.floor(diffSecs / 3600);
+              const mins = Math.floor((diffSecs % 3600) / 60);
+              setLastScan(`${hours}h ${mins}m ago`);
             }
           }
         }
@@ -56,7 +61,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     fetchAccount();
-    const interval = setInterval(fetchAccount, 10000); // Poll every 10 seconds
+    // Update more frequently to show accurate time difference
+    const interval = setInterval(fetchAccount, 1000); // Poll every second for accurate time
     return () => clearInterval(interval);
   }, []);
   const statItems = [

@@ -23,8 +23,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('signals');
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [currentTime, setCurrentTime] = useState<string>(new Date().toLocaleTimeString('en-GB'));
+  const [isScanning, setIsScanning] = useState(false);
 
   useEffect(() => {
+    // Update current time every second
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString('en-GB'));
+    }, 1000);
+
     // Fetch logs from backend
     const fetchLogs = async () => {
       try {
@@ -33,6 +40,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           const data = await response.json();
           if (data.logs) {
             setLogs(data.logs);
+            // Check if currently scanning
+            const recentLogs = data.logs.slice(-5);
+            const scanning = recentLogs.some((log: LogEntry) => 
+              log.message.includes('Fetching data') || 
+              log.message.includes('Generating signals')
+            );
+            setIsScanning(scanning);
           }
         }
       } catch (error) {
@@ -43,8 +57,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     fetchLogs();
 
     // Poll for logs every 5 seconds
-    const interval = setInterval(fetchLogs, 5000);
-    return () => clearInterval(interval);
+    const logInterval = setInterval(fetchLogs, 5000);
+    
+    return () => {
+      clearInterval(timeInterval);
+      clearInterval(logInterval);
+    };
   }, []);
 
   const tabs: Array<{ id: TabType; label: string }> = [
@@ -86,12 +104,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="flex items-center gap-4 text-xs" style={{ color: '#666' }}>
             <div className="flex items-center gap-2">
               <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{ backgroundColor: '#00ff41' }}
+                className={`w-2 h-2 rounded-full ${isScanning ? 'animate-pulse' : ''}`}
+                style={{ backgroundColor: isScanning ? '#ff6b6b' : '#00ff41' }}
               />
-              <span>LIVE</span>
+              <span>{isScanning ? 'SCANNING' : 'LIVE'}</span>
             </div>
-            <span>13:11:08</span>
+            <span>{currentTime}</span>
           </div>
         </div>
       </div>
