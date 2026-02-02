@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from models import Signal, SignalDirection, Component, ComponentType, SignalResponse
 from alpha_vantage import get_client as get_alpha_vantage_client
+from news_client import get_client as get_news_client
 from indicators import TechnicalIndicators
 
 load_dotenv()
