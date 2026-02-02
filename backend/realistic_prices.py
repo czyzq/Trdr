@@ -7,11 +7,11 @@ from datetime import datetime
 from typing import Dict, Any
 
 # Base prices updated as of Feb 2, 2026
-# These should be updated periodically to match real market prices
+# Prices match XTB CFD broker values
 BASE_PRICES = {
-    "GC=F": 2772.0,    # Gold (XAU/USD) $/oz
-    "SI=F": 31.50,     # Silver (XAG/USD) $/oz  
-    "NQ=F": 21860.0,   # Nasdaq-100 Index
+    "GC=F": 4779.0,    # Gold CFD (XTB GOLD)
+    "SI=F": 83.040,    # Silver CFD (XTB SILVER - per 100oz?)
+    "NQ=F": 25494.0,   # Nasdaq-100 CFD (XTB US100)
 }
 
 class RealisticPriceFeeder:
