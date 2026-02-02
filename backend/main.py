@@ -334,11 +334,11 @@ async def get_quote(symbol: str):
     """
     Get current quote for a symbol
     """
-    global finnhub_client
-    if finnhub_client is None:
-        finnhub_client = get_finnhub_client()
+    global alpha_client
+    if alpha_client is None:
+        alpha_client = get_alpha_vantage_client()
     
-    quote = finnhub_client.get_quote(symbol)
+    quote = alpha_client.get_quote(symbol)
     return quote if quote else {"error": f"Failed to fetch quote for {symbol}"}
 
 if __name__ == "__main__":
