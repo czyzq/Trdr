@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 
 interface NewsArticle {
+  symbol: string; // GC=F, SI=F, NQ=F
+  name: string; // Gold, Silver, Nasdaq-100
   headline: string;
   sentiment: number; // -1 to +1
   direction: 'buy' | 'sell' | 'neutral';
@@ -10,38 +12,23 @@ interface NewsArticle {
   published: string;
 }
 
-interface NewsData {
-  symbol: string;
+interface NewsResponse {
   news: NewsArticle[];
   timestamp: string;
 }
 
-const SYMBOLS = ['GC=F', 'SI=F', 'NQ=F'];
-const SYMBOL_NAMES: Record<string, string> = {
-  'GC=F': 'Gold',
-  'SI=F': 'Silver',
-  'NQ=F': 'Nasdaq-100'
-};
-
 export const NewsTab: React.FC = () => {
-  const [selectedSymbol, setSelectedSymbol] = useState<string>('GC=F');
-  const [newsData, setNewsData] = useState<Record<string, NewsData>>({});
+  const [newsData, setNewsData] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const fetchNews = async () => {
       setLoading(true);
       try {
-        // Fetch news for all symbols
-        for (const symbol of SYMBOLS) {
-          const response = await fetch(`/api/news/${symbol}`);
-          if (response.ok) {
-            const data = await response.json();
-            setNewsData(prev => ({
-              ...prev,
-              [symbol]: data
-            }));
-          }
+        const response = await fetch('/api/news/all');
+        if (response.ok) {
+          const data: NewsResponse = await response.json();
+          setNewsData(data.news);
         }
       } catch (error) {
         console.error('Failed to fetch news:', error);
@@ -51,12 +38,10 @@ export const NewsTab: React.FC = () => {
     };
 
     fetchNews();
-    // Refresh news every 2 minutes (avoid API spam)
+    // Refresh news every 2 minutes
     const interval = setInterval(fetchNews, 120000);
     return () => clearInterval(interval);
   }, []);
-
-  const currentNews = newsData[selectedSymbol];
 
   const getSignalColor = (direction: string) => {
     switch (direction) {
@@ -65,143 +50,138 @@ export const NewsTab: React.FC = () => {
       case 'sell':
         return '#ff1f1f'; // Red
       default:
-        return '#888'; // Gray
+        return '#666'; // Gray
     }
   };
 
   const getSignalLabel = (direction: string) => {
     switch (direction) {
       case 'buy':
-        return '🟢 BUY';
+        return 'BUY';
       case 'sell':
-        return '🔴 SELL';
+        return 'SELL';
       default:
-        return '⚪ NEUTRAL';
+        return 'NEUTRAL';
     }
+  };
+
+  const getTickerShort = (symbol: string) => {
+    const map: Record<string, string> = {
+      'GC=F': 'GOLD',
+      'SI=F': 'SILVER',
+      'NQ=F': 'NQ'
+    };
+    return map[symbol] || symbol;
   };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" style={{ backgroundColor: '#0a0e27' }}>
-      {/* Symbol Selector */}
-      <div className="border-b px-6 py-4" style={{ borderColor: '#1a1f2e' }}>
-        <div className="flex gap-4">
-          {SYMBOLS.map(symbol => (
-            <button
-              key={symbol}
-              onClick={() => setSelectedSymbol(symbol)}
-              className={`font-mono text-xs uppercase tracking-widest font-bold px-4 py-2 border transition ${
-                selectedSymbol === symbol ? 'border-opacity-100' : 'border-opacity-30'
-              }`}
-              style={{
-                color: selectedSymbol === symbol ? '#00ff41' : '#666',
-                borderColor: '#00ff41',
-                backgroundColor: selectedSymbol === symbol ? 'rgba(0, 255, 65, 0.1)' : 'transparent'
-              }}
-            >
-              {SYMBOL_NAMES[symbol]}
-            </button>
-          ))}
+      {/* Header */}
+      <div className="border-b px-3 py-3 sm:px-6 sm:py-4" style={{ borderColor: '#1a1f2e' }}>
+        <div className="font-mono text-xs sm:text-sm uppercase tracking-widest font-bold" style={{ color: '#00ff41' }}>
+          📰 News Feed
         </div>
       </div>
 
-      {/* News List */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading && !currentNews && (
-          <div className="text-center" style={{ color: '#666' }}>
-            <div className="font-mono text-sm">Loading news...</div>
+      {/* News Table */}
+      <div className="flex-1 overflow-y-auto">
+        {loading && newsData.length === 0 ? (
+          <div className="text-center p-6" style={{ color: '#666' }}>
+            <div className="font-mono text-xs sm:text-sm">Loading news...</div>
           </div>
-        )}
-
-        {currentNews && currentNews.news && currentNews.news.length > 0 ? (
-          <div className="space-y-4">
-            {currentNews.news.map((article, idx) => (
+        ) : newsData.length > 0 ? (
+          <div className="divide-y" style={{ borderColor: '#1a1f2e' }}>
+            {newsData.map((article, idx) => (
               <div
                 key={idx}
-                className="border rounded p-4"
+                className="p-3 sm:p-4 hover:bg-opacity-30 transition"
                 style={{
-                  borderColor: getSignalColor(article.direction),
-                  backgroundColor: 'rgba(0, 0, 0, 0.3)'
+                  backgroundColor: idx % 2 === 0 ? 'rgba(0, 0, 0, 0.2)' : 'transparent'
                 }}
               >
-                {/* Header: Signal + Importance */}
-                <div className="flex items-center justify-between mb-3">
-                  <div
-                    className="font-mono text-sm font-bold"
-                    style={{ color: getSignalColor(article.direction) }}
-                  >
-                    {getSignalLabel(article.direction)}
-                  </div>
+                {/* Ticker + Signal Row */}
+                <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-[10px]" style={{ color: '#888' }}>
-                      IMPORTANCE:
+                    <span className="font-mono text-xs sm:text-sm font-bold" style={{ color: '#00ff41' }}>
+                      {getTickerShort(article.symbol)}
                     </span>
-                    <div className="flex gap-1">
-                      {[...Array(5)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="w-2 h-4"
-                          style={{
-                            backgroundColor: i < Math.round(article.importance * 5)
-                              ? '#00ff41'
-                              : '#1a1f2e'
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <span className="font-mono text-xs" style={{ color: '#00ff41' }}>
-                      {Math.round(article.importance * 100)}%
+                    <span className="font-mono text-[10px] sm:text-xs opacity-60" style={{ color: '#fff' }}>
+                      {article.name}
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="font-mono text-[10px] sm:text-xs font-bold px-2 py-1 rounded"
+                      style={{
+                        color: getSignalColor(article.direction),
+                        backgroundColor: `${getSignalColor(article.direction)}20`,
+                        border: `1px solid ${getSignalColor(article.direction)}`
+                      }}
+                    >
+                      {getSignalLabel(article.direction)}
+                    </span>
+                    
+                    <span
+                      className="font-mono text-[10px] sm:text-xs font-bold"
+                      style={{ color: getSignalColor(article.direction) }}
+                    >
+                      {article.sentiment > 0 ? '+' : ''}{article.sentiment.toFixed(2)}
                     </span>
                   </div>
                 </div>
 
                 {/* Headline */}
-                <div className="font-mono text-sm mb-2" style={{ color: '#fff' }}>
+                <div
+                  className="font-mono text-xs sm:text-sm mb-2 leading-relaxed"
+                  style={{ color: '#fff' }}
+                >
                   {article.headline}
                 </div>
 
-                {/* Metadata */}
-                <div className="flex items-center justify-between text-[10px] font-mono" style={{ color: '#666' }}>
-                  <span>{article.source}</span>
-                  {article.url && (
-                    <a
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                      style={{ color: '#00ff41' }}
-                    >
-                      Read more →
-                    </a>
-                  )}
-                </div>
-
-                {/* Sentiment Score */}
-                <div className="mt-2 pt-2 border-t" style={{ borderColor: '#1a1f2e' }}>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[10px]" style={{ color: '#888' }}>
-                      SENTIMENT:
+                {/* Importance Bar + Source */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-1">
+                    <span className="font-mono text-[9px] sm:text-[10px] opacity-60" style={{ color: '#888' }}>
+                      IMP:
                     </span>
-                    <div className="flex-1 h-2 rounded" style={{ backgroundColor: '#1a1f2e' }}>
+                    <div className="flex-1 max-w-[100px] h-1.5 sm:h-2 rounded" style={{ backgroundColor: '#1a1f2e' }}>
                       <div
                         className="h-full rounded"
                         style={{
-                          width: `${Math.abs(article.sentiment) * 50 + 50}%`,
-                          backgroundColor: article.sentiment > 0 ? '#00ff41' : '#ff1f1f',
-                          marginLeft: article.sentiment < 0 ? '0' : `${50 - Math.abs(article.sentiment) * 50}%`
+                          width: `${article.importance * 100}%`,
+                          backgroundColor: '#00ff41'
                         }}
                       />
                     </div>
-                    <span className="font-mono text-xs" style={{ color: getSignalColor(article.direction) }}>
-                      {article.sentiment > 0 ? '+' : ''}{article.sentiment.toFixed(2)}
+                    <span className="font-mono text-[9px] sm:text-[10px]" style={{ color: '#00ff41' }}>
+                      {Math.round(article.importance * 100)}%
                     </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[9px] sm:text-[10px] opacity-60" style={{ color: '#666' }}>
+                      {article.source}
+                    </span>
+                    {article.url && (
+                      <a
+                        href={article.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-[9px] sm:text-[10px]"
+                        style={{ color: '#00ff41' }}
+                      >
+                        →
+                      </a>
+                    )}
                   </div>
                 </div>
               </div>
             ))}
           </div>
-        ) : !loading && (
-          <div className="text-center" style={{ color: '#666' }}>
-            <div className="font-mono text-sm">No news available for {SYMBOL_NAMES[selectedSymbol]}</div>
+        ) : (
+          <div className="text-center p-6" style={{ color: '#666' }}>
+            <div className="font-mono text-xs sm:text-sm">No news available</div>
           </div>
         )}
       </div>

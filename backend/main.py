@@ -322,6 +322,38 @@ async def set_account_mode(mode: str):
         "message": f"Now in {mode.upper()} mode"
     }
 
+@app.get("/api/news/all")
+async def get_all_news():
+    """
+    Get latest news for all symbols (combined list)
+    """
+    log_event("Fetching news for all symbols...", "info")
+    news_client = get_news_client()
+    
+    all_news = []
+    
+    for symbol, info in INSTRUMENTS.items():
+        try:
+            news = news_client.get_news(symbol, limit=5)
+            if news:
+                # Add symbol + name to each article
+                for article in news:
+                    article["symbol"] = symbol
+                    article["name"] = info["name"]
+                all_news.extend(news)
+        except Exception as e:
+            log_event(f"Failed to fetch news for {symbol}: {e}", "error")
+    
+    # Sort by importance (highest first)
+    all_news.sort(key=lambda x: x.get("importance", 0), reverse=True)
+    
+    log_event(f"Found {len(all_news)} total articles across all symbols", "success")
+    
+    return {
+        "news": all_news,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 @app.get("/api/news/{symbol}")
 async def get_news(symbol: str):
     """
