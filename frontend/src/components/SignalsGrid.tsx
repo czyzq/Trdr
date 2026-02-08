@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ScoreGauge } from './ScoreGauge';
+import { SimpleChart } from './SimpleChart';
 
 interface Signal {
   id?: string;
@@ -23,7 +24,7 @@ interface SignalsGridProps {
 const defaultSignals: Signal[] = [
   {
     id: '1',
-    symbol: 'GC=F',
+    symbol: 'XAU',
     score: 0.45,
     direction: 'buy',
     entry_point: 2050.00,
@@ -35,7 +36,7 @@ const defaultSignals: Signal[] = [
   },
   {
     id: '2',
-    symbol: 'SI=F',
+    symbol: 'XAG',
     score: 0.62,
     direction: 'buy',
     entry_point: 32.50,
@@ -47,7 +48,7 @@ const defaultSignals: Signal[] = [
   },
   {
     id: '3',
-    symbol: 'NQ=F',
+    symbol: 'US100',
     score: 0.55,
     direction: 'buy',
     entry_point: 19500.00,
@@ -97,6 +98,14 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
 }) => {
   const [signals, setSignals] = useState<Signal[]>(defaultSignals);
   const [loading, setLoading] = useState(false);
+  const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
+  const [showChart, setShowChart] = useState(false);
+
+  // Update parent with signal count when signals change
+  useEffect(() => {
+    // This could be implemented to pass signal count up to parent
+    // For now, we'll just use the length
+  }, [signals]);
 
   useEffect(() => {
     if (externalSignals && externalSignals.length > 0) {
@@ -113,19 +122,21 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
           const data = await response.json();
           if (data.signals && data.signals.length > 0) {
             // Transform backend signals to frontend format
-            const transformedSignals = data.signals.map((sig: any, idx: number) => ({
-              id: `${idx}`,
-              symbol: sig.symbol,
-              score: sig.score,
-              direction: sig.direction.toLowerCase().includes('buy') ? 'buy' : 'sell',
-              entry_point: sig.entry_point || sig.current_price,
-              current_price: sig.current_price,
-              take_profit: sig.take_profit,
-              stop_loss: sig.stop_loss,
-              confidence: sig.confidence,
-              risk_reward_ratio: sig.risk_reward_ratio,
-              trend: [sig.score * 0.5, sig.score * 0.6, sig.score * 0.7, sig.score * 0.8, sig.score * 0.9, sig.score],
-            }));
+            // Show all signals from backend
+            const transformedSignals = data.signals
+              .map((sig: any, idx: number) => ({
+                id: `${idx}`,
+                symbol: sig.symbol,
+                score: sig.score,
+                direction: sig.direction.toLowerCase().includes('buy') ? 'buy' : 'sell',
+                entry_point: sig.entry_point || sig.current_price,
+                current_price: sig.current_price,
+                take_profit: sig.take_profit,
+                stop_loss: sig.stop_loss,
+                confidence: sig.confidence,
+                risk_reward_ratio: sig.risk_reward_ratio,
+                trend: [sig.score * 0.5, sig.score * 0.6, sig.score * 0.7, sig.score * 0.8, sig.score * 0.9, sig.score],
+              }));
             setSignals(transformedSignals);
           }
         }
@@ -144,6 +155,17 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
     return () => clearInterval(interval);
   }, [externalSignals]);
 
+  const handleSignalClick = (signal: Signal) => {
+    setSelectedSignal(signal);
+    setShowChart(true);
+    onSignalClick?.(signal);
+  };
+
+  const closeChart = () => {
+    setShowChart(false);
+    setSelectedSignal(null);
+  };
+
   return (
     <div
       className="flex-1 border rounded-sm overflow-hidden flex flex-col"
@@ -152,6 +174,58 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
         borderColor: '#00ff41',
       }}
     >
+      {/* Chart Modal */}
+      {showChart && selectedSignal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="border rounded-sm w-full max-w-4xl max-h-[90vh] overflow-auto"
+               style={{
+                 backgroundColor: '#0a0e27',
+                 borderColor: '#00ff41',
+               }}>
+            <div className="p-4 border-b flex items-center justify-between"
+                 style={{ borderColor: '#00ff41' }}>
+              <div className="font-mono text-sm uppercase tracking-widest font-bold"
+                   style={{ color: '#00ff41' }}>
+                {selectedSignal.symbol} - Technical Analysis
+              </div>
+              <button
+                onClick={closeChart}
+                className="px-3 py-1 border text-xs font-mono uppercase tracking-widest hover:bg-opacity-10 transition"
+                style={{
+                  borderColor: '#00ff41',
+                  color: '#00ff41',
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-4">
+              <SimpleChart symbol={selectedSignal.symbol} />
+              <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
+                <div className="border p-3 rounded-sm"
+                     style={{ borderColor: '#1a1f2e' }}>
+                  <div className="font-bold mb-2" style={{ color: '#00ff41' }}>Signal Details</div>
+                  <div className="space-y-1" style={{ color: '#aaa' }}>
+                    <div>Score: <span className="font-bold">{selectedSignal.score.toFixed(3)}</span></div>
+                    <div>Direction: <span className="font-bold" style={{color: selectedSignal.direction === 'buy' ? '#00ff41' : '#ff1f1f'}}>{selectedSignal.direction.toUpperCase()}</span></div>
+                    <div>Confidence: <span className="font-bold">{(selectedSignal.confidence * 100).toFixed(1)}%</span></div>
+                  </div>
+                </div>
+                <div className="border p-3 rounded-sm"
+                     style={{ borderColor: '#1a1f2e' }}>
+                  <div className="font-bold mb-2" style={{ color: '#00ff41' }}>Trade Levels</div>
+                  <div className="space-y-1" style={{ color: '#aaa' }}>
+                    <div>Entry: <span className="font-bold">{selectedSignal.entry_point?.toFixed(2) || 'N/A'}</span></div>
+                    <div>Take Profit: <span className="font-bold" style={{color: '#00ff41'}}>{selectedSignal.take_profit?.toFixed(2) || 'N/A'}</span></div>
+                    <div>Stop Loss: <span className="font-bold" style={{color: '#ff1f1f'}}>{selectedSignal.stop_loss?.toFixed(2) || 'N/A'}</span></div>
+                    <div>Risk/Reward: <span className="font-bold">{selectedSignal.risk_reward_ratio?.toFixed(1) || 'N/A'}:1</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div
         className="px-4 py-3 border-b"
@@ -192,7 +266,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                 className="px-4 py-2 text-center uppercase font-bold tracking-widest"
                 style={{ color: '#00ff41' }}
               >
-                Direction
+                Signal
               </th>
               <th
                 className="px-4 py-2 text-right uppercase font-bold tracking-widest"
@@ -237,7 +311,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
               return (
                 <tr
                   key={signal.id}
-                  onClick={() => onSignalClick?.(signal)}
+                  onClick={() => handleSignalClick(signal)}
                   className="border-b hover:bg-opacity-10 cursor-pointer transition"
                   style={{
                     borderColor: '#1a1f2e',
@@ -246,9 +320,18 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                 >
                   {/* Symbol */}
                   <td className="px-4 py-3">
-                    <span style={{ color: '#00ff41' }} className="font-bold">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent row click
+                        // You could add symbol-specific action here
+                        console.log('Symbol clicked:', signal.symbol);
+                      }}
+                      className="font-bold hover:underline transition"
+                      style={{ color: '#00ff41' }}
+                      title={`View ${signal.symbol} chart`}
+                    >
                       {signal.symbol}
-                    </span>
+                    </button>
                   </td>
 
                   {/* Score */}

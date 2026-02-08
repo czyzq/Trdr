@@ -34,7 +34,7 @@ class AlphaVantageClient:
     def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Fetch current quote for a symbol
-        Symbols: GC=F (gold), SI=F (silver), NQ=F (nasdaq)
+        Symbols: XAU (gold), XAG (silver), US100 (nasdaq)
         """
         # Check cache first
         if symbol in self.price_cache:
@@ -46,9 +46,9 @@ class AlphaVantageClient:
             
             # Map futures symbols to Alpha Vantage symbols
             symbol_map = {
-                "GC=F": "GOLD",     # Gold spot price
-                "SI=F": "SILVER",   # Silver spot price  
-                "NQ=F": "SPY",      # Use SPY for Nasdaq proxy (or could use INDEX function)
+                "XAU": "GOLD",     # Gold spot price
+                "XAG": "SILVER",   # Silver spot price  
+                "US100": "SPY",      # Use SPY for Nasdaq proxy (or could use INDEX function)
             }
             
             av_symbol = symbol_map.get(symbol, symbol)
@@ -69,13 +69,13 @@ class AlphaVantageClient:
                 price = float(quote["05. price"])
                 
                 # Apply realistic adjustments for commodity symbols
-                if symbol == "GC=F":
+                if symbol == "XAU":
                     # Gold: multiply by ~100 to get realistic price (2050 range)
                     price = price * 100 if price < 100 else price
-                elif symbol == "SI=F":
+                elif symbol == "XAG":
                     # Silver: multiply by ~30 for realistic price
                     price = price * 30 if price < 50 else price
-                elif symbol == "NQ=F":
+                elif symbol == "US100":
                     # Nasdaq: multiply by ~5 for realistic index level
                     price = price * 5 if price < 10000 else price
                 
@@ -115,9 +115,9 @@ class AlphaVantageClient:
             self._rate_limit()
             
             symbol_map = {
-                "GC=F": "GOLD",
-                "SI=F": "SILVER",
-                "NQ=F": "SPY",
+                "XAU": "GOLD",
+                "XAG": "SILVER",
+                "US100": "SPY",
             }
             
             av_symbol = symbol_map.get(symbol, symbol)

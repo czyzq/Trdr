@@ -3,3 +3,7 @@ export { Sidebar } from './Sidebar';
 export { SignalsGrid } from './SignalsGrid';
 export { ConsoleTab } from './ConsoleTab';
 export { ScoreGauge } from './ScoreGauge';
+export { SimpleChart } from './SimpleChart';
+export { CandlestickChart } from './CandlestickChart';
+export { ChartsTab } from './ChartsTab';
+export { MainTab } from './MainTab';

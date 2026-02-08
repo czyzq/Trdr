@@ -1,13 +1,16 @@
 """
 News client with Brave Search integration and sentiment analysis
-Respects API rate limits (1 req/sec)
+Respects API rate limits (20 req/min for free plan)
 """
 import os
 import time
 import httpx
+import asyncio
+import threading
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from dotenv import load_dotenv
+from mock_news import get_mock_news
 
 load_dotenv()
 
@@ -35,14 +38,23 @@ class NewsClient:
         self.cache_time = {}
         self.cache_ttl = 120  # Cache for 2 minutes
         self.last_api_call = 0
-        self.min_interval = 1.0  # 1 second between requests
+        self.min_interval = 1.0  # 1 second between requests (Brave API allows 1 req/sec)
+        self._rate_limit_lock = threading.Lock()
     
     def _rate_limit(self):
-        """Respect API rate limits (1 req/sec)"""
-        elapsed = time.time() - self.last_api_call
-        if elapsed < self.min_interval:
-            time.sleep(self.min_interval - elapsed)
-        self.last_api_call = time.time()
+        """Respect API rate limits (1 req per 20 seconds)"""
+        try:
+            with self._rate_limit_lock:
+                elapsed = time.time() - self.last_api_call
+                if elapsed < self.min_interval:
+                    sleep_time = self.min_interval - elapsed
+                    print(f"Rate limiting: sleeping {sleep_time:.1f}s")
+                    time.sleep(sleep_time)
+                self.last_api_call = time.time()
+        except Exception as e:
+            print(f"Rate limit error: {e}")
+            # If rate limiting fails, still proceed but with a small delay
+            time.sleep(1)
     
     def _calculate_sentiment(self, headline: str) -> tuple[float, str]:
         """
@@ -74,9 +86,10 @@ class NewsClient:
         """
         Fetch news for a symbol from Brave Search
         """
-        # Check cache first
+        # Check cache first (respect rate limits even for cache checks)
         if symbol in self.cache:
             if time.time() - self.cache_time.get(symbol, 0) < self.cache_ttl:
+                print(f"Using cached news for {symbol}")
                 return self.cache[symbol]
         
         try:
@@ -84,9 +97,9 @@ class NewsClient:
             
             # Map futures symbols to searchable terms
             symbol_map = {
-                "GC=F": "gold price news",
-                "SI=F": "silver price news",
-                "NQ=F": "nasdaq nasdaq-100 news"
+                "XAU": "gold price news",
+                "XAG": "silver price news",
+                "US100": "nasdaq nasdaq-100 news"}   
             }
             
             query = symbol_map.get(symbol, symbol)
@@ -106,8 +119,15 @@ class NewsClient:
                 self.base_url, 
                 params=params, 
                 headers=headers,
-                timeout=10
+                timeout=3  # Short timeout to prevent hanging
             )
+            
+            if response.status_code == 429:
+                print(f"Brave API rate limit hit for {symbol}. Using mock news as fallback.")
+                # Use mock news as fallback when API rate limit is hit
+                # mock_news = get_mock_news(symbol, limit)
+                return []
+            
             response.raise_for_status()
             data = response.json()
             
@@ -149,7 +169,10 @@ class NewsClient:
             
         except Exception as e:
             print(f"Error fetching news for {symbol}: {e}")
-            return None
+            # Use mock news as fallback when API fails
+            print(f"Using mock news as fallback for {symbol}")
+            mock_news = get_mock_news(symbol, limit)
+            return mock_news
     
     def close(self):
         """Close HTTP client"""

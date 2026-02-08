@@ -3,8 +3,11 @@ import { Sidebar } from './Sidebar';
 import { SignalsGrid } from './SignalsGrid';
 import { ConsoleTab } from './ConsoleTab';
 import { NewsTab } from './NewsTab';
+import { ChartsTab } from './ChartsTab';
+import { MainTab } from './MainTab';
+import { ChartTest } from './ChartTest';
 
-type TabType = 'signals' | 'news' | 'history' | 'console' | 'settings';
+type TabType = 'main' | 'signals' | 'news' | 'charts' | 'history' | 'console' | 'settings' | 'test';
 
 interface LogEntry {
   id: string;
@@ -22,9 +25,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   title = 'CFD Trading Bot',
   version = 'v0.1.0',
 }) => {
-  const [activeTab, setActiveTab] = useState<TabType>('signals');
+  const [activeTab, setActiveTab] = useState<TabType>('main');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentTime, setCurrentTime] = useState<string>(new Date().toLocaleTimeString('en-GB'));
+  const [selectedSymbol, setSelectedSymbol] = useState<string>('XAU');
+  const [accountData, setAccountData] = useState<any>(null);
 
   useEffect(() => {
     // Update current time every second
@@ -47,23 +52,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
     };
 
-    fetchLogs();
+    // Fetch account data
+    const fetchAccount = async () => {
+      try {
+        const response = await fetch('/api/account');
+        if (response.ok) {
+          const data = await response.json();
+          setAccountData(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch account data:', error);
+      }
+    };
 
-    // Poll for logs every 5 seconds
-    const logInterval = setInterval(fetchLogs, 5000);
+    fetchLogs();
+    fetchAccount();
+
+    // Poll for data every 5 seconds
+    const interval = setInterval(() => {
+      fetchLogs();
+      fetchAccount();
+    }, 5000);
     
     return () => {
       clearInterval(timeInterval);
-      clearInterval(logInterval);
+      clearInterval(interval);
     };
   }, []);
 
   const tabs: Array<{ id: TabType; label: string }> = [
-    { id: 'signals', label: 'Signals' },
+    { id: 'main', label: 'MAIN' },
+    { id: 'charts', label: 'Charts' },
     { id: 'news', label: 'News' },
     { id: 'history', label: 'History' },
     { id: 'console', label: 'Console' },
     { id: 'settings', label: 'Settings' },
+    { id: 'test', label: 'Test' },
   ];
 
   return (
@@ -105,12 +129,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <Sidebar
-          balance={25000}
-          activePositions={3}
-          activeSignals={12}
-          equity={25300}
-          marginUsed={45}
-          winRate={62.5}
+          balance={accountData?.balance}
+          activePositions={accountData?.positions}
+          activeSignals={3} // This will be updated by signals data
+          equity={accountData?.equity}
+          marginUsed={accountData ? ((accountData.balance - accountData.available) / accountData.balance * 100) : 0}
+          winRate={62.5} // This could be calculated from trade history
         />
 
         {/* Main Content */}
@@ -139,16 +163,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Tab Content */}
           <div className="flex-1 overflow-hidden p-4">
-            {activeTab === 'signals' && (
-              <SignalsGrid
-                signals={undefined}
+            {activeTab === 'main' && (
+              <MainTab
                 onSignalClick={(signal) => {
                   console.log('Signal clicked:', signal);
                 }}
+                selectedSymbol={selectedSymbol}
+                onSymbolSelect={setSelectedSymbol}
               />
             )}
 
             {activeTab === 'news' && <NewsTab />}
+
+            {activeTab === 'charts' && <ChartsTab />}
+
+            {activeTab === 'test' && <ChartTest symbol={selectedSymbol} />}
 
             {activeTab === 'console' && (
               <ConsoleTab logs={logs && logs.length > 0 ? logs : undefined} maxLogs={100} />

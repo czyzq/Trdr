@@ -14,7 +14,7 @@ while true; do
   echo "=== CHECK at $(date) ===" >> $LOG_FILE
   
   # 1. Check backend health
-  BACKEND_ALIVE=$(curl -s http://localhost:8000/ 2>/dev/null | grep -c "CFD Trading Bot API")
+  BACKEND_ALIVE=$(curl -s http://localhost:8002/ 2>/dev/null | grep -c "CFD Trading Bot API")
   if [ "$BACKEND_ALIVE" -eq 0 ]; then
     echo "[ISSUE] Backend not responding" >> $LOG_FILE
     echo "Restarting backend..." >> $LOG_FILE
@@ -27,25 +27,25 @@ while true; do
   fi
   
   # 2. Check account endpoint
-  ACCOUNT=$(curl -s http://localhost:8000/api/account 2>/dev/null | grep -o '"balance"')
+  ACCOUNT=$(curl -s http://localhost:8002/api/account 2>/dev/null | grep -o '"balance"')
   if [ -z "$ACCOUNT" ]; then
     echo "[ISSUE] Account endpoint broken" >> $LOG_FILE
     echo "Restarting backend..." >> $LOG_FILE
     pkill -9 -f "python.*main" 2>/dev/null
     sleep 3
-    cd $PROJECT_DIR/backend && source venv/bin/activate && python main.py > /tmp/backend.log 2>&1 &
+    cd $PROJECT_DIR/backend && source venv/bin/activate && python main.py --port 8002 > /tmp/backend.log 2>&1 &
     sleep 8
     cd $PROJECT_DIR && git add -A && git commit -m "fix: auto-restart backend (account endpoint broken)" >> $LOG_FILE 2>&1
   fi
   
   # 3. Check signals endpoint
-  SIGNALS=$(curl -s http://localhost:8000/api/signals 2>/dev/null | grep -o '"symbol"')
+  SIGNALS=$(curl -s http://localhost:8002/api/signals 2>/dev/null | grep -o '"symbol"')
   if [ -z "$SIGNALS" ]; then
     echo "[ISSUE] Signals endpoint broken" >> $LOG_FILE
     echo "Restarting backend..." >> $LOG_FILE
     pkill -9 -f "python.*main" 2>/dev/null
     sleep 3
-    cd $PROJECT_DIR/backend && source venv/bin/activate && python main.py > /tmp/backend.log 2>&1 &
+    cd $PROJECT_DIR/backend && source venv/bin/activate && python main.py --port 8002 > /tmp/backend.log 2>&1 &
     sleep 8
     cd $PROJECT_DIR && git add -A && git commit -m "fix: auto-restart backend (signals endpoint broken)" >> $LOG_FILE 2>&1
   fi
@@ -70,14 +70,14 @@ while true; do
   fi
   
   # 6. Test API responsiveness
-  RESPONSE_TIME=$(curl -s -w '%{time_total}' -o /dev/null http://localhost:8000/api/signals)
+  RESPONSE_TIME=$(curl -s -w '%{time_total}' -o /dev/null http://localhost:8002/api/signals)
   if (( $(echo "$RESPONSE_TIME > 5" | bc -l) )); then
     echo "[SLOW] API response slow: ${RESPONSE_TIME}s" >> $LOG_FILE
   fi
   
   # 7. Verify real data is flowing
-  BALANCE=$(curl -s http://localhost:8000/api/account 2>/dev/null | grep -o '"balance": [0-9.]*' | head -1)
-  SCORE=$(curl -s http://localhost:8000/api/signals 2>/dev/null | grep -o '"score": [0-9.]*' | head -1)
+  BALANCE=$(curl -s http://localhost:8002/api/account 2>/dev/null | grep -o '"balance": [0-9.]*' | head -1)
+  SCORE=$(curl -s http://localhost:8002/api/signals 2>/dev/null | grep -o '"score": [0-9.]*' | head -1)
   echo "[DATA] $BALANCE | First signal $SCORE" >> $LOG_FILE
   
   # 8. Check for frontend data binding
@@ -89,7 +89,7 @@ while true; do
   fi
   
   # 9. Check news health
-  NEWS=$(curl -s http://localhost:8000/api/news/GC=F 2>/dev/null | grep -c "headline")
+  NEWS=$(curl -s http://localhost:8002/api/news/GC=F 2>/dev/null | grep -c "headline")
   if [ "$NEWS" -eq 0 ]; then
     echo "[WARNING] News endpoint not returning articles" >> $LOG_FILE
   else

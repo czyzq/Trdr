@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 interface NewsArticle {
-  symbol: string; // GC=F, SI=F, NQ=F
+  symbol: string; // XAU, XAG, US100
   name: string; // Gold, Silver, Nasdaq-100
   headline: string;
   sentiment: number; // -1 to +1
@@ -20,14 +20,26 @@ interface NewsResponse {
 export const NewsTab: React.FC = () => {
   const [newsData, setNewsData] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(false);
+  const [cachedNewsIds, setCachedNewsIds] = useState<Set<string>>(new Set());
+  const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
 
   useEffect(() => {
     const fetchNews = async () => {
+      const fetchStartTime = new Date();
       setLoading(true);
       try {
         const response = await fetch('/api/news/all');
         if (response.ok) {
           const data: NewsResponse = await response.json();
+          
+          // Cache news IDs for identifying new items
+          const newIds = new Set(data.news.map((article, index) => 
+            `${article.symbol}-${article.headline}-${article.published}`
+          ));
+          
+          // Update cached IDs and last fetch time
+          setCachedNewsIds(newIds);
+          setLastFetchTime(fetchStartTime);
           setNewsData(data.news);
         }
       } catch (error) {
@@ -67,11 +79,38 @@ export const NewsTab: React.FC = () => {
 
   const getTickerShort = (symbol: string) => {
     const map: Record<string, string> = {
-      'GC=F': 'GOLD',
-      'SI=F': 'SILVER',
-      'NQ=F': 'NQ'
+      'XAU': 'GOLD',
+      'XAG': 'SILVER',
+      'US100': 'NQ'
     };
     return map[symbol] || symbol;
+  };
+
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    
+    return date.toLocaleDateString('en-GB', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  const isNewNews = (published: string, fetchTime: Date | null) => {
+    if (!fetchTime) return true;
+    const publishedDate = new Date(published);
+    return publishedDate > fetchTime;
   };
 
   return (
@@ -108,6 +147,14 @@ export const NewsTab: React.FC = () => {
                     <span className="font-mono text-[10px] sm:text-xs opacity-60" style={{ color: '#fff' }}>
                       {article.name}
                     </span>
+                    {isNewNews(article.published, lastFetchTime) && (
+                      <span className="font-mono text-[9px] px-1 py-0.5 rounded bg-yellow-500 text-black font-bold">
+                        NEW
+                      </span>
+                    )}
+                  </div>
+                  <div className="font-mono text-[9px] sm:text-[10px] opacity-60" style={{ color: '#666' }}>
+                    {formatDateTime(article.published)}
                   </div>
                   
                   <div className="flex items-center gap-2">

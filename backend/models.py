@@ -111,7 +111,7 @@ class HistoricalSignal(BaseModel):
 
 class SignalRequest(BaseModel):
     """Request to generate signals for specific symbols"""
-    symbols: List[str] = ["GC=F", "SI=F", "NQ=F"]
+    symbols: List[str] = ["XAU", "XAG", "US100"]
     time_horizon: str = "1h"  # 1h, 4h, 1d
     include_news: bool = True
 

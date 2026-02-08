@@ -6,3 +6,7 @@ pydantic==2.5.0
 httpx==0.25.2
 websockets==12.0
 email-validator==2.1.0
+python-dateutil==2.9.0.post0
+aiohttp==3.9.1
+beautifulsoup4==4.12.2
+lxml==4.9.3

@@ -14,9 +14,9 @@ BASE_URL = "https://finnhub.io/api/v1"
 
 # Instruments we track
 INSTRUMENTS = {
-    "GC=F": "Gold",
-    "SI=F": "Silver",
-    "NQ=F": "Nasdaq-100"
+    "XAU": "Gold",
+    "XAG": "Silver",
+    "US100": "Nasdaq-100"
 }
 
 class FinnhubClient:
