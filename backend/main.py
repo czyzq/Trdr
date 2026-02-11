@@ -21,6 +21,7 @@ from realistic_prices import get_feeder as get_realistic_price_feeder
 from indicators import TechnicalIndicators
 from imessage_alerts import AlertConfig, iMessageAlertDispatcher, get_dispatcher
 from openclaw_integration import set_openclaw_message_function, format_imessage_for_cfd_alert
+import database as db
 
 load_dotenv()
 
@@ -46,55 +47,44 @@ PLN_USD_RATE = 4.05
 signals_cache = {}
 alpha_client = None
 event_log = []
-account = {
-    "balance_pln": 10000.0,       # Starting balance in PLN
-    "equity_pln": 10000.0,        # Current equity in PLN
-    "balance_usd": 2469.14,       # Equivalent in USD
-    "equity_usd": 2469.14,
-    "positions": 0,
-    "open_trades": 0,
-    "closed_trades": 0,
-    "total_pnl_pln": 0.0,
-    "total_pnl_usd": 0.0,
-    "win_count": 0,
-    "loss_count": 0,
-    "win_rate": 0.0,
-    "used_margin": 0.0,
-    "available_pln": 10000.0,
-    "last_scan": datetime.utcnow().isoformat(),
-    "dry_run": True,
-    "mode": "simulate",
-    "currency": "PLN"
-}
 
-# Simulated trades storage
-open_positions = []     # Currently open positions
-closed_positions = []   # Closed trade history
+# Account and trade state – loaded from MongoDB on startup, falls back to defaults
+account = db.load_account()
+open_positions = db.load_open_positions()
+closed_positions = db.load_closed_positions()
 
 # Signal history cache for trend analysis
 signal_history_cache = {}
 
 def load_signal_cache():
-    """Load signal history cache from file"""
+    """Load signal history cache from DB, fallback to JSON file"""
     global signal_history_cache
+    # Try MongoDB first
+    cached = db.load_signal_cache_db()
+    if cached:
+        signal_history_cache = cached
+        log_event(f"Loaded signal cache from DB ({len(signal_history_cache)} symbols)")
+        return
+    # Fallback to JSON file
     try:
         cache_file = "signal_cache.json"
         if os.path.exists(cache_file):
             with open(cache_file, 'r') as f:
                 signal_history_cache = json.load(f)
-            log_event(f"Loaded signal history cache with {len(signal_history_cache)} symbols")
+            log_event(f"Loaded signal cache from file ({len(signal_history_cache)} symbols)")
     except Exception as e:
         log_event(f"Failed to load signal cache: {e}", "warning")
         signal_history_cache = {}
 
 def save_signal_cache():
-    """Save signal history cache to file"""
+    """Save signal history cache to DB + JSON file"""
+    db.save_signal_cache_db(signal_history_cache)
     try:
         cache_file = "signal_cache.json"
         with open(cache_file, 'w') as f:
             json.dump(signal_history_cache, f)
-    except Exception as e:
-        log_event(f"Failed to save signal cache: {e}", "error")
+    except Exception:
+        pass  # File write is best-effort fallback
 
 # Instruments to monitor
 INSTRUMENTS = {
@@ -453,6 +443,14 @@ async def startup():
     """Initialize on startup"""
     log_event("[CFD TRADING BOT v0.2.0 - PLN SIMULATION]", "event")
     log_event("Instruments: XAU (Gold), XAG (Silver), US100 (Nasdaq), BTC (Bitcoin)", "info")
+
+    # Database status
+    if db.is_connected():
+        log_event("MongoDB connected – trades & account persisted", "success")
+        log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
+    else:
+        log_event("MongoDB not configured – using in-memory storage (set MONGO_URI)", "warning")
+
     global alpha_client
     alpha_client = get_alpha_vantage_client()
     if alpha_client:
@@ -464,12 +462,13 @@ async def startup():
     except Exception as e:
         log_event(f"Failed to initialize news client: {e}", "error")
     account["last_scan"] = datetime.utcnow().isoformat()
-    log_event(f"Account initialized: {account['balance_pln']:.2f} PLN ({account['balance_usd']:.2f} USD)", "success")
+    log_event(f"Account loaded: {account['balance_pln']:.2f} PLN ({account['balance_usd']:.2f} USD)", "success")
 
 @app.on_event("shutdown")
 async def shutdown():
     """Cleanup on shutdown"""
     save_signal_cache()
+    db.save_account(account)
     try:
         news_client = get_news_client()
         if hasattr(news_client, 'close'):
@@ -509,6 +508,7 @@ async def set_account_mode(mode: str):
         return {"error": "Invalid mode. Use 'simulate' or 'live'"}
     account["mode"] = mode
     account["dry_run"] = (mode == "simulate")
+    db.save_account(account)
     log_event(f"Trading mode changed to: {mode.upper()}", "event")
     return {"mode": account["mode"], "dry_run": account["dry_run"]}
 
@@ -580,6 +580,10 @@ async def open_trade(symbol: str, direction: str, size: float = 0.01):
     account["open_trades"] = len(open_positions)
     account["positions"] = len(open_positions)
 
+    # Persist to MongoDB
+    db.save_trade(position)
+    db.save_account(account)
+
     log_event(f"[TRADE] Opened {direction.upper()} {symbol} @ {entry_price:.2f} | Size: {size} | Margin: {margin_pln:.2f} PLN", "success")
 
     return {"status": "opened", "position": position}
@@ -648,6 +652,10 @@ async def close_trade(position_id: str):
     account["open_trades"] = len(open_positions)
     account["positions"] = len(open_positions)
 
+    # Persist to MongoDB
+    db.save_trade(closed_pos)
+    db.save_account(account)
+
     result_emoji = "+" if pnl_usd >= 0 else ""
     log_event(
         f"[TRADE] Closed {position['direction'].upper()} {position['symbol']} @ {exit_price:.2f} | P&L: {result_emoji}{pnl_pln:.2f} PLN ({result_emoji}{pnl_usd:.2f} USD)",
@@ -698,6 +706,9 @@ async def reset_account():
         "used_margin": 0.0,
         "available_pln": 10000.0,
     })
+    # Clear DB
+    db.delete_all_trades()
+    db.save_account(account)
     log_event("[ACCOUNT] Reset to 10,000.00 PLN", "event")
     return {"status": "reset", "account": account}
 
