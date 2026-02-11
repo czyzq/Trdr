@@ -18,39 +18,36 @@ interface ChartResponse {
   source: string;
 }
 
+const instruments = [
+  { symbol: 'XAU', name: 'Gold', color: '#eab308' },
+  { symbol: 'XAG', name: 'Silver', color: '#94a3b8' },
+  { symbol: 'US100', name: 'Nasdaq-100', color: '#3b82f6' },
+  { symbol: 'BTC', name: 'Bitcoin', color: '#f97316' },
+];
+
+const resolutions = [
+  { value: '15', label: '15m' },
+  { value: '30', label: '30m' },
+  { value: '60', label: '1H' },
+  { value: 'D', label: '1D' },
+];
+
 export const ChartsTab: React.FC = () => {
   const [charts, setCharts] = useState<ChartResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedResolution, setSelectedResolution] = useState('60');
 
-  const instruments = [
-    { symbol: 'XAU', name: 'Gold' },
-    { symbol: 'XAG', name: 'Silver' },
-    { symbol: 'US100', name: 'Nasdaq-100' },
-  ];
-
-  const resolutions = [
-    { value: '15', label: '15min' },
-    { value: '30', label: '30min' },
-    { value: '60', label: '1H' },
-    { value: 'D', label: 'Daily' },
-  ];
-
   const fetchChartData = async () => {
     try {
       setLoading(true);
       const chartData: ChartResponse[] = [];
-
       for (const instrument of instruments) {
         const response = await fetch(`/api/chart/${instrument.symbol}?resolution=${selectedResolution}&count=50`);
         if (response.ok) {
           const data = await response.json();
-          if (data.data) {
-            chartData.push(data);
-          }
+          if (data.data) chartData.push(data);
         }
       }
-
       setCharts(chartData);
     } catch (error) {
       console.error('Failed to fetch chart data:', error);
@@ -61,66 +58,34 @@ export const ChartsTab: React.FC = () => {
 
   useEffect(() => {
     fetchChartData();
-    
-    // Refresh every 30 seconds
     const interval = setInterval(fetchChartData, 30000);
     return () => clearInterval(interval);
   }, [selectedResolution]);
 
   if (loading && charts.length === 0) {
     return (
-      <div
-        className="border rounded-sm p-4 h-full flex items-center justify-center"
-        style={{
-          backgroundColor: '#0a0e27',
-          borderColor: '#00ff41',
-        }}
-      >
-        <div className="text-center">
-          <div
-            className="font-mono text-xs uppercase tracking-widest mb-2"
-            style={{ color: '#00ff41' }}
-          >
-            Loading Charts...
-          </div>
-          <div style={{ color: '#666' }} className="text-xs">
-            Fetching historical data
-          </div>
-        </div>
+      <div className="h-full flex items-center justify-center" style={{ color: '#4a5568' }}>
+        <div className="text-xs uppercase tracking-widest">Loading charts...</div>
       </div>
     );
   }
 
   return (
-    <div
-      className="border rounded-sm p-4 h-full overflow-auto"
-      style={{
-        backgroundColor: '#0a0e27',
-        borderColor: '#00ff41',
-      }}
-    >
+    <div className="h-full overflow-auto p-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div
-          className="font-mono text-xs uppercase tracking-widest font-bold"
-          style={{ color: '#00ff41' }}
-        >
-          Price Charts
-        </div>
-        
-        {/* Resolution Selector */}
-        <div className="flex gap-1">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
+          Multi-Chart View
+        </span>
+        <div className="flex gap-0.5">
           {resolutions.map((res) => (
             <button
               key={res.value}
               onClick={() => setSelectedResolution(res.value)}
-              className={`px-2 py-1 text-xs font-mono border transition ${
-                selectedResolution === res.value ? 'bg-opacity-10' : ''
-              }`}
+              className="px-2 py-1 text-[10px] font-medium rounded-sm transition-all"
               style={{
-                borderColor: selectedResolution === res.value ? '#00ff41' : '#1a1f2e',
-                color: selectedResolution === res.value ? '#00ff41' : '#666',
-                backgroundColor: selectedResolution === res.value ? 'rgba(0, 255, 65, 0.1)' : 'transparent',
+                color: selectedResolution === res.value ? '#e2e8f0' : '#4a5568',
+                backgroundColor: selectedResolution === res.value ? '#1a1f35' : 'transparent',
               }}
             >
               {res.label}
@@ -130,64 +95,45 @@ export const ChartsTab: React.FC = () => {
       </div>
 
       {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {instruments.map((instrument) => {
           const chartData = charts.find(c => c.symbol === instrument.symbol);
-          
           return (
-            <div key={instrument.symbol} className="border rounded-sm p-3"
-                 style={{ borderColor: '#1a1f2e' }}>
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="font-mono text-sm font-bold" style={{ color: '#00ff41' }}>
-                    {instrument.symbol}
-                  </div>
-                  <div className="text-xs" style={{ color: '#666' }}>
-                    {instrument.name}
-                  </div>
+            <div
+              key={instrument.symbol}
+              className="rounded-sm overflow-hidden"
+              style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}
+            >
+              <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #1a1f35' }}>
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: instrument.color }} />
+                  <span className="text-[11px] font-bold" style={{ color: '#e2e8f0' }}>{instrument.symbol}</span>
+                  <span className="text-[10px]" style={{ color: '#4a5568' }}>{instrument.name}</span>
                 </div>
                 {chartData && (
-                  <div className="text-xs" style={{ color: '#666' }}>
-                    {chartData.source === 'alpha_vantage' ? 'Live' : 'Simulated'}
+                  <span className="text-[9px]" style={{ color: '#374151' }}>
+                    {chartData.source === 'alpha_vantage' ? 'LIVE' : 'SIM'} | {chartData.count} pts
+                  </span>
+                )}
+              </div>
+              <div className="p-2">
+                {chartData && chartData.data.length > 0 ? (
+                  <CandlestickChart
+                    symbol={instrument.symbol}
+                    data={chartData.data}
+                    height={220}
+                    showVolume={true}
+                    showRSI={true}
+                  />
+                ) : (
+                  <div className="h-[220px] flex items-center justify-center" style={{ color: '#4a5568' }}>
+                    <div className="text-[10px]">No data</div>
                   </div>
                 )}
               </div>
-              
-              {chartData && chartData.data.length > 0 ? (
-                <CandlestickChart 
-                  symbol={instrument.symbol} 
-                  data={chartData.data} 
-                  height={250}
-                  showVolume={true}
-                  showRSI={true}
-                />
-              ) : (
-                <div className="text-center py-8" style={{ color: '#666' }}>
-                  <div className="text-xs">No chart data available</div>
-                </div>
-              )}
-              
-              {chartData && chartData.data.length > 0 && (
-                <div className="mt-2 pt-2 border-t text-xs"
-                     style={{ borderColor: '#1a1f2e' }}>
-                  <div className="flex justify-between" style={{ color: '#666' }}>
-                    <span>Points: {chartData.count}</span>
-                    <span>Last: {chartData.data[chartData.data.length - 1].close.toFixed(2)}</span>
-                  </div>
-                </div>
-              )}
             </div>
           );
         })}
-      </div>
-
-      {/* Footer Info */}
-      <div className="mt-4 pt-3 border-t text-xs"
-           style={{ borderColor: '#1a1f2e' }}>
-        <div className="flex justify-between" style={{ color: '#666' }}>
-          <span>Data from Alpha Vantage API</span>
-          <span>Updates every 30 seconds</span>
-        </div>
       </div>
     </div>
   );

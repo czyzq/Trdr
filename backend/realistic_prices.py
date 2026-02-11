@@ -10,8 +10,9 @@ from typing import Dict, Any, Optional
 # Proper trading symbols with current market values
 BASE_PRICES = {
     "XAU": 2035.50,   # Gold (XAU/USD) - current ~$2035/oz
-    "XAG": 22.85,     # Silver (XAG/USD) - current ~$22.85/oz  
-    "US100": 17525.0,    # Nasdaq-100 (US100) - current ~17525
+    "XAG": 22.85,     # Silver (XAG/USD) - current ~$22.85/oz
+    "US100": 17525.0,  # Nasdaq-100 (US100) - current ~17525
+    "BTC": 97250.0,    # Bitcoin (BTC/USD) - current ~$97250
 }
 
 # Warsaw timezone (UTC+1) for proper local time display
@@ -54,6 +55,7 @@ class RealisticPriceFeeder:
             "XAU": random.randint(50000, 150000),
             "XAG": random.randint(100000, 300000),
             "US100": random.randint(1000000, 3000000),
+            "BTC": random.randint(500000, 2000000),
         }
         
         return {

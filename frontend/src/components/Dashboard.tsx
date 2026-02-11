@@ -5,9 +5,9 @@ import { ConsoleTab } from './ConsoleTab';
 import { NewsTab } from './NewsTab';
 import { ChartsTab } from './ChartsTab';
 import { MainTab } from './MainTab';
-import { ChartTest } from './ChartTest';
+import { TradesTab } from './TradesTab';
 
-type TabType = 'main' | 'signals' | 'news' | 'charts' | 'history' | 'console' | 'settings' | 'test';
+type TabType = 'main' | 'charts' | 'trades' | 'news' | 'console' | 'settings';
 
 interface LogEntry {
   id: string;
@@ -16,15 +16,7 @@ interface LogEntry {
   type: 'info' | 'success' | 'warning' | 'error' | 'event';
 }
 
-interface DashboardProps {
-  title?: string;
-  version?: string;
-}
-
-export const Dashboard: React.FC<DashboardProps> = ({
-  title = 'CFD Trading Bot',
-  version = 'v0.1.0',
-}) => {
+export const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('main');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentTime, setCurrentTime] = useState<string>(new Date().toLocaleTimeString('en-GB'));
@@ -32,215 +24,153 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [accountData, setAccountData] = useState<any>(null);
 
   useEffect(() => {
-    // Update current time every second
     const timeInterval = setInterval(() => {
       setCurrentTime(new Date().toLocaleTimeString('en-GB'));
     }, 1000);
 
-    // Fetch logs from backend
-    const fetchLogs = async () => {
+    const fetchData = async () => {
       try {
-        const response = await fetch('/api/logs');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.logs) {
-            setLogs(data.logs);
-          }
+        const [logsRes, accRes] = await Promise.all([
+          fetch('/api/logs'),
+          fetch('/api/account')
+        ]);
+        if (logsRes.ok) {
+          const data = await logsRes.json();
+          if (data.logs) setLogs(data.logs);
         }
-      } catch (error) {
-        console.error('Failed to fetch logs:', error);
-      }
-    };
-
-    // Fetch account data
-    const fetchAccount = async () => {
-      try {
-        const response = await fetch('/api/account');
-        if (response.ok) {
-          const data = await response.json();
+        if (accRes.ok) {
+          const data = await accRes.json();
           setAccountData(data);
         }
       } catch (error) {
-        console.error('Failed to fetch account data:', error);
+        console.error('Failed to fetch data:', error);
       }
     };
 
-    fetchLogs();
-    fetchAccount();
+    fetchData();
+    const interval = setInterval(fetchData, 3000);
 
-    // Poll for data every 5 seconds
-    const interval = setInterval(() => {
-      fetchLogs();
-      fetchAccount();
-    }, 5000);
-    
     return () => {
       clearInterval(timeInterval);
       clearInterval(interval);
     };
   }, []);
 
-  const tabs: Array<{ id: TabType; label: string }> = [
-    { id: 'main', label: 'MAIN' },
-    { id: 'charts', label: 'Charts' },
-    { id: 'news', label: 'News' },
-    { id: 'history', label: 'History' },
-    { id: 'console', label: 'Console' },
-    { id: 'settings', label: 'Settings' },
-    { id: 'test', label: 'Test' },
+  const tabs: Array<{ id: TabType; label: string; icon: string }> = [
+    { id: 'main', label: 'Dashboard', icon: 'D' },
+    { id: 'charts', label: 'Charts', icon: 'C' },
+    { id: 'trades', label: 'Trades', icon: 'T' },
+    { id: 'news', label: 'News', icon: 'N' },
+    { id: 'console', label: 'Console', icon: '>' },
+    { id: 'settings', label: 'Settings', icon: 'S' },
   ];
 
   return (
-    <div
-      className="w-full h-screen flex flex-col font-mono"
-      style={{ backgroundColor: '#0a0e27' }}
-    >
-      {/* Top Header */}
+    <div className="w-full h-screen flex flex-col" style={{ backgroundColor: '#0b0f1a' }}>
+      {/* Top Header Bar */}
       <div
-        className="border-b px-6 py-4"
-        style={{ borderColor: '#00ff41' }}
+        className="flex items-center justify-between px-5 py-2.5"
+        style={{ backgroundColor: '#0d1220', borderBottom: '1px solid #1a1f35' }}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1
-              className="text-sm font-bold uppercase tracking-widest"
-              style={{ color: '#00ff41' }}
-            >
-              {title}
-            </h1>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: '#22c55e' }}
+            />
             <span
-              className="text-xs px-2 py-1 rounded"
-              style={{
-                color: '#00ff41',
-                borderColor: '#00ff41',
-                border: '1px solid',
-              }}
+              className="text-xs font-bold tracking-wider uppercase"
+              style={{ color: '#e2e8f0', letterSpacing: '0.15em' }}
             >
-              {version}
+              CFD Trading Bot
             </span>
           </div>
-          <div className="flex items-center gap-4 text-xs" style={{ color: '#666' }}>
-            <span>{currentTime}</span>
-          </div>
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-sm font-medium"
+            style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
+          >
+            v0.2.0
+          </span>
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-sm font-medium"
+            style={{
+              backgroundColor: accountData?.mode === 'simulate' ? 'rgba(234, 179, 8, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              color: accountData?.mode === 'simulate' ? '#eab308' : '#ef4444',
+            }}
+          >
+            {accountData?.mode === 'simulate' ? 'SIMULATION' : 'LIVE'}
+          </span>
+        </div>
+
+        {/* Tab Navigation in Header */}
+        <div className="flex items-center gap-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="px-3 py-1.5 text-[11px] font-medium tracking-wide uppercase transition-all rounded-sm"
+              style={{
+                color: activeTab === tab.id ? '#e2e8f0' : '#4a5568',
+                backgroundColor: activeTab === tab.id ? '#1a1f35' : 'transparent',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-4">
+          <span className="text-[11px] font-medium" style={{ color: '#4a5568' }}>
+            {currentTime}
+          </span>
         </div>
       </div>
 
-      {/* Main Container */}
+      {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <Sidebar
-          balance={accountData?.balance}
-          activePositions={accountData?.positions}
-          activeSignals={3} // This will be updated by signals data
-          equity={accountData?.equity}
-          marginUsed={accountData ? ((accountData.balance - accountData.available) / accountData.balance * 100) : 0}
-          winRate={62.5} // This could be calculated from trade history
-        />
+        <Sidebar accountData={accountData} />
 
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Tab Navigation */}
-          <div
-            className="border-b px-6 py-4 flex gap-8"
-            style={{ borderColor: '#1a1f2e' }}
-          >
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`font-mono text-xs uppercase tracking-widest font-bold pb-2 transition border-b-2 ${
-                  activeTab === tab.id ? 'border-opacity-100' : 'border-opacity-0'
-                }`}
-                style={{
-                  color: activeTab === tab.id ? '#00ff41' : '#666',
-                  borderColor: '#00ff41',
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Tab Content */}
-          <div className="flex-1 overflow-hidden p-4">
-            {activeTab === 'main' && (
-              <MainTab
-                onSignalClick={(signal) => {
-                  console.log('Signal clicked:', signal);
-                }}
-                selectedSymbol={selectedSymbol}
-                onSymbolSelect={setSelectedSymbol}
-              />
-            )}
-
-            {activeTab === 'news' && <NewsTab />}
-
-            {activeTab === 'charts' && <ChartsTab />}
-
-            {activeTab === 'test' && <ChartTest symbol={selectedSymbol} />}
-
-            {activeTab === 'console' && (
-              <ConsoleTab logs={logs && logs.length > 0 ? logs : undefined} maxLogs={100} />
-            )}
-
-            {activeTab === 'history' && (
-              <div
-                className="border rounded-sm p-4 h-full flex items-center justify-center"
-                style={{
-                  backgroundColor: '#0a0e27',
-                  borderColor: '#00ff41',
-                }}
-              >
-                <div className="text-center">
-                  <div
-                    className="font-mono text-xs uppercase tracking-widest mb-2"
-                    style={{ color: '#00ff41' }}
-                  >
-                    Trade History
-                  </div>
-                  <div style={{ color: '#666' }} className="text-xs">
-                    Historical data and closed trades coming soon...
-                  </div>
+        {/* Tab Content */}
+        <div className="flex-1 overflow-hidden">
+          {activeTab === 'main' && (
+            <MainTab
+              onSignalClick={(signal) => console.log('Signal clicked:', signal)}
+              selectedSymbol={selectedSymbol}
+              onSymbolSelect={setSelectedSymbol}
+            />
+          )}
+          {activeTab === 'charts' && <ChartsTab />}
+          {activeTab === 'trades' && <TradesTab />}
+          {activeTab === 'news' && <NewsTab />}
+          {activeTab === 'console' && (
+            <ConsoleTab logs={logs && logs.length > 0 ? logs : undefined} maxLogs={100} />
+          )}
+          {activeTab === 'settings' && (
+            <div className="h-full flex items-center justify-center" style={{ color: '#4a5568' }}>
+              <div className="text-center">
+                <div className="text-xs uppercase tracking-widest mb-2" style={{ color: '#64748b' }}>
+                  Settings
                 </div>
+                <div className="text-xs">Configuration panel coming soon</div>
               </div>
-            )}
-
-            {activeTab === 'settings' && (
-              <div
-                className="border rounded-sm p-4 h-full flex items-center justify-center"
-                style={{
-                  backgroundColor: '#0a0e27',
-                  borderColor: '#00ff41',
-                }}
-              >
-                <div className="text-center">
-                  <div
-                    className="font-mono text-xs uppercase tracking-widest mb-2"
-                    style={{ color: '#00ff41' }}
-                  >
-                    Settings
-                  </div>
-                  <div style={{ color: '#666' }} className="text-xs">
-                    Configuration panel coming soon...
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Footer */}
       <div
-        className="border-t px-6 py-2 text-xs"
-        style={{
-          borderColor: '#1a1f2e',
-          color: '#666',
-        }}
+        className="flex items-center justify-between px-5 py-1.5 text-[10px]"
+        style={{ backgroundColor: '#0d1220', borderTop: '1px solid #1a1f35', color: '#374151' }}
       >
-        <div className="flex items-center justify-between">
-          <span>Claude Code + Perplexity MCP | Realtime Market Analysis</span>
-          <span>Connected to Live Data Streams</span>
+        <span>CFD Trading Bot | XAU, XAG, US100, BTC</span>
+        <div className="flex items-center gap-3">
+          <span>PLN/USD: 4.05</span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#22c55e' }} />
+            Connected
+          </span>
         </div>
       </div>
     </div>
