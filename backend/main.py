@@ -898,10 +898,32 @@ async def clear_alert_history():
     dispatcher.clear_history()
     return {"status": "cleared"}
 
+# =====================
+# SERVE FRONTEND (production)
+# =====================
+# In production, the backend serves the built frontend as static files.
+# Build with: cd frontend && npm run build
+# The dist/ folder is served at / and all non-API routes fall back to index.html (SPA)
+
+import pathlib
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_frontend_dist = pathlib.Path(__file__).parent.parent / "frontend" / "dist"
+
+if _frontend_dist.is_dir():
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """Serve frontend SPA – all non-API routes get index.html"""
+        file_path = _frontend_dist / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(_frontend_dist / "index.html")
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     args = parser.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)
