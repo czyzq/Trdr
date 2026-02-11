@@ -30,8 +30,12 @@ export const MainTab: React.FC<MainTabProps> = ({
   onSymbolSelect,
 }) => {
   const [chartData, setChartData] = useState<any>(null);
-  const [selectedTimeframe, setSelectedTimeframe] = useState('60');
+  const [selectedTimeframe, setSelectedTimeframe] = useState(() => {
+    return localStorage.getItem('cfd_timeframe') || '60';
+  });
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => { localStorage.setItem('cfd_timeframe', selectedTimeframe); }, [selectedTimeframe]);
 
   const fetchChartData = async (symbol: string, resolution: string) => {
     try {

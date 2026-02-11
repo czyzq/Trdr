@@ -35,9 +35,14 @@ interface ClosedTrade {
 export const TradesTab: React.FC = () => {
   const [openPositions, setOpenPositions] = useState<Position[]>([]);
   const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([]);
-  const [activeSection, setActiveSection] = useState<'open' | 'history'>('open');
+  const [activeSection, setActiveSection] = useState<'open' | 'history'>(() => {
+    const saved = localStorage.getItem('cfd_tradesSection');
+    return (saved === 'history' ? 'history' : 'open');
+  });
   const [stats, setStats] = useState({ win_count: 0, loss_count: 0, win_rate: 0, total_pnl_pln: 0, total_pnl_usd: 0 });
   const [closingId, setClosingId] = useState<string | null>(null);
+
+  useEffect(() => { localStorage.setItem('cfd_tradesSection', activeSection); }, [activeSection]);
 
   const fetchData = async () => {
     try {

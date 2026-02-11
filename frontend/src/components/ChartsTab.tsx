@@ -35,7 +35,11 @@ const resolutions = [
 export const ChartsTab: React.FC = () => {
   const [charts, setCharts] = useState<ChartResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedResolution, setSelectedResolution] = useState('60');
+  const [selectedResolution, setSelectedResolution] = useState(() => {
+    return localStorage.getItem('cfd_chartsResolution') || '60';
+  });
+
+  useEffect(() => { localStorage.setItem('cfd_chartsResolution', selectedResolution); }, [selectedResolution]);
 
   const fetchChartData = async () => {
     try {

@@ -17,11 +17,19 @@ interface LogEntry {
 }
 
 export const Dashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabType>('main');
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const saved = localStorage.getItem('cfd_activeTab');
+    return (saved as TabType) || 'main';
+  });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentTime, setCurrentTime] = useState<string>(new Date().toLocaleTimeString('en-GB'));
-  const [selectedSymbol, setSelectedSymbol] = useState<string>('XAU');
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
+    return localStorage.getItem('cfd_selectedSymbol') || 'XAU';
+  });
   const [accountData, setAccountData] = useState<any>(null);
+
+  useEffect(() => { localStorage.setItem('cfd_activeTab', activeTab); }, [activeTab]);
+  useEffect(() => { localStorage.setItem('cfd_selectedSymbol', selectedSymbol); }, [selectedSymbol]);
 
   useEffect(() => {
     const timeInterval = setInterval(() => {
