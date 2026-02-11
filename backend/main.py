@@ -17,11 +17,11 @@ from dotenv import load_dotenv
 from models import Signal, SignalDirection, Component, ComponentType, SignalResponse
 from alpha_vantage import get_client as get_alpha_vantage_client
 from alpha_vantage_news import get_client as get_news_client
-from realistic_prices import get_feeder as get_realistic_price_feeder
 from indicators import TechnicalIndicators
 from imessage_alerts import AlertConfig, iMessageAlertDispatcher, get_dispatcher
 from openclaw_integration import set_openclaw_message_function, format_imessage_for_cfd_alert
 import database as db
+from broker_factory import create_broker, create_data_provider
 
 load_dotenv()
 
@@ -48,10 +48,22 @@ signals_cache = {}
 alpha_client = None
 event_log = []
 
-# Account and trade state – loaded from MongoDB on startup, falls back to defaults
-account = db.load_account()
-open_positions = db.load_open_positions()
-closed_positions = db.load_closed_positions()
+# Broker abstraction – switch via BROKER_TYPE env var ("sim" or "ibkr")
+data_provider = create_data_provider()
+broker = create_broker(data_provider)
+
+# Convenience references (broker owns this state)
+account = broker.get_account()
+open_positions = broker.get_open_positions() if hasattr(broker, 'open_positions') else []
+closed_positions = broker.get_closed_positions() if hasattr(broker, 'closed_positions') else []
+
+# For SimulatedBroker, keep direct references to the same lists
+if hasattr(broker, 'open_positions'):
+    open_positions = broker.open_positions
+if hasattr(broker, 'closed_positions'):
+    closed_positions = broker.closed_positions
+if hasattr(broker, 'account'):
+    account = broker.account
 
 # Signal history cache for trend analysis
 signal_history_cache = {}
@@ -397,29 +409,8 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
     return round(max(min_size, min(size, max_size)), 4)
 
 def update_account_equity():
-    """Update account equity based on open positions"""
-    global account
-    price_feeder = get_realistic_price_feeder()
-    unrealized_pnl_usd = 0.0
-
-    for pos in open_positions:
-        quote = price_feeder.get_quote(pos["symbol"])
-        if quote:
-            current_price = quote["price"]
-            if pos["direction"] == "buy":
-                pnl = (current_price - pos["entry_price"]) * pos["size"]
-            else:
-                pnl = (pos["entry_price"] - current_price) * pos["size"]
-            pos["current_price"] = current_price
-            pos["unrealized_pnl_usd"] = round(pnl, 2)
-            pos["unrealized_pnl_pln"] = round(pnl * PLN_USD_RATE, 2)
-            unrealized_pnl_usd += pnl
-
-    unrealized_pnl_pln = unrealized_pnl_usd * PLN_USD_RATE
-    account["equity_pln"] = round(account["balance_pln"] + unrealized_pnl_pln, 2)
-    account["equity_usd"] = round(account["equity_pln"] / PLN_USD_RATE, 2)
-    account["open_trades"] = len(open_positions)
-    account["positions"] = len(open_positions)
+    """Update account equity based on open positions via broker."""
+    broker.update_prices(data_provider)
 
 async def generate_signals() -> List[Signal]:
     """Generate trading signals for all instruments using regime-adaptive scoring"""
@@ -431,7 +422,6 @@ async def generate_signals() -> List[Signal]:
     if account["balance_pln"] > account.get("peak_balance_pln", INITIAL_BALANCE_PLN):
         account["peak_balance_pln"] = account["balance_pln"]
 
-    price_feeder = get_realistic_price_feeder()
     news_client_instance = get_news_client()
 
     signals = []
@@ -440,14 +430,14 @@ async def generate_signals() -> List[Signal]:
         try:
             log_event(f"Analyzing {symbol} ({info['name']})...")
 
-            quote = price_feeder.get_quote(symbol)
+            quote = data_provider.get_quote(symbol)
             if not quote:
                 log_event(f"Failed to generate price for {symbol}", "error")
                 continue
 
             current_price = quote["price"]
 
-            candles = price_feeder.get_candles(symbol, resolution="60", count=100)
+            candles = data_provider.get_candles(symbol, resolution="60", count=100)
             if not candles or len(candles) < 50:
                 log_event(f"Insufficient candle data for {symbol} ({len(candles) if candles else 0} bars)", "error")
                 continue
@@ -678,8 +668,7 @@ async def open_trade(symbol: str, direction: str, size: float = 0):
         if pos["symbol"] == symbol and pos["direction"] == direction:
             return {"error": f"Already have an open {direction} position on {symbol}"}
 
-    price_feeder = get_realistic_price_feeder()
-    quote = price_feeder.get_quote(symbol)
+    quote = data_provider.get_quote(symbol)
     if not quote:
         return {"error": f"Cannot get price for {symbol}"}
 
@@ -691,7 +680,7 @@ async def open_trade(symbol: str, direction: str, size: float = 0):
         take_profit = signal.take_profit
         stop_loss = signal.stop_loss
     else:
-        atr = entry_price * 0.01  # Default 1% ATR
+        atr = entry_price * 0.01
         if direction == "buy":
             take_profit = entry_price + (atr * 3)
             stop_loss = entry_price - (atr * 2)
@@ -699,124 +688,45 @@ async def open_trade(symbol: str, direction: str, size: float = 0):
             take_profit = entry_price - (atr * 3)
             stop_loss = entry_price + (atr * 2)
 
-    # Auto-calculate position size if not specified (risk-based)
     if size <= 0:
         size = calculate_position_size(symbol, entry_price, stop_loss)
 
-    # Calculate margin required (simplified: 1% margin for CFDs)
-    margin_usd = entry_price * size * 0.01
-    margin_pln = margin_usd * PLN_USD_RATE
+    result = broker.open_position(
+        symbol=symbol, direction=direction, size=size,
+        take_profit=take_profit, stop_loss=stop_loss, entry_price=entry_price,
+    )
+    if "error" in result:
+        return result
 
-    if margin_pln > account["available_pln"]:
-        return {"error": "Insufficient margin", "required_pln": margin_pln, "available_pln": account["available_pln"]}
-
-    position = {
-        "id": str(uuid.uuid4())[:8],
-        "symbol": symbol,
-        "name": INSTRUMENTS[symbol]["name"],
-        "direction": direction,
-        "size": size,
-        "entry_price": entry_price,
-        "current_price": entry_price,
-        "take_profit": round(take_profit, 2),
-        "stop_loss": round(stop_loss, 2),
-        "margin_pln": round(margin_pln, 2),
-        "unrealized_pnl_usd": 0.0,
-        "unrealized_pnl_pln": 0.0,
-        "opened_at": datetime.utcnow().isoformat(),
-        "status": "open"
-    }
-
-    open_positions.append(position)
-    account["used_margin"] += margin_pln
-    account["available_pln"] = account["balance_pln"] - account["used_margin"]
-    account["open_trades"] = len(open_positions)
-    account["positions"] = len(open_positions)
-
-    # Persist to MongoDB
-    db.save_trade(position)
-    db.save_account(account)
-
-    log_event(f"[TRADE] Opened {direction.upper()} {symbol} @ {entry_price:.2f} | Size: {size} | Margin: {margin_pln:.2f} PLN", "success")
-
-    return {"status": "opened", "position": position}
+    log_event(f"[TRADE] Opened {direction.upper()} {symbol} @ {entry_price:.2f} | Size: {size}", "success")
+    return result
 
 @app.post("/api/trade/close/{position_id}")
 async def close_trade(position_id: str):
-    """Close an open trade position"""
-    global account
-
-    position = None
-    pos_index = None
-    for i, pos in enumerate(open_positions):
-        if pos["id"] == position_id:
-            position = pos
-            pos_index = i
-            break
-
+    """Close an open trade position via broker"""
+    # Get current price for the position
+    position = next((p for p in open_positions if p["id"] == position_id), None)
     if not position:
         return {"error": f"Position {position_id} not found"}
 
-    price_feeder = get_realistic_price_feeder()
-    quote = price_feeder.get_quote(position["symbol"])
-    if not quote:
-        return {"error": "Cannot get current price"}
+    quote = data_provider.get_quote(position["symbol"])
+    exit_price = quote["price"] if quote else None
 
-    exit_price = quote["price"]
+    result = broker.close_position(position_id, exit_price=exit_price)
+    if "error" in result:
+        return result
 
-    # Calculate P&L
-    if position["direction"] == "buy":
-        pnl_usd = (exit_price - position["entry_price"]) * position["size"]
-    else:
-        pnl_usd = (position["entry_price"] - exit_price) * position["size"]
-
-    pnl_pln = pnl_usd * PLN_USD_RATE
-
-    # Update account
-    account["balance_pln"] = round(account["balance_pln"] + pnl_pln, 2)
-    account["balance_usd"] = round(account["balance_pln"] / PLN_USD_RATE, 2)
-    account["used_margin"] = max(0, account["used_margin"] - position["margin_pln"])
-    account["available_pln"] = account["balance_pln"] - account["used_margin"]
-    account["total_pnl_pln"] = round(account["total_pnl_pln"] + pnl_pln, 2)
-    account["total_pnl_usd"] = round(account["total_pnl_usd"] + pnl_usd, 2)
-    account["closed_trades"] += 1
-
-    if pnl_usd >= 0:
-        account["win_count"] += 1
-    else:
-        account["loss_count"] += 1
-
-    total_closed = account["win_count"] + account["loss_count"]
-    account["win_rate"] = round((account["win_count"] / total_closed * 100) if total_closed > 0 else 0, 1)
-
-    # Move to closed positions
-    closed_pos = {
-        **position,
-        "exit_price": exit_price,
-        "pnl_usd": round(pnl_usd, 2),
-        "pnl_pln": round(pnl_pln, 2),
-        "closed_at": datetime.utcnow().isoformat(),
-        "status": "closed",
-        "result": "win" if pnl_usd >= 0 else "loss"
-    }
-    closed_positions.insert(0, closed_pos)
-    open_positions.pop(pos_index)
-
-    account["open_trades"] = len(open_positions)
-    account["positions"] = len(open_positions)
-
-    # Persist to MongoDB
-    db.save_trade(closed_pos)
-    db.save_account(account)
-
-    result_emoji = "+" if pnl_usd >= 0 else ""
+    closed_pos = result["position"]
+    pnl_pln = closed_pos.get("pnl_pln", 0)
+    pnl_usd = closed_pos.get("pnl_usd", 0)
+    emoji = "+" if pnl_usd >= 0 else ""
     log_event(
-        f"[TRADE] Closed {position['direction'].upper()} {position['symbol']} @ {exit_price:.2f} | P&L: {result_emoji}{pnl_pln:.2f} PLN ({result_emoji}{pnl_usd:.2f} USD)",
+        f"[TRADE] Closed {position['direction'].upper()} {position['symbol']} @ {exit_price:.2f} | P&L: {emoji}{pnl_pln:.2f} PLN ({emoji}{pnl_usd:.2f} USD)",
         "success" if pnl_usd >= 0 else "warning"
     )
 
     update_account_equity()
-    return {"status": "closed", "position": closed_pos}
+    return result
 
 @app.get("/api/trades/open")
 async def get_open_trades():
@@ -840,28 +750,9 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=200)):
 @app.post("/api/account/reset")
 async def reset_account():
     """Reset simulated account to starting balance"""
-    global account, open_positions, closed_positions
-    open_positions = []
-    closed_positions = []
-    account.update({
-        "balance_pln": 10000.0,
-        "equity_pln": 10000.0,
-        "balance_usd": 2469.14,
-        "equity_usd": 2469.14,
-        "positions": 0,
-        "open_trades": 0,
-        "closed_trades": 0,
-        "total_pnl_pln": 0.0,
-        "total_pnl_usd": 0.0,
-        "win_count": 0,
-        "loss_count": 0,
-        "win_rate": 0.0,
-        "used_margin": 0.0,
-        "available_pln": 10000.0,
-    })
-    # Clear DB
-    db.delete_all_trades()
-    db.save_account(account)
+    if not hasattr(broker, 'reset'):
+        return {"error": "Reset not supported for live brokers"}
+    result = broker.reset()
     log_event("[ACCOUNT] Reset to 10,000.00 PLN", "event")
     return {"status": "reset", "account": account}
 
@@ -947,8 +838,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 50):
 
             return {"symbol": symbol, "data": chart_data, "resolution": resolution, "count": len(chart_data), "source": "alpha_vantage"}
         else:
-            price_feeder = get_realistic_price_feeder()
-            candles = price_feeder.get_candles(symbol, resolution, count)
+            candles = data_provider.get_candles(symbol, resolution, count)
 
             if candles:
                 chart_data = [{
