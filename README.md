@@ -109,7 +109,21 @@ The easiest free hosting for this stack. One service runs both backend + fronten
 ### Render free tier notes:
 - Spins down after 15 min of inactivity (cold start ~30s)
 - 750 hours/month (enough for 1 service 24/7)
-- To keep it warm, use a free cron ping service like UptimeRobot on the `/health` endpoint
+
+### Keep it alive with UptimeRobot (free)
+
+Render free tier sleeps your service after 15 min of no traffic. UptimeRobot pings it every 5 min to prevent that.
+
+1. Create a free account at [uptimerobot.com](https://uptimerobot.com)
+2. Click **Add New Monitor**
+3. Configure:
+   - **Monitor Type**: HTTP(s)
+   - **Friendly Name**: CFD Trading Bot
+   - **URL**: `https://your-app-name.onrender.com/health`
+   - **Monitoring Interval**: 5 minutes
+4. Save
+
+You also get free email/Telegram alerts if your bot goes down.
 
 ## Architecture
 
