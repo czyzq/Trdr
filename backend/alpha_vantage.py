@@ -10,7 +10,7 @@ import time
 
 load_dotenv()
 
-ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY", "DKFNMGRFCANQSH1Q")
+ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY", "demo")
 BASE_URL = "https://www.alphavantage.co/query"
 
 class AlphaVantageClient:
