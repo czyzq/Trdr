@@ -48,7 +48,7 @@ class AlphaVantageClient:
             symbol_map = {
                 "XAU": "GOLD",     # Gold spot price
                 "XAG": "SILVER",   # Silver spot price  
-                "US100": "SPY",      # Use SPY for Nasdaq proxy (or could use INDEX function)
+                "US100": "QQQ",      # Nasdaq-100 ETF (tracks the actual index)
             }
             
             av_symbol = symbol_map.get(symbol, symbol)
@@ -117,7 +117,7 @@ class AlphaVantageClient:
             symbol_map = {
                 "XAU": "GOLD",
                 "XAG": "SILVER",
-                "US100": "SPY",
+                "US100": "QQQ",
             }
             
             av_symbol = symbol_map.get(symbol, symbol)

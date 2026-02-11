@@ -108,66 +108,200 @@ def log_event(message: str, log_type: str = "info"):
 
 def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, List[Component]]:
     """
-    Enhanced composite signal scoring with multi-factor weighted system.
-    Uses RSI, MACD, Momentum, Bollinger Bands, SMA crossover.
+    Multi-factor signal scoring with regime-adaptive weighting.
+    Uses: RSI (corrected), MACD, Bollinger Bands, SMA trend, ADX trend strength,
+    StochRSI for timing, and volume confirmation.
+
+    In TRENDING markets (ADX > 25): momentum/trend components get higher weight.
+    In RANGING markets (ADX < 20): mean-reversion components (BB, RSI) get higher weight.
+
     Returns score (-1 to +1) and components breakdown.
     """
     components = []
     scores = []
     weights = []
 
-    # --- RSI Component (weight: 25%) ---
+    # --- Detect market regime via ADX ---
+    adx_data = indicators.get("adx")
+    adx_value = adx_data["adx"] if adx_data else 20
+    is_trending = adx_value > 25
+    is_strong_trend = adx_value > 40
+    regime = "TRENDING" if is_trending else "RANGING"
+
+    if adx_data:
+        trend_dir = "UP" if adx_data["plus_di"] > adx_data["minus_di"] else "DOWN"
+        components.append(Component(
+            type=ComponentType.TECHNICAL,
+            name="ADX (Trend)",
+            value=max(-1, min(1, (adx_value - 25) / 25)) if trend_dir == "UP" else max(-1, min(1, -(adx_value - 25) / 25)),
+            description=f"ADX {adx_value:.0f} ({regime}, {trend_dir}) +DI:{adx_data['plus_di']:.0f} -DI:{adx_data['minus_di']:.0f}",
+            confidence=0.8 if adx_value > 30 else 0.5,
+            indicators=adx_data
+        ))
+
+    # --- RSI Component (FIXED: oversold=BUY, overbought=SELL) ---
     if indicators.get("rsi_14") is not None:
         rsi = indicators["rsi_14"]
+        # Correct interpretation: low RSI = oversold = buy opportunity
         if rsi < 30:
-            rsi_score = -((30 - rsi) / 30)  # Oversold = bearish pressure
+            rsi_score = (30 - rsi) / 30        # Oversold → positive (BUY)
         elif rsi > 70:
-            rsi_score = (rsi - 70) / 30      # Overbought = bullish pressure
+            rsi_score = -((rsi - 70) / 30)     # Overbought → negative (SELL)
+        elif rsi < 45:
+            rsi_score = (45 - rsi) / 45 * 0.3  # Mild bullish bias
+        elif rsi > 55:
+            rsi_score = -(rsi - 55) / 45 * 0.3 # Mild bearish bias
         else:
-            rsi_score = (rsi - 50) / 50       # Neutral zone
-        rsi_score = max(-1, min(1, rsi_score))
+            rsi_score = 0                       # Dead neutral zone
 
+        rsi_score = max(-1, min(1, rsi_score))
         zone = "OVERSOLD" if rsi < 30 else "OVERBOUGHT" if rsi > 70 else "NEUTRAL"
+
+        # RSI weight depends on regime: higher in ranging, lower in trending
+        rsi_weight = 0.15 if is_trending else 0.25
+
         components.append(Component(
             type=ComponentType.TECHNICAL,
             name="RSI (14)",
             value=rsi_score,
-            description=f"RSI at {rsi:.1f} ({zone})",
-            confidence=0.85 if abs(rsi - 50) > 20 else 0.6,
+            description=f"RSI {rsi:.1f} ({zone})",
+            confidence=0.85 if abs(rsi - 50) > 20 else 0.5,
             indicators={"value": rsi, "zone": zone}
         ))
         scores.append(rsi_score)
-        weights.append(0.25)
+        weights.append(rsi_weight)
 
-    # --- MACD Component (weight: 25%) ---
+    # --- StochRSI Component (entry timing) ---
+    stoch = indicators.get("stoch_rsi")
+    if stoch:
+        k, d = stoch["k"], stoch["d"]
+        if k < 20:
+            stoch_score = 0.6 + (20 - k) / 50   # Oversold → BUY
+        elif k > 80:
+            stoch_score = -(0.6 + (k - 80) / 50) # Overbought → SELL
+        else:
+            stoch_score = 0
+
+        # Crossover confirmation: %K crossing above %D = bullish
+        if k > d and k < 30:
+            stoch_score = max(stoch_score, 0.5)
+        elif k < d and k > 70:
+            stoch_score = min(stoch_score, -0.5)
+
+        stoch_score = max(-1, min(1, stoch_score))
+        if abs(stoch_score) > 0.1:
+            components.append(Component(
+                type=ComponentType.TECHNICAL,
+                name="StochRSI",
+                value=stoch_score,
+                description=f"StochRSI K:{k:.0f} D:{d:.0f}",
+                confidence=0.7 if abs(k - 50) > 30 else 0.4,
+                indicators=stoch
+            ))
+            scores.append(stoch_score)
+            weights.append(0.10)
+
+    # --- MACD Component (normalized by ATR for cross-symbol consistency) ---
     if indicators.get("macd"):
         macd = indicators["macd"]
         if macd.get("histogram") is not None and macd.get("macd_line") is not None:
             histogram = macd["histogram"]
             macd_line = macd["macd_line"]
             signal_line = macd.get("signal_line", 0) or 0
+            atr = indicators.get("atr_14", 1) or 1
 
-            # Histogram direction and crossover
-            if histogram > 0 and macd_line > signal_line:
-                macd_score = min(1, histogram / max(abs(macd_line), 0.01) * 2)
-            elif histogram < 0 and macd_line < signal_line:
-                macd_score = max(-1, histogram / max(abs(macd_line), 0.01) * 2)
-            else:
-                macd_score = max(-1, min(1, histogram / 100)) if histogram != 0 else 0
+            # Normalize histogram by ATR for consistent scaling across symbols
+            norm_hist = histogram / atr
+            macd_score = max(-1, min(1, norm_hist * 2))
 
-            cross = "BULLISH_CROSS" if macd_line > signal_line else "BEARISH_CROSS"
+            cross = "BULLISH" if macd_line > signal_line else "BEARISH"
+            # MACD weight: higher in trending markets
+            macd_weight = 0.25 if is_trending else 0.15
+
             components.append(Component(
                 type=ComponentType.TECHNICAL,
                 name="MACD",
                 value=macd_score,
-                description=f"MACD hist: {histogram:.4f} ({cross})",
-                confidence=0.8 if abs(histogram) > 0.5 else 0.55,
+                description=f"MACD {cross} | hist/ATR: {norm_hist:.2f}",
+                confidence=0.8 if abs(norm_hist) > 0.5 else 0.5,
                 indicators=macd
             ))
             scores.append(macd_score)
-            weights.append(0.25)
+            weights.append(macd_weight)
 
-    # --- Momentum Component (weight: 15%) ---
+    # --- Bollinger Bands Component (mean-reversion) ---
+    if indicators.get("bollinger_bands"):
+        bb = indicators["bollinger_bands"]
+        closes = indicators.get("_closes", [])
+        if closes:
+            current_price = closes[-1]
+            bb_upper = bb["upper"]
+            bb_lower = bb["lower"]
+            bb_range = bb_upper - bb_lower if bb_upper != bb_lower else 1
+
+            bb_position = ((current_price - bb_lower) / bb_range) * 2 - 1
+            bb_score = -bb_position * 0.8  # Near upper = sell, near lower = buy
+
+            zone = "UPPER" if current_price > bb_upper else "LOWER" if current_price < bb_lower else "MIDDLE"
+            # BB weight: higher in ranging markets
+            bb_weight = 0.15 if is_trending else 0.25
+
+            components.append(Component(
+                type=ComponentType.TECHNICAL,
+                name="Bollinger Bands",
+                value=max(-1, min(1, bb_score)),
+                description=f"BB {zone} (pos: {bb_position:.2f})",
+                confidence=0.75 if abs(bb_position) > 0.8 else 0.4,
+                indicators={"position": bb_position, "zone": zone}
+            ))
+            scores.append(max(-1, min(1, bb_score)))
+            weights.append(bb_weight)
+
+    # --- SMA Trend Component ---
+    if indicators.get("sma_20") is not None and indicators.get("sma_50") is not None:
+        sma_20 = indicators["sma_20"]
+        sma_50 = indicators["sma_50"]
+        if sma_50 > 0:
+            sma_diff_pct = ((sma_20 - sma_50) / sma_50) * 100
+            sma_score = max(-1, min(1, sma_diff_pct / 2))
+            trend = "BULLISH" if sma_20 > sma_50 else "BEARISH"
+            # SMA weight: higher in trending markets
+            sma_weight = 0.20 if is_trending else 0.10
+
+            components.append(Component(
+                type=ComponentType.TECHNICAL,
+                name="SMA Cross (20/50)",
+                value=sma_score,
+                description=f"SMA20/50: {sma_diff_pct:.2f}% ({trend})",
+                confidence=0.7,
+                indicators={"sma_20": sma_20, "sma_50": sma_50, "trend": trend}
+            ))
+            scores.append(sma_score)
+            weights.append(sma_weight)
+
+    # --- Volume Confirmation ---
+    vol = indicators.get("volume_profile")
+    if vol:
+        vol_ratio = vol["vol_ratio"]
+        up_down = vol["up_down_ratio"]
+
+        # High volume confirms the move; low volume weakens it
+        vol_multiplier = min(1.5, max(0.5, vol_ratio))
+        vol_bias = max(-0.5, min(0.5, (up_down - 1.0) * 0.3))
+
+        if vol_ratio > 1.5:
+            components.append(Component(
+                type=ComponentType.TECHNICAL,
+                name="Volume",
+                value=vol_bias,
+                description=f"Vol {vol_ratio:.1f}x avg | Up/Down: {up_down:.1f}",
+                confidence=0.6,
+                indicators=vol
+            ))
+            scores.append(vol_bias)
+            weights.append(0.10)
+
+    # --- Momentum (reduced weight, confirmation only) ---
     if indicators.get("momentum_10") is not None:
         momentum = indicators["momentum_10"]
         base_price = indicators.get("sma_20", 1) or 1
@@ -179,104 +313,88 @@ def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, L
             name="Momentum (10)",
             value=momentum_score,
             description=f"Momentum: {mom_pct:.2f}%",
-            confidence=0.7,
+            confidence=0.6,
             indicators={"value": momentum, "pct": mom_pct}
         ))
         scores.append(momentum_score)
-        weights.append(0.15)
+        weights.append(0.05)
 
-    # --- Bollinger Bands Component (weight: 20%) ---
-    if indicators.get("bollinger_bands"):
-        bb = indicators["bollinger_bands"]
-        closes = indicators.get("_closes", [])
-        if closes:
-            current_price = closes[-1]
-            bb_upper = bb["upper"]
-            bb_lower = bb["lower"]
-            bb_middle = bb["middle"]
-            bb_range = bb_upper - bb_lower if bb_upper != bb_lower else 1
-
-            # Position within bands (-1 = at lower, +1 = at upper)
-            bb_position = ((current_price - bb_lower) / bb_range) * 2 - 1
-            # Near upper band = overbought (sell), near lower = oversold (buy)
-            bb_score = -bb_position * 0.8  # Reverse: near upper = sell signal
-
-            zone = "UPPER" if current_price > bb_upper else "LOWER" if current_price < bb_lower else "MIDDLE"
-            components.append(Component(
-                type=ComponentType.TECHNICAL,
-                name="Bollinger Bands",
-                value=max(-1, min(1, bb_score)),
-                description=f"BB position: {zone} ({bb_position:.2f})",
-                confidence=0.75 if abs(bb_position) > 0.8 else 0.5,
-                indicators={"position": bb_position, "zone": zone}
-            ))
-            scores.append(max(-1, min(1, bb_score)))
-            weights.append(0.20)
-
-    # --- SMA Crossover Component (weight: 15%) ---
-    if indicators.get("sma_20") is not None and indicators.get("sma_50") is not None:
-        sma_20 = indicators["sma_20"]
-        sma_50 = indicators["sma_50"]
-        if sma_50 > 0:
-            sma_diff_pct = ((sma_20 - sma_50) / sma_50) * 100
-            sma_score = max(-1, min(1, sma_diff_pct / 2))
-
-            trend = "BULLISH" if sma_20 > sma_50 else "BEARISH"
-            components.append(Component(
-                type=ComponentType.TECHNICAL,
-                name="SMA Cross (20/50)",
-                value=sma_score,
-                description=f"SMA20 vs SMA50: {sma_diff_pct:.2f}% ({trend})",
-                confidence=0.7,
-                indicators={"sma_20": sma_20, "sma_50": sma_50, "trend": trend}
-            ))
-            scores.append(sma_score)
-            weights.append(0.15)
-
-    # Calculate weighted composite score
+    # --- Calculate weighted composite score ---
     if scores:
         total_weight = sum(weights)
         composite_score = sum(s * w for s, w in zip(scores, weights)) / total_weight if total_weight > 0 else 0
     else:
         composite_score = 0
 
-    return composite_score, components
+    # --- Component agreement bonus/penalty ---
+    # If most components agree on direction, boost confidence; if mixed, dampen
+    if len(scores) >= 3:
+        bullish = sum(1 for s in scores if s > 0.1)
+        bearish = sum(1 for s in scores if s < -0.1)
+        agreement = max(bullish, bearish) / len(scores)
+        if agreement > 0.7:
+            composite_score *= 1.15  # Boost when components agree
+        elif agreement < 0.4:
+            composite_score *= 0.7   # Dampen when components disagree
 
-def calculate_trend_score(current_score: float, previous_scores: List[float]) -> float:
-    """Calculate trend-based score adjustment based on previous signal scores"""
-    if not previous_scores or len(previous_scores) < 2:
-        return 0.0
+    return max(-1, min(1, composite_score)), components
 
-    recent_scores = previous_scores[-5:]
-    if len(recent_scores) < 2:
-        return 0.0
-
-    score_changes = [recent_scores[i] - recent_scores[i-1] for i in range(1, len(recent_scores))]
-    avg_change = sum(score_changes) / len(score_changes)
-
-    positive_changes = sum(1 for change in score_changes if change > 0)
-    negative_changes = sum(1 for change in score_changes if change < 0)
-    consistency = abs(positive_changes - negative_changes) / len(score_changes)
-
-    trend_bonus = avg_change * consistency * 0.2
-    recent_avg = sum(recent_scores) / len(recent_scores)
-    deviation = abs(current_score - recent_avg)
-    mean_reversion_penalty = -deviation * 0.1 if deviation > 0.3 else 0.0
-
-    return trend_bonus + mean_reversion_penalty
 
 def get_signal_direction(score: float) -> SignalDirection:
-    """Determine signal direction from score"""
-    if score > 0.6:
+    """Determine signal direction from score with tighter thresholds"""
+    if score > 0.45:
         return SignalDirection.STRONG_BUY
-    elif score > 0.2:
+    elif score > 0.15:
         return SignalDirection.BUY
-    elif score < -0.6:
+    elif score < -0.45:
         return SignalDirection.STRONG_SELL
-    elif score < -0.2:
+    elif score < -0.15:
         return SignalDirection.SELL
     else:
         return SignalDirection.NEUTRAL
+
+
+# ── Risk Management ──────────────────────────────────────────────────
+
+MAX_DRAWDOWN_PCT = 20.0      # Stop trading if account drops 20% from peak
+MAX_OPEN_POSITIONS = 3        # Max concurrent positions
+MAX_RISK_PER_TRADE_PCT = 2.0  # Risk max 2% of balance per trade
+INITIAL_BALANCE_PLN = 10000.0
+
+def check_circuit_breaker() -> tuple[bool, str]:
+    """Check if trading should be halted due to drawdown or position limits."""
+    peak_balance = max(INITIAL_BALANCE_PLN, account.get("peak_balance_pln", INITIAL_BALANCE_PLN))
+    current = account["balance_pln"]
+    drawdown_pct = ((peak_balance - current) / peak_balance) * 100 if peak_balance > 0 else 0
+
+    if drawdown_pct >= MAX_DRAWDOWN_PCT:
+        return False, f"CIRCUIT BREAKER: {drawdown_pct:.1f}% drawdown exceeds {MAX_DRAWDOWN_PCT}% limit"
+
+    if len(open_positions) >= MAX_OPEN_POSITIONS:
+        return False, f"Max {MAX_OPEN_POSITIONS} positions reached"
+
+    return True, "OK"
+
+def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -> float:
+    """
+    Calculate position size based on risk per trade.
+    Risks MAX_RISK_PER_TRADE_PCT of account balance per trade.
+    """
+    risk_amount_pln = account["balance_pln"] * (MAX_RISK_PER_TRADE_PCT / 100)
+    risk_amount_usd = risk_amount_pln / PLN_USD_RATE
+
+    risk_per_unit = abs(entry_price - stop_loss)
+    if risk_per_unit <= 0:
+        return INSTRUMENTS.get(symbol, {}).get("lot_size", 0.01)
+
+    size = risk_amount_usd / risk_per_unit
+
+    # Clamp to instrument limits
+    lot_size = INSTRUMENTS.get(symbol, {}).get("lot_size", 0.01)
+    min_size = lot_size
+    max_size = lot_size * 10
+
+    return round(max(min_size, min(size, max_size)), 4)
 
 def update_account_equity():
     """Update account equity based on open positions"""
@@ -304,10 +422,14 @@ def update_account_equity():
     account["positions"] = len(open_positions)
 
 async def generate_signals() -> List[Signal]:
-    """Generate trading signals for all instruments"""
+    """Generate trading signals for all instruments using regime-adaptive scoring"""
     global alpha_client, account
 
     account["last_scan"] = datetime.utcnow().isoformat()
+
+    # Track peak balance for drawdown calculation
+    if account["balance_pln"] > account.get("peak_balance_pln", INITIAL_BALANCE_PLN):
+        account["peak_balance_pln"] = account["balance_pln"]
 
     price_feeder = get_realistic_price_feeder()
     news_client_instance = get_news_client()
@@ -326,8 +448,8 @@ async def generate_signals() -> List[Signal]:
             current_price = quote["price"]
 
             candles = price_feeder.get_candles(symbol, resolution="60", count=100)
-            if not candles or len(candles) < 26:
-                log_event(f"Insufficient candle data for {symbol}", "error")
+            if not candles or len(candles) < 50:
+                log_event(f"Insufficient candle data for {symbol} ({len(candles) if candles else 0} bars)", "error")
                 continue
 
             indicators = TechnicalIndicators.calculate_all(candles, period=14)
@@ -335,10 +457,20 @@ async def generate_signals() -> List[Signal]:
                 log_event(f"Failed to calculate indicators for {symbol}", "warning")
                 continue
 
-            # Pass closes for BB calculation
             indicators["_closes"] = [c["close"] for c in candles]
 
-            # Fetch news sentiment
+            # ── Volatility filter ──
+            atr = indicators.get("atr_14", current_price * 0.01)
+            atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
+            # Skip if volatility is extreme (>3% per candle = dangerous)
+            if atr_pct > 3.0:
+                log_event(f"[SKIP] {symbol} ATR {atr_pct:.1f}% too volatile", "warning")
+                continue
+
+            # ── Technical scoring (regime-adaptive) ──
+            technical_score, components = calculate_signal_score(indicators, symbol)
+
+            # ── News sentiment (capped influence: max 15% of final score) ──
             news_score = 0.0
             try:
                 news = await news_client_instance.get_news(symbol, limit=5)
@@ -349,48 +481,54 @@ async def generate_signals() -> List[Signal]:
             except Exception as e:
                 log_event(f"Failed to fetch news for {symbol}: {e}", "warning")
 
-            # Enhanced scoring
-            technical_score, components = calculate_signal_score(indicators, symbol)
-
-            previous_scores = signal_history_cache.get(symbol, [])
-            trend_adjustment = calculate_trend_score(technical_score, previous_scores)
-            adjusted_technical_score = max(-1, min(1, technical_score + trend_adjustment))
-
-            effective_news_score = news_score if abs(news_score) > 0.1 else 0.0
-
-            # Weighted: 55% technical (improved), 5% price action, 40% news
-            score = (adjusted_technical_score * 0.55) + (0 * 0.05) + (effective_news_score * 0.40)
+            # Final score: 85% technical + 15% news (only if news is available and meaningful)
+            effective_news = news_score if abs(news_score) > 0.1 else 0.0
+            if effective_news != 0:
+                score = technical_score * 0.85 + effective_news * 0.15
+            else:
+                score = technical_score  # 100% technical when no news
             score = max(-1, min(1, score))
 
             direction = get_signal_direction(score)
 
+            # ── Signal history tracking ──
             if symbol not in signal_history_cache:
                 signal_history_cache[symbol] = []
             signal_history_cache[symbol].append(score)
-            if len(signal_history_cache[symbol]) > 10:
+            if len(signal_history_cache[symbol]) > 20:
                 signal_history_cache[symbol].pop(0)
-
-            if len(signals) % 5 == 0:
+            if len(signals) % 4 == 0:
                 save_signal_cache()
 
-            base_confidence = min(0.95, abs(score) + 0.3)
-            if (effective_news_score > 0 and adjusted_technical_score > 0) or \
-               (effective_news_score < 0 and adjusted_technical_score < 0):
-                confidence = min(0.95, base_confidence * 1.1)
+            # ── Confidence based on component agreement ──
+            component_values = [c.value for c in components]
+            if component_values:
+                bullish_count = sum(1 for v in component_values if v > 0.1)
+                bearish_count = sum(1 for v in component_values if v < -0.1)
+                total_opinionated = bullish_count + bearish_count
+                agreement = max(bullish_count, bearish_count) / max(total_opinionated, 1)
+                confidence = min(0.95, abs(score) * agreement + 0.1)
             else:
-                confidence = base_confidence
+                confidence = 0.1
 
-            rsi = indicators.get("rsi_14", 50)
-            atr = indicators.get("atr_14", current_price * 0.01)
-
+            # ── TP/SL with ATR-based adaptive levels ──
             entry_point = current_price
+            adx_data = indicators.get("adx")
+            is_trending = adx_data and adx_data["adx"] > 25
+
+            # Trending: wider TP (let profits run), tighter SL
+            # Ranging: tighter TP (take profit quickly), wider SL (give room)
+            if is_trending:
+                sl_mult, tp_mult = 1.5, 3.5  # 1:2.3 R:R in trends
+            else:
+                sl_mult, tp_mult = 2.0, 2.5  # 1:1.25 R:R in ranges
 
             if direction in [SignalDirection.BUY, SignalDirection.STRONG_BUY]:
-                stop_loss = entry_point - (atr * 2)
-                take_profit = entry_point + (atr * 3)
+                stop_loss = entry_point - (atr * sl_mult)
+                take_profit = entry_point + (atr * tp_mult)
             else:
-                stop_loss = entry_point + (atr * 2)
-                take_profit = entry_point - (atr * 3)
+                stop_loss = entry_point + (atr * sl_mult)
+                take_profit = entry_point - (atr * tp_mult)
 
             risk = abs(entry_point - stop_loss)
             reward = abs(take_profit - entry_point)
@@ -517,10 +655,10 @@ async def set_account_mode(mode: str):
 # =====================
 
 @app.post("/api/trade/open")
-async def open_trade(symbol: str, direction: str, size: float = 0.01):
+async def open_trade(symbol: str, direction: str, size: float = 0):
     """
     Open a simulated trade position.
-    size: lot size (e.g. 0.01 for micro lot)
+    size: lot size - if 0, automatically calculated from risk management rules.
     """
     global account
 
@@ -529,19 +667,23 @@ async def open_trade(symbol: str, direction: str, size: float = 0.01):
     if direction not in ["buy", "sell"]:
         return {"error": "Direction must be 'buy' or 'sell'"}
 
+    # Circuit breaker check
+    can_trade, reason = check_circuit_breaker()
+    if not can_trade:
+        log_event(f"[BLOCKED] {reason}", "warning")
+        return {"error": reason}
+
+    # Check for duplicate position on same symbol+direction
+    for pos in open_positions:
+        if pos["symbol"] == symbol and pos["direction"] == direction:
+            return {"error": f"Already have an open {direction} position on {symbol}"}
+
     price_feeder = get_realistic_price_feeder()
     quote = price_feeder.get_quote(symbol)
     if not quote:
         return {"error": f"Cannot get price for {symbol}"}
 
     entry_price = quote["price"]
-
-    # Calculate margin required (simplified: 1% margin for CFDs)
-    margin_usd = entry_price * size * 0.01
-    margin_pln = margin_usd * PLN_USD_RATE
-
-    if margin_pln > account["available_pln"]:
-        return {"error": "Insufficient margin", "required_pln": margin_pln, "available_pln": account["available_pln"]}
 
     # Get signal data for TP/SL
     signal = signals_cache.get(symbol)
@@ -556,6 +698,17 @@ async def open_trade(symbol: str, direction: str, size: float = 0.01):
         else:
             take_profit = entry_price - (atr * 3)
             stop_loss = entry_price + (atr * 2)
+
+    # Auto-calculate position size if not specified (risk-based)
+    if size <= 0:
+        size = calculate_position_size(symbol, entry_price, stop_loss)
+
+    # Calculate margin required (simplified: 1% margin for CFDs)
+    margin_usd = entry_price * size * 0.01
+    margin_pln = margin_usd * PLN_USD_RATE
+
+    if margin_pln > account["available_pln"]:
+        return {"error": "Insufficient margin", "required_pln": margin_pln, "available_pln": account["available_pln"]}
 
     position = {
         "id": str(uuid.uuid4())[:8],
