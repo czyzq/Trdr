@@ -57,7 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
 
   return (
     <div
-      className="w-60 flex flex-col overflow-y-auto"
+      className="w-60 h-full flex flex-col overflow-y-auto"
       style={{ backgroundColor: '#0d1220', borderRight: '1px solid #1a1f35' }}
     >
       {/* Balance Section */}

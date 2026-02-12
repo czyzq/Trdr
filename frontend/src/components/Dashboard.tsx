@@ -27,6 +27,7 @@ export const Dashboard: React.FC = () => {
     return localStorage.getItem('cfd_selectedSymbol') || 'XAU';
   });
   const [accountData, setAccountData] = useState<any>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => { localStorage.setItem('cfd_activeTab', activeTab); }, [activeTab]);
   useEffect(() => { localStorage.setItem('cfd_selectedSymbol', selectedSymbol); }, [selectedSymbol]);
@@ -64,58 +65,79 @@ export const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const tabs: Array<{ id: TabType; label: string; icon: string }> = [
-    { id: 'main', label: 'Dashboard', icon: 'D' },
-    { id: 'charts', label: 'Charts', icon: 'C' },
-    { id: 'trades', label: 'Trades', icon: 'T' },
-    { id: 'news', label: 'News', icon: 'N' },
-    { id: 'console', label: 'Console', icon: '>' },
-    { id: 'settings', label: 'Settings', icon: 'S' },
+  // Close sidebar when switching tabs on mobile
+  const handleTabSwitch = (tab: TabType) => {
+    setActiveTab(tab);
+    setSidebarOpen(false);
+  };
+
+  const tabs: Array<{ id: TabType; label: string; shortLabel: string; icon: string }> = [
+    { id: 'main', label: 'Dashboard', shortLabel: 'Home', icon: '◎' },
+    { id: 'charts', label: 'Charts', shortLabel: 'Charts', icon: '◩' },
+    { id: 'trades', label: 'Trades', shortLabel: 'Trades', icon: '⇅' },
+    { id: 'news', label: 'News', shortLabel: 'News', icon: '◉' },
+    { id: 'console', label: 'Console', shortLabel: 'Log', icon: '▸' },
+    { id: 'settings', label: 'Settings', shortLabel: 'Set.', icon: '⚙' },
   ];
 
   return (
     <div className="w-full h-screen flex flex-col" style={{ backgroundColor: '#0b0f1a' }}>
       {/* Top Header Bar */}
       <div
-        className="flex items-center justify-between px-5 py-2.5"
+        className="flex items-center justify-between px-3 md:px-5 py-2 md:py-2.5 flex-shrink-0"
         style={{ backgroundColor: '#0d1220', borderBottom: '1px solid #1a1f35' }}
       >
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
+          {/* Mobile sidebar toggle */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="md:hidden flex items-center justify-center w-7 h-7 rounded-sm"
+            style={{ backgroundColor: sidebarOpen ? '#1a1f35' : 'transparent', color: '#64748b' }}
+          >
+            <span className="text-sm">{sidebarOpen ? '✕' : '☰'}</span>
+          </button>
+
           <div className="flex items-center gap-2">
             <div
               className="w-2 h-2 rounded-full"
               style={{ backgroundColor: '#22c55e' }}
             />
             <span
-              className="text-xs font-bold tracking-wider uppercase"
+              className="text-xs font-bold tracking-wider uppercase hidden sm:inline"
               style={{ color: '#e2e8f0', letterSpacing: '0.15em' }}
             >
               CFD Trading Bot
             </span>
+            <span
+              className="text-xs font-bold tracking-wider uppercase sm:hidden"
+              style={{ color: '#e2e8f0', letterSpacing: '0.15em' }}
+            >
+              CFD Bot
+            </span>
           </div>
           <span
-            className="text-[10px] px-2 py-0.5 rounded-sm font-medium"
+            className="text-[10px] px-2 py-0.5 rounded-sm font-medium hidden sm:inline-block"
             style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
           >
             v0.2.0
           </span>
           <span
-            className="text-[10px] px-2 py-0.5 rounded-sm font-medium"
+            className="text-[10px] px-1.5 py-0.5 rounded-sm font-medium"
             style={{
               backgroundColor: accountData?.mode === 'simulate' ? 'rgba(234, 179, 8, 0.15)' : 'rgba(239, 68, 68, 0.15)',
               color: accountData?.mode === 'simulate' ? '#eab308' : '#ef4444',
             }}
           >
-            {accountData?.mode === 'simulate' ? 'SIMULATION' : 'LIVE'}
+            {accountData?.mode === 'simulate' ? 'SIM' : 'LIVE'}
           </span>
         </div>
 
-        {/* Tab Navigation in Header */}
-        <div className="flex items-center gap-1">
+        {/* Desktop Tab Navigation */}
+        <div className="hidden md:flex items-center gap-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabSwitch(tab.id)}
               className="px-3 py-1.5 text-[11px] font-medium tracking-wide uppercase transition-all rounded-sm"
               style={{
                 color: activeTab === tab.id ? '#e2e8f0' : '#4a5568',
@@ -128,16 +150,32 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
-          <span className="text-[11px] font-medium" style={{ color: '#4a5568' }}>
+          <span className="text-[11px] font-medium hidden sm:inline" style={{ color: '#4a5568' }}>
             {currentTime}
           </span>
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <Sidebar accountData={accountData} />
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Mobile sidebar overlay */}
+        {sidebarOpen && (
+          <div
+            className="md:hidden fixed inset-0 z-40"
+            style={{ backgroundColor: 'rgba(0,0,0,0.6)', top: '44px' }}
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        {/* Sidebar - hidden on mobile, slides in when toggled */}
+        <div className={`
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+          md:translate-x-0 md:relative
+          fixed top-[44px] left-0 bottom-[52px] md:bottom-0
+          z-50 transition-transform duration-200 ease-in-out
+        `}>
+          <Sidebar accountData={accountData} />
+        </div>
 
         {/* Tab Content */}
         <div className="flex-1 overflow-hidden">
@@ -167,9 +205,33 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Footer */}
+      {/* Mobile Bottom Navigation */}
       <div
-        className="flex items-center justify-between px-5 py-1.5 text-[10px]"
+        className="md:hidden flex items-center justify-around flex-shrink-0"
+        style={{
+          backgroundColor: '#0d1220',
+          borderTop: '1px solid #1a1f35',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}
+      >
+        {tabs.slice(0, 5).map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => handleTabSwitch(tab.id)}
+            className="flex flex-col items-center py-2 px-2 min-w-[52px] transition-all"
+            style={{
+              color: activeTab === tab.id ? '#e2e8f0' : '#4a5568',
+            }}
+          >
+            <span className="text-base leading-none mb-0.5">{tab.icon}</span>
+            <span className="text-[9px] font-medium">{tab.shortLabel}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Desktop Footer */}
+      <div
+        className="hidden md:flex items-center justify-between px-5 py-1.5 text-[10px] flex-shrink-0"
         style={{ backgroundColor: '#0d1220', borderTop: '1px solid #1a1f35', color: '#374151' }}
       >
         <span>CFD Trading Bot | XAU, XAG, US100, BTC</span>

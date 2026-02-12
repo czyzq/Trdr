@@ -137,7 +137,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
   return (
     <div className="h-full rounded-sm overflow-hidden flex flex-col" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: '1px solid #1a1f35' }}>
+      <div className="flex items-center justify-between px-3 md:px-4 py-2" style={{ borderBottom: '1px solid #1a1f35' }}>
         <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
           Trading Signals
         </span>
@@ -146,8 +146,101 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
         </span>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto">
+      {/* Mobile Card Layout */}
+      <div className="flex-1 overflow-auto md:hidden">
+        <div className="p-2 space-y-2">
+          {signals.map((signal) => {
+            const scoreColor = getScoreColor(signal.score);
+            const isBuy = signal.direction === 'buy';
+            const dirColor = isBuy ? '#22c55e' : signal.direction === 'sell' ? '#ef4444' : '#64748b';
+
+            return (
+              <div
+                key={signal.id || signal.symbol}
+                onClick={() => onSignalClick?.(signal)}
+                className="rounded-sm p-3"
+                style={{ backgroundColor: '#0b0f1a', border: '1px solid #131825' }}
+              >
+                {/* Row 1: Symbol, Direction, Score */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs" style={{ color: '#e2e8f0' }}>{signal.symbol}</span>
+                    <span
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-sm"
+                      style={{ color: dirColor, backgroundColor: `${dirColor}15` }}
+                    >
+                      {signal.direction.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <MiniSparkline data={signal.trend || []} />
+                    <span className="font-bold text-xs" style={{ color: scoreColor }}>
+                      {signal.score >= 0 ? '+' : ''}{signal.score.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Row 2: Prices */}
+                <div className="flex items-center justify-between text-[10px] mb-2">
+                  <div>
+                    <span style={{ color: '#4a5568' }}>Entry: </span>
+                    <span style={{ color: '#94a3b8' }}>{formatPrice(signal.entry_point)}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#4a5568' }}>TP: </span>
+                    <span style={{ color: '#22c55e' }}>{formatPrice(signal.take_profit)}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#4a5568' }}>SL: </span>
+                    <span style={{ color: '#ef4444' }}>{formatPrice(signal.stop_loss)}</span>
+                  </div>
+                </div>
+
+                {/* Row 3: Conf, R:R, Actions */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 text-[10px]">
+                    <span style={{ color: '#4a5568' }}>
+                      Conf: <span style={{ color: '#94a3b8' }}>{(signal.confidence * 100).toFixed(0)}%</span>
+                    </span>
+                    <span style={{ color: '#4a5568' }}>
+                      R:R <span style={{ color: '#94a3b8' }}>{signal.risk_reward_ratio ? signal.risk_reward_ratio.toFixed(1) : '--'}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openTrade(signal.symbol, 'buy'); }}
+                      disabled={tradingSymbol === signal.symbol}
+                      className="px-3 py-1 text-[10px] font-bold rounded-sm transition-all"
+                      style={{
+                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        color: '#22c55e',
+                        border: '1px solid rgba(34, 197, 94, 0.2)',
+                      }}
+                    >
+                      BUY
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openTrade(signal.symbol, 'sell'); }}
+                      disabled={tradingSymbol === signal.symbol}
+                      className="px-3 py-1 text-[10px] font-bold rounded-sm transition-all"
+                      style={{
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        color: '#ef4444',
+                        border: '1px solid rgba(239, 68, 68, 0.2)',
+                      }}
+                    >
+                      SELL
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Desktop Table Layout */}
+      <div className="flex-1 overflow-auto hidden md:block">
         <table className="w-full text-[11px]">
           <thead>
             <tr style={{ borderBottom: '1px solid #1a1f35' }}>

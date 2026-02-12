@@ -85,19 +85,19 @@ export const MainTab: React.FC<MainTabProps> = ({
   const currentInstrument = instruments.find(i => i.symbol === selectedSymbol);
 
   return (
-    <div className="flex flex-col h-full p-4 gap-3">
+    <div className="flex flex-col h-full p-2 md:p-4 gap-2 md:gap-3 overflow-auto">
       {/* Chart Section */}
-      <div className="flex-1 min-h-0 rounded-sm overflow-hidden" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
+      <div className="flex-1 min-h-[250px] md:min-h-0 rounded-sm overflow-hidden" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
         {/* Chart Header */}
-        <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid #1a1f35' }}>
-          <div className="flex items-center gap-3">
-            {/* Symbol Tabs */}
-            <div className="flex items-center gap-0.5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 md:px-4 py-2 md:py-2.5 gap-2 sm:gap-0" style={{ borderBottom: '1px solid #1a1f35' }}>
+          <div className="flex items-center gap-2 md:gap-3 w-full sm:w-auto">
+            {/* Symbol Tabs - scrollable on mobile */}
+            <div className="flex items-center gap-0.5 overflow-x-auto flex-shrink-0">
               {instruments.map((inst) => (
                 <button
                   key={inst.symbol}
                   onClick={() => onSymbolSelect(inst.symbol)}
-                  className="px-2.5 py-1 text-[11px] font-medium rounded-sm transition-all"
+                  className="px-2 md:px-2.5 py-1 text-[11px] font-medium rounded-sm transition-all whitespace-nowrap flex-shrink-0"
                   style={{
                     color: selectedSymbol === inst.symbol ? '#e2e8f0' : '#4a5568',
                     backgroundColor: selectedSymbol === inst.symbol ? '#1a1f35' : 'transparent',
@@ -108,7 +108,7 @@ export const MainTab: React.FC<MainTabProps> = ({
                 </button>
               ))}
             </div>
-            <span className="text-[10px]" style={{ color: '#4a5568' }}>
+            <span className="text-[10px] hidden sm:inline" style={{ color: '#4a5568' }}>
               {currentInstrument?.name}
             </span>
             {chartData && !chartData.error && (
@@ -119,12 +119,12 @@ export const MainTab: React.FC<MainTabProps> = ({
           </div>
 
           {/* Timeframe Selector */}
-          <div className="flex gap-0.5">
+          <div className="flex gap-0.5 overflow-x-auto w-full sm:w-auto">
             {timeframes.map((tf) => (
               <button
                 key={tf.value}
                 onClick={() => setSelectedTimeframe(tf.value)}
-                className="px-2 py-1 text-[10px] font-medium rounded-sm transition-all"
+                className="px-2 py-1 text-[10px] font-medium rounded-sm transition-all flex-shrink-0"
                 style={{
                   color: selectedTimeframe === tf.value ? '#e2e8f0' : '#4a5568',
                   backgroundColor: selectedTimeframe === tf.value ? '#1a1f35' : 'transparent',
@@ -137,7 +137,7 @@ export const MainTab: React.FC<MainTabProps> = ({
         </div>
 
         {/* Chart Area */}
-        <div className="p-2" style={{ height: 'calc(100% - 45px)' }}>
+        <div className="p-1 md:p-2" style={{ height: 'calc(100% - 45px)' }}>
           {loading ? (
             <div className="h-full flex items-center justify-center" style={{ color: '#4a5568' }}>
               <div className="text-center">
@@ -166,7 +166,7 @@ export const MainTab: React.FC<MainTabProps> = ({
       </div>
 
       {/* Signals Section */}
-      <div className="flex-shrink-0" style={{ height: '280px' }}>
+      <div className="flex-shrink-0 min-h-[200px] md:min-h-0" style={{ height: 'auto', maxHeight: '320px' }}>
         <SignalsGrid onSignalClick={handleSignalClick} />
       </div>
     </div>
