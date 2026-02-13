@@ -98,12 +98,18 @@ def save_signal_cache():
     except Exception:
         pass  # File write is best-effort fallback
 
-# Instruments to monitor
+# Instruments to monitor — with per-instrument signal tuning
+# min_score: minimum |score| to enter (higher = fewer but better trades)
+# asset_class: "commodity" (mean-reverting) or "equity"/"crypto" (trending)
 INSTRUMENTS = {
-    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 1},
-    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 100},
-    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 1},
-    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.01}
+    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 1,
+            "min_score": 0.30, "asset_class": "commodity"},
+    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 100,
+            "min_score": 0.28, "asset_class": "commodity"},
+    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 1,
+              "min_score": 0.20, "asset_class": "equity"},
+    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.01,
+            "min_score": 0.20, "asset_class": "crypto"},
 }
 
 def log_event(message: str, log_type: str = "info"):
@@ -352,15 +358,16 @@ def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, L
     return max(-1, min(1, composite_score)), components
 
 
-def get_signal_direction(score: float) -> SignalDirection:
-    """Determine signal direction from score with tighter thresholds"""
-    if score > 0.45:
+def get_signal_direction(score: float, min_score: float = 0.15) -> SignalDirection:
+    """Determine signal direction from score with per-instrument thresholds."""
+    strong_threshold = max(0.45, min_score + 0.20)
+    if score > strong_threshold:
         return SignalDirection.STRONG_BUY
-    elif score > 0.15:
+    elif score > min_score:
         return SignalDirection.BUY
-    elif score < -0.45:
+    elif score < -strong_threshold:
         return SignalDirection.STRONG_SELL
-    elif score < -0.15:
+    elif score < -min_score:
         return SignalDirection.SELL
     else:
         return SignalDirection.NEUTRAL
@@ -479,7 +486,33 @@ async def generate_signals() -> List[Signal]:
                 score = technical_score  # 100% technical when no news
             score = max(-1, min(1, score))
 
-            direction = get_signal_direction(score)
+            # ── Per-instrument entry threshold ──
+            min_score = info.get("min_score", 0.15)
+            direction = get_signal_direction(score, min_score=min_score)
+
+            # ── Minimum indicator agreement filter (per-instrument) ──
+            component_vals = [c.value for c in components]
+            bullish_c = sum(1 for v in component_vals if v > 0.1)
+            bearish_c = sum(1 for v in component_vals if v < -0.1)
+            # Commodities need more agreement (3), equities/crypto need less (2)
+            min_agreement = 3 if info.get("asset_class") == "commodity" else 2
+            if direction != SignalDirection.NEUTRAL and max(bullish_c, bearish_c) < min_agreement:
+                log_event(f"[SKIP] {symbol} only {max(bullish_c, bearish_c)} indicators agree (need {min_agreement})", "info")
+                direction = SignalDirection.NEUTRAL
+
+            # ── Trend-alignment filter for commodities ──
+            # Commodities (gold, silver) mean-revert — only trade with the larger trend
+            sma_50 = indicators.get("sma_50")
+            if info.get("asset_class") == "commodity" and sma_50 and direction != SignalDirection.NEUTRAL:
+                price_above_sma50 = current_price > sma_50
+                is_buy = direction in (SignalDirection.BUY, SignalDirection.STRONG_BUY)
+                # Only allow buys when price is above SMA50 (uptrend), sells when below
+                if is_buy and not price_above_sma50:
+                    log_event(f"[SKIP] {symbol} BUY rejected: price below SMA50 (counter-trend)", "info")
+                    direction = SignalDirection.NEUTRAL
+                elif not is_buy and price_above_sma50:
+                    log_event(f"[SKIP] {symbol} SELL rejected: price above SMA50 (counter-trend)", "info")
+                    direction = SignalDirection.NEUTRAL
 
             # ── Signal history tracking ──
             if symbol not in signal_history_cache:
@@ -507,11 +540,11 @@ async def generate_signals() -> List[Signal]:
             is_trending = adx_data and adx_data["adx"] > 25
 
             # Trending: wider TP (let profits run), tighter SL
-            # Ranging: tighter TP (take profit quickly), wider SL (give room)
+            # Ranging: moderate TP/SL — maintain min 1.67:1 R:R
             if is_trending:
                 sl_mult, tp_mult = 1.5, 3.5  # 1:2.3 R:R in trends
             else:
-                sl_mult, tp_mult = 2.0, 2.5  # 1:1.25 R:R in ranges
+                sl_mult, tp_mult = 1.5, 3.0  # 1:2.0 R:R in ranges
 
             if direction in [SignalDirection.BUY, SignalDirection.STRONG_BUY]:
                 stop_loss = entry_point - (atr * sl_mult)

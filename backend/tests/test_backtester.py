@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backtester import (
     run_backtest,
     calculate_signal_score,
+    get_direction,
     BacktestResult,
     BacktestTrade,
     results_to_dict,
@@ -168,15 +169,25 @@ class TestSignalScoring:
     def test_score_range(self, gold_candles):
         ind = TechnicalIndicators.calculate_all(gold_candles, period=14)
         ind["_closes"] = [c["close"] for c in gold_candles]
-        score, direction = calculate_signal_score(ind)
+        score, component_scores = calculate_signal_score(ind)
         assert -1 <= score <= 1
+        direction = get_direction(score)
         assert direction in ("STRONG_BUY", "BUY", "NEUTRAL", "SELL", "STRONG_SELL")
 
     def test_strong_buy_threshold(self):
         # Score > 0.45 should be STRONG_BUY
-        # We can't easily force a specific score, but we can check the mapping
-        from backtester import calculate_signal_score
-        # This is implicitly tested through the backtest
+        assert get_direction(0.50) == "STRONG_BUY"
+        assert get_direction(0.20) == "BUY"
+        assert get_direction(0.10) == "NEUTRAL"
+        assert get_direction(-0.20) == "SELL"
+        assert get_direction(-0.50) == "STRONG_SELL"
+
+    def test_instrument_specific_thresholds(self):
+        # Gold requires min_score=0.30 to enter
+        assert get_direction(0.25, min_score=0.30) == "NEUTRAL"
+        assert get_direction(0.35, min_score=0.30) == "BUY"
+        # BTC/US100 can enter at 0.20
+        assert get_direction(0.25, min_score=0.20) == "BUY"
 
     def test_neutral_for_flat_market(self):
         """A perfectly flat market should produce neutral signals."""
@@ -189,7 +200,7 @@ class TestSignalScoring:
         ind = TechnicalIndicators.calculate_all(candles, period=14)
         if ind:
             ind["_closes"] = [100.0] * 100
-            score, direction = calculate_signal_score(ind)
+            score, component_scores = calculate_signal_score(ind)
             # Flat market should be neutral or very weak signal
             assert abs(score) < 0.5
 
@@ -366,9 +377,10 @@ class TestIntradayBacktest:
         assert len(candles) == 48
 
     def test_intraday_backtest_runs(self):
-        """15m backtest should run and produce trades."""
-        candles = generate_sample_data("XAU", days=30, base_price=2000.0, resolution="15")
-        result = run_backtest(candles, symbol="XAU")
+        """15m backtest should run and produce signals (trades may be filtered by strict commodity rules)."""
+        # Use BTC (fewer filters) to ensure trades are generated
+        candles = generate_sample_data("BTC", days=30, base_price=95000.0, resolution="15")
+        result = run_backtest(candles, symbol="BTC")
         assert result.total_trades > 0
         assert result.total_signals > 0
         assert 0 <= result.win_rate <= 100

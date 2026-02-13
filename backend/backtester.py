@@ -141,19 +141,23 @@ def calculate_signal_score(indicators: dict) -> Tuple[float, str]:
 
     score = max(-1, min(1, composite))
 
-    # Direction
-    if score > 0.45:
-        direction = "STRONG_BUY"
-    elif score > 0.15:
-        direction = "BUY"
-    elif score < -0.45:
-        direction = "STRONG_SELL"
-    elif score < -0.15:
-        direction = "SELL"
-    else:
-        direction = "NEUTRAL"
+    # Return score and raw component scores for agreement filtering
+    return score, scores
 
-    return score, direction
+
+def get_direction(score: float, min_score: float = 0.15) -> str:
+    """Convert score to direction string using per-instrument threshold."""
+    strong_threshold = max(0.45, min_score + 0.20)
+    if score > strong_threshold:
+        return "STRONG_BUY"
+    elif score > min_score:
+        return "BUY"
+    elif score < -strong_threshold:
+        return "STRONG_SELL"
+    elif score < -min_score:
+        return "SELL"
+    else:
+        return "NEUTRAL"
 
 
 # ── Trade simulation ──
@@ -199,6 +203,16 @@ class BacktestResult:
 LOOKBACK = 60
 # Max candles to hold a position before force-closing
 MAX_HOLD_CANDLES = 20
+# Per-instrument tuning
+# min_score: higher = fewer but better trades
+# min_agreement: how many indicators must agree to enter
+# asset_class: "commodity" gets trend-alignment filter
+INSTRUMENT_CONFIG = {
+    "XAU":  {"min_score": 0.30, "min_agreement": 3, "asset_class": "commodity"},
+    "XAG":  {"min_score": 0.28, "min_agreement": 3, "asset_class": "commodity"},
+    "US100": {"min_score": 0.20, "min_agreement": 2, "asset_class": "equity"},
+    "BTC":  {"min_score": 0.20, "min_agreement": 2, "asset_class": "crypto"},
+}
 
 
 def run_backtest(
@@ -309,20 +323,48 @@ def run_backtest(
         if atr_pct > 3.0:
             continue
 
-        score, direction = calculate_signal_score(ind)
+        score, component_scores = calculate_signal_score(ind)
         total_signals += 1
+
+        # Per-instrument threshold
+        inst_config = INSTRUMENT_CONFIG.get(symbol, {})
+        min_score = inst_config.get("min_score", 0.15)
+        asset_class = inst_config.get("asset_class", "equity")
+
+        direction = get_direction(score, min_score=min_score)
 
         if direction == "NEUTRAL":
             neutral_skipped += 1
             continue
 
-        # Determine TP/SL using ATR (same as production)
+        # Minimum indicator agreement filter (per-instrument)
+        bullish_c = sum(1 for s in component_scores if s > 0.1)
+        bearish_c = sum(1 for s in component_scores if s < -0.1)
+        min_agreement = inst_config.get("min_agreement", 2)
+        if max(bullish_c, bearish_c) < min_agreement:
+            neutral_skipped += 1
+            continue
+
+        # Trend-alignment filter for commodities
+        # Only trade with the SMA50 trend direction
+        sma_50 = ind.get("sma_50")
+        if asset_class == "commodity" and sma_50:
+            price_above_sma50 = current_price > sma_50
+            is_buy = direction in ("BUY", "STRONG_BUY")
+            if is_buy and not price_above_sma50:
+                neutral_skipped += 1
+                continue
+            if not is_buy and price_above_sma50:
+                neutral_skipped += 1
+                continue
+
+        # Determine TP/SL using ATR — maintain min 1.67:1 R:R
         adx_data = ind.get("adx")
         is_trending = adx_data and adx_data["adx"] > 25
         if is_trending:
-            sl_mult, tp_mult = 1.5, 3.5
+            sl_mult, tp_mult = 1.5, 3.5  # 1:2.3 R:R
         else:
-            sl_mult, tp_mult = 2.0, 2.5
+            sl_mult, tp_mult = 1.5, 3.0  # 1:2.0 R:R
 
         if direction in ("BUY", "STRONG_BUY"):
             stop_loss = current_price - (atr * sl_mult)
