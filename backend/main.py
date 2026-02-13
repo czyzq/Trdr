@@ -816,10 +816,10 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 50):
                 timestamp = candle["timestamp"]
                 try:
                     dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    if resolution in ['1', '5', '15']:
+                    if resolution in ['1', '5', '15', '30']:
                         time_str = dt.strftime('%H:%M')
-                    elif resolution in ['30', '60']:
-                        time_str = dt.strftime('%H:00')
+                    elif resolution == '60':
+                        time_str = dt.strftime('%H:%M')
                     elif resolution == 'D':
                         time_str = dt.strftime('%m/%d')
                     else:

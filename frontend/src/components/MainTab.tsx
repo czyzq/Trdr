@@ -87,7 +87,7 @@ export const MainTab: React.FC<MainTabProps> = ({
   return (
     <div className="flex flex-col h-full p-2 md:p-4 gap-2 md:gap-3 overflow-auto">
       {/* Chart Section */}
-      <div className="flex-1 min-h-[250px] md:min-h-0 rounded-sm overflow-hidden" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
+      <div className="flex-1 min-h-[300px] md:min-h-0 rounded-sm overflow-hidden" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
         {/* Chart Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 md:px-4 py-2 md:py-2.5 gap-2 sm:gap-0" style={{ borderBottom: '1px solid #1a1f35' }}>
           <div className="flex items-center gap-2 md:gap-3 w-full sm:w-auto">

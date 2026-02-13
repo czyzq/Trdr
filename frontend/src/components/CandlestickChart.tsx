@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
 interface CandleData {
   time: string;
@@ -133,6 +133,21 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     sma: true,
     macd: true,
   });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
 
   const toggleOverlay = (key: keyof typeof overlays) => {
     setOverlays(prev => ({ ...prev, [key]: !prev[key] }));
@@ -188,9 +203,13 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const maxVolume = Math.max(...volumes);
   const priceRange = maxPrice - minPrice || 1;
 
-  // Layout
+  // Layout — responsive: use container width on mobile, 1100 on desktop
+  const isMobile = containerWidth > 0 && containerWidth < 600;
   const showMACD = overlays.macd;
-  const chartWidth = 1100;
+  // On mobile, set chart width to at least 600 for readability (scrollable)
+  const chartWidth = containerWidth > 0
+    ? Math.max(600, containerWidth)
+    : 1100;
   const macdH = showMACD ? 45 : 0;
   const volumeH = showVolume ? 35 : 0;
   const rsiH = showRSI ? 45 : 0;
@@ -207,7 +226,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     + (showMACD ? macdH + gapH : 0)
     + (showRSI ? rsiH + gapH : 0)
     + 20; // time labels
-  const rightPad = 55;
+  const rightPad = isMobile ? 45 : 55;
   const usableWidth = chartWidth - rightPad;
 
   const currentPrice = validData[validData.length - 1].close;
@@ -226,9 +245,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     priceLevels.push({ price, y: priceToY(price) });
   }
 
-  // Time labels
+  // Time labels — fewer on mobile to avoid overlap
   const timeLabels: { time: string; x: number }[] = [];
-  const maxLabels = 10;
+  const maxLabels = isMobile ? 6 : 10;
   const step = Math.max(1, Math.floor(validData.length / maxLabels));
   for (let i = 0; i < validData.length; i += step) {
     timeLabels.push({
@@ -296,6 +315,16 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     if (idx >= 0 && idx < candlesticks.length) setHoveredCandle(idx);
   };
 
+  const handleTouchMove = useCallback((event: React.TouchEvent<SVGElement>) => {
+    if (event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const chartX = (x / rect.width) * chartWidth;
+    const idx = Math.round((chartX / usableWidth) * (candlesticks.length - 1));
+    if (idx >= 0 && idx < candlesticks.length) setHoveredCandle(idx);
+  }, [chartWidth, usableWidth, candlesticks.length]);
+
   // Hovered MACD values
   const hoveredMacd = hoveredCandle !== null ? {
     macd: indicators.macd.macdLine[hoveredCandle],
@@ -304,22 +333,22 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   } : null;
 
   return (
-    <div className="h-full relative">
+    <div className="h-full relative" ref={containerRef}>
       {/* Header: Price Info + Overlay Toggles */}
-      <div className="flex items-center gap-3 mb-1 px-1">
-        <span className="text-sm font-bold" style={{ color: '#e2e8f0' }}>{symbol}</span>
-        <span className="text-sm font-bold" style={{ color: priceChange >= 0 ? '#22c55e' : '#ef4444' }}>
+      <div className="flex flex-wrap items-center gap-1 sm:gap-3 mb-1 px-1">
+        <span className="text-xs sm:text-sm font-bold" style={{ color: '#e2e8f0' }}>{symbol}</span>
+        <span className="text-xs sm:text-sm font-bold" style={{ color: priceChange >= 0 ? '#22c55e' : '#ef4444' }}>
           {currentPrice.toFixed(2)}
         </span>
-        <span className="text-[10px]" style={{ color: priceChange >= 0 ? '#22c55e' : '#ef4444' }}>
+        <span className="text-[9px] sm:text-[10px]" style={{ color: priceChange >= 0 ? '#22c55e' : '#ef4444' }}>
           {priceChangeStr}
         </span>
 
         {/* Overlay toggles */}
-        <div className="flex items-center gap-1 ml-2">
+        <div className="flex items-center gap-1 ml-1 sm:ml-2">
           <button
             onClick={() => toggleOverlay('bb')}
-            className="px-1.5 py-0.5 text-[9px] font-medium rounded-sm transition-all"
+            className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
             style={{
               color: overlays.bb ? '#a78bfa' : '#374151',
               backgroundColor: overlays.bb ? '#1a1f35' : 'transparent',
@@ -330,7 +359,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           </button>
           <button
             onClick={() => toggleOverlay('sma')}
-            className="px-1.5 py-0.5 text-[9px] font-medium rounded-sm transition-all"
+            className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
             style={{
               color: overlays.sma ? '#38bdf8' : '#374151',
               backgroundColor: overlays.sma ? '#1a1f35' : 'transparent',
@@ -341,7 +370,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           </button>
           <button
             onClick={() => toggleOverlay('macd')}
-            className="px-1.5 py-0.5 text-[9px] font-medium rounded-sm transition-all"
+            className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
             style={{
               color: overlays.macd ? '#fb923c' : '#374151',
               backgroundColor: overlays.macd ? '#1a1f35' : 'transparent',
@@ -352,33 +381,40 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           </button>
         </div>
 
-        {/* Hover info */}
+        {/* Hover info — wraps on mobile, inline on desktop */}
         {hoveredCandle !== null && candlesticks[hoveredCandle] && (
-          <div className="flex items-center gap-2 ml-auto text-[10px]" style={{ color: '#64748b' }}>
-            <span>O: {candlesticks[hoveredCandle].data.open.toFixed(2)}</span>
-            <span>H: {candlesticks[hoveredCandle].data.high.toFixed(2)}</span>
-            <span>L: {candlesticks[hoveredCandle].data.low.toFixed(2)}</span>
-            <span>C: {candlesticks[hoveredCandle].data.close.toFixed(2)}</span>
-            <span>V: {(candlesticks[hoveredCandle].data.volume / 1000).toFixed(0)}K</span>
+          <div className="flex flex-wrap items-center gap-1 sm:gap-2 ml-auto text-[9px] sm:text-[10px]" style={{ color: '#64748b' }}>
+            <span>O:{candlesticks[hoveredCandle].data.open.toFixed(2)}</span>
+            <span>H:{candlesticks[hoveredCandle].data.high.toFixed(2)}</span>
+            <span>L:{candlesticks[hoveredCandle].data.low.toFixed(2)}</span>
+            <span>C:{candlesticks[hoveredCandle].data.close.toFixed(2)}</span>
+            <span className="hidden sm:inline">V:{(candlesticks[hoveredCandle].data.volume / 1000).toFixed(0)}K</span>
             {candlesticks[hoveredCandle].rsi !== undefined && (
-              <span>RSI: {candlesticks[hoveredCandle].rsi.toFixed(1)}</span>
+              <span className="hidden sm:inline">RSI:{candlesticks[hoveredCandle].rsi.toFixed(1)}</span>
             )}
             {overlays.macd && hoveredMacd?.macd !== null && hoveredMacd?.macd !== undefined && (
-              <span style={{ color: '#fb923c' }}>MACD: {hoveredMacd.macd.toFixed(2)}</span>
+              <span className="hidden sm:inline" style={{ color: '#fb923c' }}>MACD:{hoveredMacd.macd.toFixed(2)}</span>
             )}
           </div>
         )}
       </div>
 
-      <svg
-        width="100%"
-        height={height}
-        viewBox={`0 0 ${chartWidth} ${totalH}`}
-        preserveAspectRatio="xMidYMid meet"
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoveredCandle(null)}
-        style={{ cursor: 'crosshair' }}
+      {/* Scrollable chart container for mobile */}
+      <div
+        className="overflow-x-auto"
+        style={{ WebkitOverflowScrolling: 'touch' }}
       >
+        <svg
+          width={isMobile ? chartWidth : '100%'}
+          height={height}
+          viewBox={`0 0 ${chartWidth} ${totalH}`}
+          preserveAspectRatio="xMidYMid meet"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setHoveredCandle(null)}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={() => setHoveredCandle(null)}
+          style={{ cursor: 'crosshair', minWidth: isMobile ? `${chartWidth}px` : undefined }}
+        >
         {/* ── Price Chart Grid ── */}
         <g stroke="#131825" strokeWidth="1">
           {priceLevels.map((l, i) => (
@@ -602,7 +638,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             <text key={`t-${i}`} x={l.x} y={totalH - 2} textAnchor="middle">{l.time}</text>
           ))}
         </g>
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 };
