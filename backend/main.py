@@ -802,61 +802,58 @@ async def get_quote(symbol: str):
 
 @app.get("/api/chart/{symbol}")
 async def get_chart_data(symbol: str, resolution: str = "60", count: int = 50):
-    """Get historical chart data for a symbol"""
+    """Get historical chart data for a symbol. Returns real data only (never synthetic)."""
     global alpha_client
     if alpha_client is None:
         alpha_client = get_alpha_vantage_client()
 
-    try:
-        candles = alpha_client.get_candles(symbol, resolution, count)
-
-        if candles and len(candles) > 0:
-            chart_data = []
-            for candle in candles:
-                timestamp = candle["timestamp"]
+    def _format_candles(candles):
+        chart_data = []
+        for candle in candles:
+            timestamp = candle.get("timestamp", "")
+            time_str = candle.get("time", "")
+            if not time_str and timestamp:
                 try:
                     dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    if resolution in ['1', '5', '15', '30']:
-                        time_str = dt.strftime('%H:%M')
-                    elif resolution == '60':
-                        time_str = dt.strftime('%H:%M')
-                    elif resolution == 'D':
-                        time_str = dt.strftime('%m/%d')
-                    else:
-                        time_str = dt.strftime('%H:%M')
+                    time_str = dt.strftime('%m/%d') if resolution == 'D' else dt.strftime('%H:%M')
                 except Exception:
                     time_str = timestamp[:5] if len(timestamp) >= 5 else timestamp
+            chart_data.append({
+                "time": time_str,
+                "close": round(candle["close"], 2),
+                "open": round(candle["open"], 2),
+                "high": round(candle["high"], 2),
+                "low": round(candle["low"], 2),
+                "volume": candle.get("volume", 0)
+            })
+        return chart_data
 
-                chart_data.append({
-                    "time": time_str,
-                    "close": round(candle["close"], 2),
-                    "open": round(candle["open"], 2),
-                    "high": round(candle["high"], 2),
-                    "low": round(candle["low"], 2),
-                    "volume": candle["volume"]
-                })
-
-            return {"symbol": symbol, "data": chart_data, "resolution": resolution, "count": len(chart_data), "source": "alpha_vantage"}
-        else:
-            candles = data_provider.get_candles(symbol, resolution, count)
-
-            if candles:
-                chart_data = [{
-                    "time": c["time"],
-                    "close": round(c["close"], 2),
-                    "open": round(c["open"], 2),
-                    "high": round(c["high"], 2),
-                    "low": round(c["low"], 2),
-                    "volume": c["volume"]
-                } for c in candles]
-
-                return {"symbol": symbol, "data": chart_data, "resolution": resolution, "count": len(chart_data), "source": "realistic_feeder"}
-            else:
-                return {"error": f"No chart data available for {symbol}"}
-
+    # Try live Alpha Vantage data
+    try:
+        candles = alpha_client.get_candles(symbol, resolution, count)
+        if candles and len(candles) > 0:
+            chart_data = _format_candles(candles)
+            fetched_at = datetime.utcnow().isoformat()
+            # Cache to DB for future fallback
+            db.save_candles(symbol, resolution, chart_data, "alpha_vantage")
+            return {
+                "symbol": symbol, "data": chart_data, "resolution": resolution,
+                "count": len(chart_data), "source": "alpha_vantage",
+                "fetched_at": fetched_at,
+            }
     except Exception as e:
-        log_event(f"Error fetching chart data for {symbol}: {e}", "error")
-        return {"error": f"Failed to fetch chart data for {symbol}"}
+        log_event(f"Alpha Vantage chart fetch failed for {symbol}: {e}", "warning")
+
+    # Fallback: load last cached real data from DB
+    cached = db.load_candles(symbol, resolution)
+    if cached and cached.get("candles"):
+        return {
+            "symbol": symbol, "data": cached["candles"], "resolution": resolution,
+            "count": len(cached["candles"]), "source": "cache",
+            "fetched_at": cached["fetched_at"],
+        }
+
+    return {"error": f"No real data available for {symbol}. Check API key or try again later."}
 
 # Alert Endpoints
 @app.get("/api/alerts/config")

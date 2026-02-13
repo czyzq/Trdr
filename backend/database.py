@@ -1,6 +1,6 @@
 """
 MongoDB persistence layer for CFD Trading Bot.
-Collections: account, trades, signal_cache
+Collections: account, trades, signal_cache, candle_cache, quote_cache
 Falls back to in-memory if MONGO_URI is not set.
 """
 import os
@@ -146,3 +146,70 @@ def save_signal_cache_db(cache: dict):
 def is_connected() -> bool:
     """Check if MongoDB is available."""
     return get_db() is not None
+
+
+# ── Candle / Quote Cache ────────────────────────────────────────────
+# Persists real market data so the app can show the last-known prices
+# even when the API is temporarily unavailable.
+
+_candle_mem_cache: dict = {}
+_quote_mem_cache: dict = {}
+
+
+def save_candles(symbol: str, resolution: str, candles: list, source: str):
+    """Cache fetched candle data (DB or in-memory)."""
+    doc = {
+        "symbol": symbol,
+        "resolution": resolution,
+        "candles": candles,
+        "source": source,
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
+    db = get_db()
+    if db is not None:
+        db.candle_cache.replace_one(
+            {"symbol": symbol, "resolution": resolution},
+            {**doc, "_id": f"{symbol}_{resolution}"},
+            upsert=True,
+        )
+    _candle_mem_cache[f"{symbol}_{resolution}"] = doc
+
+
+def load_candles(symbol: str, resolution: str) -> Optional[dict]:
+    """Load cached candle data. Returns dict with candles, source, fetched_at or None."""
+    db = get_db()
+    if db is not None:
+        doc = db.candle_cache.find_one({"symbol": symbol, "resolution": resolution})
+        if doc:
+            doc.pop("_id", None)
+            return doc
+    cached = _candle_mem_cache.get(f"{symbol}_{resolution}")
+    return cached
+
+
+def save_quote(symbol: str, quote: dict):
+    """Cache a price quote (DB or in-memory)."""
+    doc = {
+        "symbol": symbol,
+        "quote": quote,
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
+    db = get_db()
+    if db is not None:
+        db.quote_cache.replace_one(
+            {"symbol": symbol},
+            {**doc, "_id": f"quote_{symbol}"},
+            upsert=True,
+        )
+    _quote_mem_cache[symbol] = doc
+
+
+def load_quote(symbol: str) -> Optional[dict]:
+    """Load cached quote. Returns dict with quote, fetched_at or None."""
+    db = get_db()
+    if db is not None:
+        doc = db.quote_cache.find_one({"symbol": symbol})
+        if doc:
+            doc.pop("_id", None)
+            return doc
+    return _quote_mem_cache.get(symbol)

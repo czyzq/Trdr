@@ -111,11 +111,35 @@ export const MainTab: React.FC<MainTabProps> = ({
             <span className="text-[10px] hidden sm:inline" style={{ color: '#4a5568' }}>
               {currentInstrument?.name}
             </span>
-            {chartData && !chartData.error && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded-sm" style={{ backgroundColor: '#1a1f35', color: '#64748b' }}>
-                {chartData.source === 'alpha_vantage' ? 'LIVE' : 'SIM'}
-              </span>
-            )}
+            {chartData && !chartData.error && (() => {
+              const isLive = chartData.source === 'alpha_vantage';
+              const isCache = chartData.source === 'cache';
+              const fetchedAt = chartData.fetched_at ? new Date(chartData.fetched_at + 'Z') : null;
+              const ageMs = fetchedAt ? Date.now() - fetchedAt.getTime() : Infinity;
+              const isStale = ageMs > 5 * 60 * 1000; // > 5 minutes
+              const ageStr = fetchedAt
+                ? ageMs < 60000 ? `${Math.floor(ageMs / 1000)}s ago`
+                : ageMs < 3600000 ? `${Math.floor(ageMs / 60000)}m ago`
+                : `${Math.floor(ageMs / 3600000)}h ago`
+                : '';
+
+              return (
+                <div className="flex items-center gap-1">
+                  <div
+                    className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: isStale ? '#ef4444' : '#22c55e' }}
+                    title={isStale ? 'Data is stale (>5 min old)' : 'Data is fresh'}
+                  />
+                  <span className="text-[9px] px-1 py-0.5 rounded-sm" style={{
+                    backgroundColor: '#1a1f35',
+                    color: isStale ? '#ef4444' : '#64748b',
+                  }}>
+                    {isLive ? 'LIVE' : isCache ? 'CACHED' : chartData.source?.toUpperCase()}
+                    {ageStr ? ` ${ageStr}` : ''}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Timeframe Selector */}

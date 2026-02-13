@@ -16,6 +16,7 @@ interface ChartResponse {
   resolution: string;
   count: number;
   source: string;
+  fetched_at?: string;
 }
 
 const instruments = [
@@ -114,11 +115,32 @@ export const ChartsTab: React.FC = () => {
                   <span className="text-[11px] font-bold" style={{ color: '#e2e8f0' }}>{instrument.symbol}</span>
                   <span className="text-[10px]" style={{ color: '#4a5568' }}>{instrument.name}</span>
                 </div>
-                {chartData && (
-                  <span className="text-[9px]" style={{ color: '#374151' }}>
-                    {chartData.source === 'alpha_vantage' ? 'LIVE' : 'SIM'} | {chartData.count} pts
-                  </span>
-                )}
+                {chartData && (() => {
+                  const isLive = chartData.source === 'alpha_vantage';
+                  const fetchedAt = chartData.fetched_at ? new Date(chartData.fetched_at + 'Z') : null;
+                  const ageMs = fetchedAt ? Date.now() - fetchedAt.getTime() : Infinity;
+                  const isStale = ageMs > 5 * 60 * 1000;
+                  const ageStr = fetchedAt
+                    ? ageMs < 60000 ? `${Math.floor(ageMs / 1000)}s ago`
+                    : ageMs < 3600000 ? `${Math.floor(ageMs / 60000)}m ago`
+                    : `${Math.floor(ageMs / 3600000)}h ago`
+                    : '';
+                  return (
+                    <div className="flex items-center gap-1">
+                      <div
+                        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: isStale ? '#ef4444' : '#22c55e' }}
+                        title={isStale ? 'Data is stale (>5 min old)' : 'Data is fresh'}
+                      />
+                      <span className="text-[9px] px-1 py-0.5 rounded-sm" style={{
+                        backgroundColor: '#1a1f35',
+                        color: isStale ? '#ef4444' : '#64748b',
+                      }}>
+                        {isLive ? 'LIVE' : 'CACHED'} {ageStr}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
               <div className="p-1 md:p-2">
                 {chartData && chartData.data.length > 0 ? (

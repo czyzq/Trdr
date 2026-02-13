@@ -241,6 +241,27 @@ def fetch_alpha_vantage_historical(
     return None
 
 
+def fetch_from_db_cache(
+    symbol: str,
+    resolution: str = "D",
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Load previously cached real candle data from MongoDB.
+    This uses data that was fetched and saved by the running app.
+    """
+    try:
+        import database as db
+        cached = db.load_candles(symbol, resolution)
+        if cached and cached.get("candles"):
+            candles = cached["candles"]
+            print(f"[HistoricalData] Loaded {len(candles)} cached candles from DB "
+                  f"(source: {cached.get('source', '?')}, fetched: {cached.get('fetched_at', '?')})")
+            return candles
+    except Exception as e:
+        print(f"[HistoricalData] DB cache load failed for {symbol}: {e}")
+    return None
+
+
 def generate_sample_data(
     symbol: str = "XAU",
     days: int = 200,

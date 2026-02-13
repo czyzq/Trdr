@@ -6,15 +6,16 @@ production, simulates trades with TP/SL, and reports performance metrics.
 
 Usage:
     # From the backend directory:
-    python backtester.py                          # Quick run with sample data
     python backtester.py --symbol XAU --days 365  # Fetch Yahoo Finance data
     python backtester.py --csv data/gold_2024.csv --symbol XAU
     python backtester.py --all --days 180         # All instruments
+    python backtester.py --sample                 # Use synthetic data (testing only)
 
 Data sources (in priority order):
     1. --csv <file>          CSV file (Yahoo Finance download format)
-    2. --symbol + --days     Fetch from Yahoo Finance API
-    3. (default)             Built-in sample data generator
+    2. Yahoo Finance API     Automatic when no --csv given
+    3. Alpha Vantage API     Fallback if Yahoo fails
+    4. --sample              Synthetic data (only for unit tests, not real analysis)
 """
 
 import argparse
@@ -498,7 +499,7 @@ def main():
 
     from historical_data import (
         fetch_yahoo_historical, fetch_alpha_vantage_historical,
-        load_csv_candles, generate_sample_data,
+        fetch_from_db_cache, load_csv_candles, generate_sample_data,
     )
 
     symbols = ["XAU", "XAG", "US100", "BTC"] if args.all else [args.symbol]
@@ -511,7 +512,7 @@ def main():
 
         candles = None
 
-        # Priority: CSV > Yahoo > Alpha Vantage > Sample
+        # Priority: CSV > Yahoo > Alpha Vantage (real data only)
         if args.csv:
             from historical_data import PRICE_MULTIPLIERS
             mult = PRICE_MULTIPLIERS.get(symbol, 1.0)
@@ -536,9 +537,14 @@ def main():
                 if candles:
                     print(f"  Fetched {len(candles)} candles from Alpha Vantage")
                 else:
-                    print(f"  API fetch failed, falling back to sample data")
+                    print(f"  Alpha Vantage failed, trying DB cache...")
+                    candles = fetch_from_db_cache(symbol, args.resolution)
+                    if not candles:
+                        print(f"  ERROR: No real data available for {symbol}.")
+                        print(f"  Use --csv <file> to provide data, or --sample for synthetic test data.")
+                        continue
 
-        if candles is None:
+        if candles is None and args.sample:
             base_prices = {"XAU": 2000.0, "XAG": 23.0, "US100": 17500.0, "BTC": 95000.0}
             sample_days = max(args.days, 300) if args.resolution == "D" else max(args.days, 30)
             candles = generate_sample_data(
@@ -546,7 +552,7 @@ def main():
                 base_price=base_prices.get(symbol, 1000),
                 resolution=args.resolution,
             )
-            print(f"  Generated {len(candles)} sample candles ({args.resolution} interval)")
+            print(f"  WARNING: Using synthetic sample data ({len(candles)} candles) — not real market data")
 
         try:
             result = run_backtest(candles, symbol=symbol, verbose=args.verbose)

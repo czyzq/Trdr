@@ -1,6 +1,7 @@
 """
 Simulated broker for paper trading.
-Implements Broker + DataProvider interfaces using synthetic/Alpha Vantage data.
+Implements Broker + DataProvider interfaces using Alpha Vantage data
+with DB-cached fallback (never synthetic/fake data).
 All positions and account state are managed in-memory + MongoDB.
 """
 import uuid
@@ -9,7 +10,6 @@ from typing import Dict, List, Optional, Any
 
 import database as db
 from broker import Broker, DataProvider
-from realistic_prices import get_feeder as get_price_feeder
 from alpha_vantage import get_client as get_alpha_client
 
 PLN_USD_RATE = 4.05
@@ -25,36 +25,41 @@ INSTRUMENTS = {
 
 class SimulatedDataProvider(DataProvider):
     """
-    Data provider that tries Alpha Vantage first, falls back to synthetic prices.
+    Data provider: Alpha Vantage for live data, DB cache as fallback.
+    Never returns synthetic/generated prices.
     """
 
     def __init__(self):
-        self._price_feeder = get_price_feeder()
         self._alpha = get_alpha_client()
 
     def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
-        # Try Alpha Vantage
         try:
             q = self._alpha.get_quote(symbol)
             if q and q.get("price"):
+                db.save_quote(symbol, q)
                 return q
         except Exception:
             pass
-        # Fallback to synthetic
-        return self._price_feeder.get_quote(symbol)
+        # Return last real quote from DB cache
+        cached = db.load_quote(symbol)
+        if cached and cached.get("quote"):
+            return cached["quote"]
+        return None
 
     def get_candles(
         self, symbol: str, resolution: str = "60", count: int = 100
     ) -> Optional[List[Dict[str, Any]]]:
-        # Try Alpha Vantage
         try:
             candles = self._alpha.get_candles(symbol, resolution, count)
             if candles and len(candles) > 0:
                 return candles
         except Exception:
             pass
-        # Fallback to synthetic
-        return self._price_feeder.get_candles(symbol, resolution, count)
+        # Return last real candles from DB cache
+        cached = db.load_candles(symbol, resolution)
+        if cached and cached.get("candles"):
+            return cached["candles"]
+        return None
 
 
 class SimulatedBroker(Broker):
