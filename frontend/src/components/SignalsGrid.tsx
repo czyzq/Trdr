@@ -22,11 +22,14 @@ interface SignalsGridProps {
   onSignalClick?: (signal: Signal) => void;
 }
 
+// All known instruments — rows always appear even without signal data
+const ALL_INSTRUMENTS = ['XAU', 'XAG', 'US100', 'BTC'];
+
 const defaultSignals: Signal[] = [
-  { id: '1', symbol: 'XAU', score: 0.45, direction: 'buy', entry_point: 2050.00, take_profit: 2065.00, stop_loss: 2035.00, trend: [0.30, 0.35, 0.40, 0.42, 0.45], confidence: 0.72, risk_reward_ratio: 1.5 },
-  { id: '2', symbol: 'XAG', score: 0.62, direction: 'buy', entry_point: 32.50, take_profit: 33.75, stop_loss: 31.25, trend: [0.40, 0.48, 0.55, 0.60, 0.62], confidence: 0.78, risk_reward_ratio: 2.0 },
-  { id: '3', symbol: 'US100', score: -0.35, direction: 'sell', entry_point: 19500.00, take_profit: 19250.00, stop_loss: 19750.00, trend: [0.10, -0.05, -0.15, -0.25, -0.35], confidence: 0.68, risk_reward_ratio: 1.67 },
-  { id: '4', symbol: 'BTC', score: 0.55, direction: 'buy', entry_point: 97250.00, take_profit: 98500.00, stop_loss: 96000.00, trend: [0.35, 0.42, 0.48, 0.52, 0.55], confidence: 0.71, risk_reward_ratio: 1.5 },
+  { id: '1', symbol: 'XAU', score: 0, direction: 'neutral', confidence: 0, trend: [] },
+  { id: '2', symbol: 'XAG', score: 0, direction: 'neutral', confidence: 0, trend: [] },
+  { id: '3', symbol: 'US100', score: 0, direction: 'neutral', confidence: 0, trend: [] },
+  { id: '4', symbol: 'BTC', score: 0, direction: 'neutral', confidence: 0, trend: [] },
 ];
 
 const MiniSparkline: React.FC<{ data: number[] }> = ({ data }) => {
@@ -66,25 +69,29 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
         const response = await fetch('/api/signals');
         if (response.ok) {
           const data = await response.json();
-          if (data.signals && data.signals.length > 0) {
-            const transformedSignals = data.signals.map((sig: any, idx: number) => ({
-              id: `${idx}`,
-              symbol: sig.symbol,
-              score: sig.score,
-              direction: sig.direction.toLowerCase().includes('buy') ? 'buy' : sig.direction.toLowerCase().includes('sell') ? 'sell' : 'neutral',
-              entry_point: sig.entry_point || sig.current_price,
-              current_price: sig.current_price,
-              take_profit: sig.take_profit,
-              stop_loss: sig.stop_loss,
-              confidence: sig.confidence,
-              risk_reward_ratio: sig.risk_reward_ratio,
-              technical_score: sig.technical_score,
-              news_score: sig.news_score,
-              components: sig.components,
-              trend: [sig.score * 0.5, sig.score * 0.6, sig.score * 0.7, sig.score * 0.8, sig.score * 0.9, sig.score],
-            }));
-            setSignals(transformedSignals);
-          }
+          const fetchedSignals: Signal[] = (data.signals || []).map((sig: any, idx: number) => ({
+            id: `${idx}`,
+            symbol: sig.symbol,
+            score: sig.score,
+            direction: sig.direction.toLowerCase().includes('buy') ? 'buy' : sig.direction.toLowerCase().includes('sell') ? 'sell' : 'neutral',
+            entry_point: sig.entry_point || sig.current_price,
+            current_price: sig.current_price,
+            take_profit: sig.take_profit,
+            stop_loss: sig.stop_loss,
+            confidence: sig.confidence,
+            risk_reward_ratio: sig.risk_reward_ratio,
+            technical_score: sig.technical_score,
+            news_score: sig.news_score,
+            components: sig.components,
+            trend: [sig.score * 0.5, sig.score * 0.6, sig.score * 0.7, sig.score * 0.8, sig.score * 0.9, sig.score],
+          }));
+
+          // Ensure all instruments have a row, even if no signal was returned
+          const signalMap = new Map(fetchedSignals.map(s => [s.symbol, s]));
+          const mergedSignals = ALL_INSTRUMENTS.map((sym, idx) =>
+            signalMap.get(sym) || { id: `default-${idx}`, symbol: sym, score: 0, direction: 'neutral', confidence: 0, trend: [] }
+          );
+          setSignals(mergedSignals);
         }
       } catch (error) {
         console.error('Failed to fetch signals:', error);

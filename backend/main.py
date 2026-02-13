@@ -476,18 +476,44 @@ async def generate_signals() -> List[Signal]:
             quote = data_provider.get_quote(symbol)
             if not quote:
                 log_event(f"Failed to generate price for {symbol}", "error")
+                # Emit a neutral placeholder so the instrument always appears in the grid
+                signals.append(Signal(
+                    symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
+                    confidence=0.0, technical_score=0.0, price_action_score=0.0,
+                    news_score=0.0, components=[], current_price=0.0,
+                    time_horizon="1h", entry_point=0.0, take_profit=0.0,
+                    stop_loss=0.0, risk_reward_ratio=0.0,
+                ))
+                signals_cache[symbol] = signals[-1]
                 continue
 
             current_price = quote["price"]
 
             candles = data_provider.get_candles(symbol, resolution="60", count=100)
-            if not candles or len(candles) < 50:
-                log_event(f"Insufficient candle data for {symbol} ({len(candles) if candles else 0} bars)", "error")
+            if not candles or len(candles) < 20:
+                log_event(f"Insufficient candle data for {symbol} ({len(candles) if candles else 0} bars, need 20+)", "warning")
+                # Emit a neutral signal with the price so the row still appears
+                signals.append(Signal(
+                    symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
+                    confidence=0.0, technical_score=0.0, price_action_score=0.0,
+                    news_score=0.0, components=[], current_price=current_price,
+                    time_horizon="1h", entry_point=current_price, take_profit=0.0,
+                    stop_loss=0.0, risk_reward_ratio=0.0,
+                ))
+                signals_cache[symbol] = signals[-1]
                 continue
 
             indicators = TechnicalIndicators.calculate_all(candles, period=14)
             if not indicators:
                 log_event(f"Failed to calculate indicators for {symbol}", "warning")
+                signals.append(Signal(
+                    symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
+                    confidence=0.0, technical_score=0.0, price_action_score=0.0,
+                    news_score=0.0, components=[], current_price=current_price,
+                    time_horizon="1h", entry_point=current_price, take_profit=0.0,
+                    stop_loss=0.0, risk_reward_ratio=0.0,
+                ))
+                signals_cache[symbol] = signals[-1]
                 continue
 
             indicators["_closes"] = [c["close"] for c in candles]
@@ -496,7 +522,7 @@ async def generate_signals() -> List[Signal]:
             htf_bias = 0.0  # -1 to +1 bias from higher timeframe
             try:
                 htf_candles = data_provider.get_candles(symbol, resolution="D", count=60)
-                if htf_candles and len(htf_candles) >= 50:
+                if htf_candles and len(htf_candles) >= 20:
                     htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
                     if htf_ind:
                         htf_sma20 = htf_ind.get("sma_20")
