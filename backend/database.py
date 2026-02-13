@@ -1,11 +1,12 @@
 """
 MongoDB persistence layer for CFD Trading Bot.
-Collections: account, trades, signal_cache, candle_cache, quote_cache
+Collections: account, trades, signal_cache, candle_cache, quote_cache, candles, event_log
 Falls back to in-memory if MONGO_URI is not set.
 """
 import os
+from collections import OrderedDict
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 _db = None
 _connected = False
@@ -221,6 +222,230 @@ def load_quote(symbol: str) -> Optional[dict]:
             doc.pop("_id", None)
             return doc
     return _quote_mem_cache.get(symbol)
+
+
+# ── Candle History (accumulating time-series) ──────────────────────
+# Stores individual candles as documents, never overwrites.
+# Key: (symbol, resolution, timestamp) — upserts to avoid duplicates.
+# This builds a growing historical dataset for backtesting.
+
+_candle_history_mem: dict = {}  # In-memory fallback: {symbol_resolution: [candles]}
+
+
+def store_candles(symbol: str, resolution: str, candles: list, source: str = ""):
+    """
+    Accumulate candles into persistent history.
+    Each candle is stored as its own document keyed by (symbol, resolution, timestamp).
+    Existing candles are updated (upsert), new ones are inserted — no data lost.
+    """
+    if not candles:
+        return
+
+    db = get_db()
+    if db is not None:
+        from pymongo import UpdateOne
+        ops = []
+        for c in candles:
+            ts = c.get("timestamp", "")
+            if not ts:
+                continue
+            doc = {
+                "symbol": symbol,
+                "resolution": resolution,
+                "timestamp": ts,
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "volume": c.get("volume", 0),
+                "source": source,
+            }
+            ops.append(UpdateOne(
+                {"symbol": symbol, "resolution": resolution, "timestamp": ts},
+                {"$set": doc},
+                upsert=True,
+            ))
+        if ops:
+            db.candles.bulk_write(ops, ordered=False)
+    else:
+        # In-memory fallback
+        key = f"{symbol}_{resolution}"
+        existing = {c.get("timestamp"): c for c in _candle_history_mem.get(key, [])}
+        for c in candles:
+            ts = c.get("timestamp", "")
+            if ts:
+                existing[ts] = c
+        _candle_history_mem[key] = sorted(existing.values(), key=lambda x: x.get("timestamp", ""))
+
+
+def load_candle_history(
+    symbol: str,
+    resolution: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    limit: int = 0,
+) -> list:
+    """
+    Load accumulated candle history from DB.
+    Optional time range filter (ISO timestamps).
+    Returns candles sorted oldest-first (chronological).
+    """
+    db = get_db()
+    if db is not None:
+        query: dict = {"symbol": symbol, "resolution": resolution}
+        if start or end:
+            ts_filter: dict = {}
+            if start:
+                ts_filter["$gte"] = start
+            if end:
+                ts_filter["$lte"] = end
+            query["timestamp"] = ts_filter
+
+        cursor = db.candles.find(query).sort("timestamp", 1)
+        if limit > 0:
+            cursor = cursor.limit(limit)
+        docs = list(cursor)
+        for doc in docs:
+            doc.pop("_id", None)
+        return docs
+
+    # In-memory fallback
+    key = f"{symbol}_{resolution}"
+    all_candles = _candle_history_mem.get(key, [])
+    if start:
+        all_candles = [c for c in all_candles if c.get("timestamp", "") >= start]
+    if end:
+        all_candles = [c for c in all_candles if c.get("timestamp", "") <= end]
+    if limit > 0:
+        all_candles = all_candles[-limit:]
+    return all_candles
+
+
+def count_candles(symbol: str, resolution: str) -> int:
+    """Count stored candles for a symbol/resolution pair."""
+    db = get_db()
+    if db is not None:
+        return db.candles.count_documents({"symbol": symbol, "resolution": resolution})
+    key = f"{symbol}_{resolution}"
+    return len(_candle_history_mem.get(key, []))
+
+
+def get_candle_date_range(symbol: str, resolution: str) -> Optional[dict]:
+    """Get the earliest and latest timestamp for stored candles."""
+    db = get_db()
+    if db is not None:
+        query = {"symbol": symbol, "resolution": resolution}
+        first = db.candles.find_one(query, sort=[("timestamp", 1)])
+        last = db.candles.find_one(query, sort=[("timestamp", -1)])
+        if first and last:
+            return {"first": first["timestamp"], "last": last["timestamp"]}
+        return None
+    key = f"{symbol}_{resolution}"
+    candles = _candle_history_mem.get(key, [])
+    if candles:
+        return {"first": candles[0].get("timestamp", ""), "last": candles[-1].get("timestamp", "")}
+    return None
+
+
+def ensure_candle_indexes():
+    """Create indexes on the candles collection for fast queries."""
+    db = get_db()
+    if db is None:
+        return
+    db.candles.create_index(
+        [("symbol", 1), ("resolution", 1), ("timestamp", 1)],
+        unique=True,
+        background=True,
+    )
+    db.candles.create_index(
+        [("symbol", 1), ("resolution", 1)],
+        background=True,
+    )
+
+
+# ── Candle Aggregation ────────────────────────────────────────────
+# Build larger interval candles from smaller stored ones.
+
+AGGREGATION_MAP = {
+    "5": ("1", 5),
+    "15": ("5", 3),    # or ("1", 15)
+    "30": ("15", 2),   # or ("5", 6)
+    "60": ("30", 2),   # or ("15", 4)
+    "240": ("60", 4),  # 4H from 1H
+    "D": ("60", None), # daily from hourly — group by date
+}
+
+
+def aggregate_candles(candles: list, target_resolution: str) -> list:
+    """
+    Aggregate smaller-interval candles into larger ones.
+    For "D" (daily): groups by date.
+    For numeric resolutions: groups every N candles.
+    """
+    if not candles:
+        return []
+
+    if target_resolution == "D":
+        # Group by date
+        days: OrderedDict = OrderedDict()
+        for c in candles:
+            ts = c.get("timestamp", "")
+            date_key = ts.split("T")[0] if "T" in ts else ""
+            if not date_key:
+                continue
+            if date_key not in days:
+                days[date_key] = {
+                    "timestamp": date_key + "T00:00:00",
+                    "time": datetime.fromisoformat(date_key).strftime("%m/%d") if len(date_key) == 10 else date_key,
+                    "open": c["open"],
+                    "high": c["high"],
+                    "low": c["low"],
+                    "close": c["close"],
+                    "volume": c.get("volume", 0),
+                }
+            else:
+                day = days[date_key]
+                day["high"] = max(day["high"], c["high"])
+                day["low"] = min(day["low"], c["low"])
+                day["close"] = c["close"]
+                day["volume"] += c.get("volume", 0)
+        return list(days.values())
+
+    # Numeric grouping
+    try:
+        n = int(target_resolution)
+    except ValueError:
+        return candles
+
+    # Determine source interval from first two timestamps
+    if len(candles) >= 2:
+        t0 = candles[0].get("timestamp", "")
+        t1 = candles[1].get("timestamp", "")
+        try:
+            dt0 = datetime.fromisoformat(t0)
+            dt1 = datetime.fromisoformat(t1)
+            src_minutes = max(1, int((dt1 - dt0).total_seconds() / 60))
+        except (ValueError, TypeError):
+            src_minutes = 1
+    else:
+        src_minutes = 1
+
+    group_size = max(1, n // src_minutes)
+    result = []
+    for i in range(0, len(candles), group_size):
+        group = candles[i:i + group_size]
+        if not group:
+            continue
+        result.append({
+            "timestamp": group[0].get("timestamp", ""),
+            "time": group[0].get("time", ""),
+            "open": group[0]["open"],
+            "high": max(c["high"] for c in group),
+            "low": min(c["low"] for c in group),
+            "close": group[-1]["close"],
+            "volume": sum(c.get("volume", 0) for c in group),
+        })
+    return result
 
 
 # ── Event Log ──────────────────────────────────────────────────────

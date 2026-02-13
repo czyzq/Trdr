@@ -436,6 +436,96 @@ class TestMultiTimeframe:
         assert result.total_candles == len(candles_60m)
 
 
+# ── Candle accumulation & aggregation tests ──
+
+class TestCandleAggregation:
+    """Tests for the candle aggregation pipeline in database.py."""
+
+    def test_aggregate_60m_from_15m(self):
+        """Build 1H candles from 15m candles."""
+        from database import aggregate_candles
+        candles_15m = generate_sample_data("XAU", days=5, base_price=2000.0, resolution="15")
+        result = aggregate_candles(candles_15m, "60")
+        # 15m → 60m: ~4x fewer candles
+        assert len(result) > 0
+        assert len(result) < len(candles_15m)
+        # Each aggregated candle should have valid OHLCV
+        for c in result:
+            assert c["high"] >= c["low"]
+            assert c["open"] > 0
+            assert c["close"] > 0
+
+    def test_aggregate_daily_from_60m(self):
+        """Build daily candles from 1H candles."""
+        from database import aggregate_candles
+        candles_60m = generate_sample_data("XAU", days=10, base_price=2000.0, resolution="60")
+        daily = aggregate_candles(candles_60m, "D")
+        assert len(daily) > 0
+        # Should have fewer bars than 60m
+        assert len(daily) < len(candles_60m)
+        # Daily open should match first 60m open of that day
+        first_date = daily[0]["timestamp"].split("T")[0]
+        first_60m = [c for c in candles_60m if c["timestamp"].startswith(first_date)]
+        assert daily[0]["open"] == first_60m[0]["open"]
+        # Daily close should match last 60m close of that day
+        assert daily[0]["close"] == first_60m[-1]["close"]
+
+    def test_aggregate_preserves_high_low(self):
+        """Aggregated high/low must match extremes of source candles."""
+        from database import aggregate_candles
+        candles_15m = generate_sample_data("BTC", days=3, base_price=95000.0, resolution="15")
+        hourly = aggregate_candles(candles_15m, "60")
+        # Check that hourly high >= all source highs in that group
+        for h_candle in hourly[:3]:
+            ts = h_candle["timestamp"]
+            # Find source candles that contributed to this bar (same hour)
+            hour_str = ts[:13]  # "YYYY-MM-DDTHH"
+            sources = [c for c in candles_15m if c["timestamp"].startswith(hour_str)]
+            if sources:
+                assert h_candle["high"] >= max(c["high"] for c in sources) - 0.01
+                assert h_candle["low"] <= min(c["low"] for c in sources) + 0.01
+
+    def test_aggregate_volume_sums(self):
+        """Aggregated volume should be the sum of source candle volumes."""
+        from database import aggregate_candles
+        candles_5m = generate_sample_data("US100", days=2, base_price=17500.0, resolution="5")
+        hourly = aggregate_candles(candles_5m, "60")
+        # Total volume should be preserved
+        total_5m_vol = sum(c.get("volume", 0) for c in candles_5m)
+        total_hourly_vol = sum(c.get("volume", 0) for c in hourly)
+        assert total_hourly_vol == total_5m_vol
+
+    def test_store_and_load_candles_in_memory(self):
+        """Test in-memory candle accumulation (no MongoDB)."""
+        from database import store_candles, load_candle_history, count_candles, _candle_history_mem
+        # Clear any existing state
+        _candle_history_mem.clear()
+
+        # BTC trades 24h so we get many candles per day
+        candles = generate_sample_data("BTC", days=10, base_price=95000.0, resolution="60")
+        assert len(candles) >= 100, f"Expected 100+ candles, got {len(candles)}"
+
+        batch1 = candles[:50]
+        store_candles("BTC", "60", batch1, source="test")
+        assert count_candles("BTC", "60") == 50
+
+        # Store overlapping + new candles
+        batch2 = candles[40:80]
+        store_candles("BTC", "60", batch2, source="test")
+        # Should have 80 unique candles (50 original + 30 new, 10 overlap deduped)
+        assert count_candles("BTC", "60") == 80
+
+        # Load and verify order
+        loaded = load_candle_history("BTC", "60")
+        assert len(loaded) == 80
+        # Should be chronological
+        for i in range(1, len(loaded)):
+            assert loaded[i]["timestamp"] >= loaded[i-1]["timestamp"]
+
+        # Clean up
+        _candle_history_mem.clear()
+
+
 # ── CSV loader tests ──
 
 class TestIntradayBacktest:

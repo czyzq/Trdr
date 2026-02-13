@@ -1,8 +1,9 @@
 """
 Simulated broker for paper trading.
-Implements Broker + DataProvider interfaces using Alpha Vantage data
+Implements Broker + DataProvider interfaces using Alpha Vantage + Yahoo Finance
 with DB-cached fallback (never synthetic/fake data).
 All positions and account state are managed in-memory + MongoDB.
+All fetched candles are accumulated in DB for backtesting.
 """
 import uuid
 from datetime import datetime
@@ -11,6 +12,7 @@ from typing import Dict, List, Optional, Any
 import database as db
 from broker import Broker, DataProvider
 from alpha_vantage import get_client as get_alpha_client
+from historical_data import fetch_yahoo_historical
 
 PLN_USD_RATE = 4.05
 INITIAL_BALANCE_PLN = 10000.0
@@ -25,14 +27,23 @@ INSTRUMENTS = {
 
 class SimulatedDataProvider(DataProvider):
     """
-    Data provider: Alpha Vantage for live data, DB cache as fallback.
+    Data provider with multiple sources and persistent candle history.
+    Priority: Alpha Vantage → Yahoo Finance → DB history → DB cache.
     Never returns synthetic/generated prices.
+    All fetched candles are accumulated in DB for backtesting.
     """
+
+    # Map resolution values to Yahoo Finance intervals
+    _YAHOO_INTERVAL = {
+        "1": "1m", "5": "5m", "15": "15m", "30": "30m",
+        "60": "1h", "D": "1d",
+    }
 
     def __init__(self):
         self._alpha = get_alpha_client()
 
     def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+        # 1. Alpha Vantage (live)
         try:
             q = self._alpha.get_quote(symbol)
             if q and q.get("price"):
@@ -40,7 +51,27 @@ class SimulatedDataProvider(DataProvider):
                 return q
         except Exception:
             pass
-        # Return last real quote from DB cache
+        # 2. Yahoo Finance — latest candle close as quote
+        try:
+            yahoo_interval = self._YAHOO_INTERVAL.get("60", "1h")
+            candles = fetch_yahoo_historical(symbol, period_days=2, interval=yahoo_interval)
+            if candles and len(candles) > 0:
+                last = candles[-1]
+                q = {
+                    "symbol": symbol,
+                    "price": last["close"],
+                    "high": last["high"],
+                    "low": last["low"],
+                    "open": last["open"],
+                    "volume": last.get("volume", 0),
+                    "timestamp": last.get("timestamp", datetime.utcnow().isoformat()),
+                    "source": "yahoo",
+                }
+                db.save_quote(symbol, q)
+                return q
+        except Exception:
+            pass
+        # 3. DB cache
         cached = db.load_quote(symbol)
         if cached and cached.get("quote"):
             return cached["quote"]
@@ -49,16 +80,81 @@ class SimulatedDataProvider(DataProvider):
     def get_candles(
         self, symbol: str, resolution: str = "60", count: int = 100
     ) -> Optional[List[Dict[str, Any]]]:
+        candles = None
+        source = ""
+
+        # 1. Alpha Vantage (live, rate-limited)
         try:
             candles = self._alpha.get_candles(symbol, resolution, count)
             if candles and len(candles) > 0:
-                return candles
+                source = "alpha_vantage"
         except Exception:
-            pass
-        # Return last real candles from DB cache
-        cached = db.load_candles(symbol, resolution)
-        if cached and cached.get("candles"):
-            return cached["candles"]
+            candles = None
+
+        # 2. Yahoo Finance (free, delayed)
+        if not candles:
+            try:
+                yahoo_interval = self._YAHOO_INTERVAL.get(resolution, "1h")
+                period = 7 if resolution in ("1", "5", "15", "30", "60") else 365
+                candles = fetch_yahoo_historical(symbol, period_days=period, interval=yahoo_interval)
+                if candles and len(candles) > 0:
+                    source = "yahoo"
+                    # Trim to requested count
+                    candles = candles[-count:]
+            except Exception:
+                candles = None
+
+        # 3. DB candle history — exact resolution
+        if not candles:
+            history = db.load_candle_history(symbol, resolution, limit=count)
+            if history:
+                candles = history
+                source = "db_history"
+
+        # 4. Aggregation pipeline — build from smaller stored candles
+        if not candles:
+            candles = self._try_aggregate(symbol, resolution, count)
+            if candles:
+                source = "aggregated"
+
+        # 5. Old candle_cache fallback (latest batch)
+        if not candles:
+            cached = db.load_candles(symbol, resolution)
+            if cached and cached.get("candles"):
+                candles = cached["candles"]
+                source = "cache"
+
+        # Accumulate to persistent history (always, regardless of source)
+        if candles and source not in ("db_history", "aggregated", "cache"):
+            db.store_candles(symbol, resolution, candles, source)
+            # Also keep old cache updated for backward compat
+            db.save_candles(symbol, resolution, candles, source)
+
+        return candles if candles else None
+
+    def _try_aggregate(
+        self, symbol: str, target_resolution: str, count: int
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Try to build target_resolution candles by aggregating smaller stored candles.
+        E.g. build 1H from 15m, daily from 1H, etc.
+        """
+        # Map target to possible source resolutions (smallest first = best)
+        source_candidates = {
+            "5": ["1"],
+            "15": ["5", "1"],
+            "30": ["15", "5", "1"],
+            "60": ["30", "15", "5", "1"],
+            "240": ["60", "30", "15"],
+            "D": ["60", "30", "15", "5", "1"],
+        }
+        candidates = source_candidates.get(target_resolution, [])
+        for src_res in candidates:
+            stored = db.load_candle_history(symbol, src_res)
+            if stored and len(stored) >= 2:
+                aggregated = db.aggregate_candles(stored, target_resolution)
+                if aggregated and len(aggregated) >= min(10, count):
+                    return aggregated[-count:]
         return None
 
 

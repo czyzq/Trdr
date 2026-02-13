@@ -829,6 +829,8 @@ async def startup():
     if db.is_connected():
         log_event("MongoDB connected – trades & account persisted", "success")
         log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
+        db.ensure_candle_indexes()
+        log_event("Candle history indexes ensured", "info")
     else:
         log_event("MongoDB not configured – using in-memory storage (set MONGO_URI)", "warning")
 
@@ -1149,8 +1151,9 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 50):
         if candles and len(candles) > 0:
             chart_data = _format_candles(candles)
             fetched_at = datetime.utcnow().isoformat()
-            # Cache to DB for future fallback
+            # Cache to DB for future fallback + accumulate history
             db.save_candles(symbol, resolution, chart_data, "alpha_vantage")
+            db.store_candles(symbol, resolution, candles, "alpha_vantage")
             return {
                 "symbol": symbol, "data": chart_data, "resolution": resolution,
                 "count": len(chart_data), "source": "alpha_vantage",
@@ -1209,6 +1212,69 @@ async def clear_alert_history():
     dispatcher = get_dispatcher()
     dispatcher.clear_history()
     return {"status": "cleared"}
+
+# =====================
+# CANDLE HISTORY
+# =====================
+
+@app.get("/api/candles/stats")
+async def get_candle_stats():
+    """Get stored candle history statistics for all instruments."""
+    stats = {}
+    resolutions = ["1", "5", "15", "30", "60", "D"]
+    for symbol in INSTRUMENTS:
+        symbol_stats = {}
+        for res in resolutions:
+            cnt = db.count_candles(symbol, res)
+            if cnt > 0:
+                date_range = db.get_candle_date_range(symbol, res)
+                symbol_stats[res] = {"count": cnt, "range": date_range}
+        if symbol_stats:
+            stats[symbol] = symbol_stats
+    return {"stats": stats}
+
+
+@app.get("/api/candles/{symbol}")
+async def get_candle_history(
+    symbol: str,
+    resolution: str = "60",
+    count: int = Query(100, ge=1, le=5000),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    """
+    Get stored candle history for a symbol.
+    Supports aggregation: request any resolution and it will be built from
+    the smallest available stored interval.
+    """
+    # Direct fetch from accumulated history
+    candles = db.load_candle_history(symbol, resolution, start=start, end=end, limit=count)
+
+    # Try aggregation from smaller intervals if not enough data
+    if len(candles) < min(10, count):
+        source_candidates = {
+            "5": ["1"],
+            "15": ["5", "1"],
+            "30": ["15", "5", "1"],
+            "60": ["30", "15", "5", "1"],
+            "240": ["60", "30", "15"],
+            "D": ["60", "30", "15", "5", "1"],
+        }
+        for src_res in source_candidates.get(resolution, []):
+            stored = db.load_candle_history(symbol, src_res, start=start, end=end)
+            if stored and len(stored) >= 2:
+                aggregated = db.aggregate_candles(stored, resolution)
+                if len(aggregated) > len(candles):
+                    candles = aggregated[-count:]
+                    break
+
+    return {
+        "symbol": symbol,
+        "resolution": resolution,
+        "count": len(candles),
+        "candles": candles,
+    }
+
 
 # =====================
 # SERVE FRONTEND (production)

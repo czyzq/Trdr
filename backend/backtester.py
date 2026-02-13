@@ -696,22 +696,48 @@ def main():
         yahoo_interval = yahoo_interval_map.get(args.resolution, "1d")
 
         if candles is None and not args.sample:
-            print(f"  Fetching {args.days} days ({args.resolution} candles) from Yahoo Finance...")
-            candles = fetch_yahoo_historical(symbol, period_days=args.days, interval=yahoo_interval)
-            if candles:
-                print(f"  Fetched {len(candles)} candles from Yahoo Finance")
+            # Try DB candle history first (accumulated from previous fetches)
+            import database as _db
+            history = _db.load_candle_history(symbol, args.resolution)
+            if history and len(history) >= 50:
+                candles = history
+                print(f"  Loaded {len(candles)} candles from DB history")
             else:
-                print(f"  Yahoo fetch failed, trying Alpha Vantage...")
-                candles = fetch_alpha_vantage_historical(symbol, count=min(args.days, 200))
+                # Try aggregation from smaller stored intervals
+                source_candidates = {
+                    "5": ["1"], "15": ["5", "1"], "30": ["15", "5", "1"],
+                    "60": ["30", "15", "5", "1"], "240": ["60", "30"],
+                    "D": ["60", "30", "15"],
+                }
+                for src_res in source_candidates.get(args.resolution, []):
+                    stored = _db.load_candle_history(symbol, src_res)
+                    if stored and len(stored) >= 10:
+                        candles = _db.aggregate_candles(stored, args.resolution)
+                        if candles and len(candles) >= 50:
+                            print(f"  Aggregated {len(candles)} {args.resolution} candles from {len(stored)} stored {src_res}m candles")
+                            break
+                        candles = None
+
+            if candles is None:
+                print(f"  Fetching {args.days} days ({args.resolution} candles) from Yahoo Finance...")
+                candles = fetch_yahoo_historical(symbol, period_days=args.days, interval=yahoo_interval)
                 if candles:
-                    print(f"  Fetched {len(candles)} candles from Alpha Vantage")
+                    print(f"  Fetched {len(candles)} candles from Yahoo Finance")
+                    # Store to DB history for future use
+                    _db.store_candles(symbol, args.resolution, candles, "yahoo")
                 else:
-                    print(f"  Alpha Vantage failed, trying DB cache...")
-                    candles = fetch_from_db_cache(symbol, args.resolution)
-                    if not candles:
-                        print(f"  ERROR: No real data available for {symbol}.")
-                        print(f"  Use --csv <file> to provide data, or --sample for synthetic test data.")
-                        continue
+                    print(f"  Yahoo fetch failed, trying Alpha Vantage...")
+                    candles = fetch_alpha_vantage_historical(symbol, count=min(args.days, 200))
+                    if candles:
+                        print(f"  Fetched {len(candles)} candles from Alpha Vantage")
+                        _db.store_candles(symbol, args.resolution, candles, "alpha_vantage")
+                    else:
+                        print(f"  Alpha Vantage failed, trying DB cache...")
+                        candles = fetch_from_db_cache(symbol, args.resolution)
+                        if not candles:
+                            print(f"  ERROR: No real data available for {symbol}.")
+                            print(f"  Use --csv <file> to provide data, or --sample for synthetic test data.")
+                            continue
 
         if candles is None and args.sample:
             base_prices = {"XAU": 2000.0, "XAG": 23.0, "US100": 17500.0, "BTC": 95000.0}
