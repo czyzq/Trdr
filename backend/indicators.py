@@ -143,7 +143,221 @@ class TechnicalIndicators:
         if len(prices) < period + 1:
             return None
         return prices[-1] - prices[-period-1]
-    
+
+    @staticmethod
+    def adx(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> Optional[Dict[str, float]]:
+        """
+        Average Directional Index - measures trend strength (0-100).
+        >25 = trending, <20 = ranging.
+        Also returns +DI and -DI for direction.
+        """
+        if len(highs) < period * 2 + 1:
+            return None
+
+        plus_dm = []
+        minus_dm = []
+        tr_list = []
+
+        for i in range(1, len(highs)):
+            up = highs[i] - highs[i - 1]
+            down = lows[i - 1] - lows[i]
+
+            plus_dm.append(up if up > down and up > 0 else 0)
+            minus_dm.append(down if down > up and down > 0 else 0)
+
+            hl = highs[i] - lows[i]
+            hc = abs(highs[i] - closes[i - 1])
+            lc = abs(lows[i] - closes[i - 1])
+            tr_list.append(max(hl, hc, lc))
+
+        def smooth(values: List[float], p: int) -> List[float]:
+            result = [sum(values[:p])]
+            for v in values[p:]:
+                result.append(result[-1] - result[-1] / p + v)
+            return result
+
+        smooth_tr = smooth(tr_list, period)
+        smooth_plus = smooth(plus_dm, period)
+        smooth_minus = smooth(minus_dm, period)
+
+        dx_values = []
+        for i in range(len(smooth_tr)):
+            if smooth_tr[i] == 0:
+                continue
+            pdi = 100 * smooth_plus[i] / smooth_tr[i]
+            mdi = 100 * smooth_minus[i] / smooth_tr[i]
+            denom = pdi + mdi
+            if denom > 0:
+                dx_values.append(100 * abs(pdi - mdi) / denom)
+
+        if len(dx_values) < period:
+            return None
+
+        adx_val = sum(dx_values[:period]) / period
+        for dx in dx_values[period:]:
+            adx_val = (adx_val * (period - 1) + dx) / period
+
+        last_pdi = 100 * smooth_plus[-1] / smooth_tr[-1] if smooth_tr[-1] else 0
+        last_mdi = 100 * smooth_minus[-1] / smooth_tr[-1] if smooth_tr[-1] else 0
+
+        return {
+            "adx": round(adx_val, 2),
+            "plus_di": round(last_pdi, 2),
+            "minus_di": round(last_mdi, 2),
+        }
+
+    @staticmethod
+    def stochastic_rsi(prices: List[float], rsi_period: int = 14, stoch_period: int = 14) -> Optional[Dict[str, float]]:
+        """
+        Stochastic RSI - RSI of RSI for more sensitive overbought/oversold signals.
+        Returns %K (0-100) and smoothed %D.
+        """
+        if len(prices) < rsi_period + stoch_period + 1:
+            return None
+
+        rsi_values = []
+        for i in range(rsi_period + 1, len(prices) + 1):
+            r = TechnicalIndicators.rsi(prices[:i], rsi_period)
+            if r is not None:
+                rsi_values.append(r)
+
+        if len(rsi_values) < stoch_period:
+            return None
+
+        recent = rsi_values[-stoch_period:]
+        lowest = min(recent)
+        highest = max(recent)
+        rng = highest - lowest
+
+        k = ((rsi_values[-1] - lowest) / rng * 100) if rng > 0 else 50.0
+        d = sum(rsi_values[-3:]) / 3 if len(rsi_values) >= 3 else k
+        d = ((d - lowest) / rng * 100) if rng > 0 else 50.0
+
+        return {"k": round(k, 2), "d": round(d, 2)}
+
+    @staticmethod
+    def volume_profile(candles: List[Dict], period: int = 20) -> Optional[Dict[str, float]]:
+        """
+        Volume analysis: ratio of current volume to average, and up/down volume ratio.
+        """
+        if len(candles) < period:
+            return None
+
+        recent = candles[-period:]
+        volumes = [c["volume"] for c in recent]
+        avg_vol = sum(volumes) / len(volumes) if volumes else 1
+
+        current_vol = candles[-1]["volume"]
+        vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1.0
+
+        up_vol = sum(c["volume"] for c in recent if c["close"] >= c["open"])
+        down_vol = sum(c["volume"] for c in recent if c["close"] < c["open"])
+        total_vol = up_vol + down_vol
+        up_down_ratio = up_vol / down_vol if down_vol > 0 else 2.0
+
+        return {
+            "vol_ratio": round(vol_ratio, 2),
+            "up_down_ratio": round(up_down_ratio, 2),
+            "avg_volume": round(avg_vol, 0),
+            "current_volume": current_vol,
+        }
+
+    @staticmethod
+    def candlestick_patterns(candles: List[Dict]) -> Optional[Dict]:
+        """
+        Detect candlestick formations on the last few bars.
+        Returns a dict with pattern name, direction bias (-1 to +1), and strength.
+
+        Patterns detected:
+        - Engulfing (bullish/bearish)
+        - Hammer / Inverted Hammer
+        - Doji (indecision)
+        - Morning Star / Evening Star (3-bar reversal)
+        - Three White Soldiers / Three Black Crows (3-bar continuation)
+        """
+        if len(candles) < 3:
+            return None
+
+        patterns = []
+
+        c0 = candles[-3]  # oldest of last 3
+        c1 = candles[-2]  # middle
+        c2 = candles[-1]  # most recent
+
+        body2 = c2["close"] - c2["open"]
+        body1 = c1["close"] - c1["open"]
+        body0 = c0["close"] - c0["open"]
+        range2 = c2["high"] - c2["low"] or 0.0001
+        range1 = c1["high"] - c1["low"] or 0.0001
+        abs_body2 = abs(body2)
+        abs_body1 = abs(body1)
+        abs_body0 = abs(body0)
+
+        # --- Engulfing ---
+        # Bullish: previous bearish, current bullish body engulfs previous body
+        if body1 < 0 and body2 > 0 and c2["open"] <= c1["close"] and c2["close"] >= c1["open"]:
+            patterns.append({"name": "BULLISH_ENGULFING", "bias": 0.7, "strength": abs_body2 / range2})
+        # Bearish: previous bullish, current bearish body engulfs previous body
+        if body1 > 0 and body2 < 0 and c2["open"] >= c1["close"] and c2["close"] <= c1["open"]:
+            patterns.append({"name": "BEARISH_ENGULFING", "bias": -0.7, "strength": abs_body2 / range2})
+
+        # --- Hammer / Inverted Hammer ---
+        lower_wick2 = min(c2["open"], c2["close"]) - c2["low"]
+        upper_wick2 = c2["high"] - max(c2["open"], c2["close"])
+        # Hammer: small body at top, long lower wick (>2x body), short upper wick
+        if abs_body2 > 0 and lower_wick2 >= abs_body2 * 2 and upper_wick2 < abs_body2 * 0.5:
+            patterns.append({"name": "HAMMER", "bias": 0.6, "strength": lower_wick2 / range2})
+        # Inverted Hammer / Shooting Star: small body at bottom, long upper wick
+        if abs_body2 > 0 and upper_wick2 >= abs_body2 * 2 and lower_wick2 < abs_body2 * 0.5:
+            # Shooting star if after uptrend (bearish), inverted hammer if after downtrend (bullish)
+            if c1["close"] > c0["close"]:  # after uptick = shooting star
+                patterns.append({"name": "SHOOTING_STAR", "bias": -0.6, "strength": upper_wick2 / range2})
+            else:
+                patterns.append({"name": "INVERTED_HAMMER", "bias": 0.5, "strength": upper_wick2 / range2})
+
+        # --- Doji ---
+        # Very small body relative to range (<10%)
+        if range2 > 0 and abs_body2 / range2 < 0.10:
+            patterns.append({"name": "DOJI", "bias": 0.0, "strength": 1.0 - abs_body2 / range2})
+
+        # --- Morning Star (bullish 3-bar reversal) ---
+        # Bar 0: large bearish, Bar 1: small body (star), Bar 2: large bullish closing above bar0 midpoint
+        mid0 = (c0["open"] + c0["close"]) / 2
+        if (body0 < 0 and abs_body0 > range2 * 0.3
+                and abs_body1 < abs_body0 * 0.4
+                and body2 > 0 and c2["close"] > mid0):
+            patterns.append({"name": "MORNING_STAR", "bias": 0.8, "strength": abs_body2 / range2})
+
+        # --- Evening Star (bearish 3-bar reversal) ---
+        if (body0 > 0 and abs_body0 > range2 * 0.3
+                and abs_body1 < abs_body0 * 0.4
+                and body2 < 0 and c2["close"] < mid0):
+            patterns.append({"name": "EVENING_STAR", "bias": -0.8, "strength": abs_body2 / range2})
+
+        # --- Three White Soldiers (bullish continuation) ---
+        if body0 > 0 and body1 > 0 and body2 > 0:
+            if c1["close"] > c0["close"] and c2["close"] > c1["close"]:
+                if c1["open"] > c0["open"] and c2["open"] > c1["open"]:
+                    patterns.append({"name": "THREE_WHITE_SOLDIERS", "bias": 0.7, "strength": 0.8})
+
+        # --- Three Black Crows (bearish continuation) ---
+        if body0 < 0 and body1 < 0 and body2 < 0:
+            if c1["close"] < c0["close"] and c2["close"] < c1["close"]:
+                if c1["open"] < c0["open"] and c2["open"] < c1["open"]:
+                    patterns.append({"name": "THREE_BLACK_CROWS", "bias": -0.7, "strength": 0.8})
+
+        if not patterns:
+            return {"patterns": [], "net_bias": 0.0}
+
+        # Net bias: weighted average by strength
+        total_strength = sum(p["strength"] for p in patterns)
+        net_bias = sum(p["bias"] * p["strength"] for p in patterns) / total_strength if total_strength > 0 else 0
+
+        return {
+            "patterns": patterns,
+            "net_bias": round(max(-1, min(1, net_bias)), 4),
+        }
+
     @staticmethod
     def calculate_all(
         candles: List[Dict],
@@ -154,11 +368,11 @@ class TechnicalIndicators:
         """
         if not candles or len(candles) < max(26, period):
             return None
-        
+
         closes = [c["close"] for c in candles]
         highs = [c["high"] for c in candles]
         lows = [c["low"] for c in candles]
-        
+
         return {
             "rsi_14": TechnicalIndicators.rsi(closes, 14),
             "macd": TechnicalIndicators.macd(closes),
@@ -167,4 +381,8 @@ class TechnicalIndicators:
             "momentum_10": TechnicalIndicators.momentum(closes, 10),
             "sma_20": TechnicalIndicators.sma(closes, 20),
             "sma_50": TechnicalIndicators.sma(closes, 50),
+            "adx": TechnicalIndicators.adx(highs, lows, closes, 14),
+            "stoch_rsi": TechnicalIndicators.stochastic_rsi(closes, 14, 14),
+            "volume_profile": TechnicalIndicators.volume_profile(candles, 20),
+            "candlestick_patterns": TechnicalIndicators.candlestick_patterns(candles),
         }

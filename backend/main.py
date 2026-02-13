@@ -1,6 +1,7 @@
 """
 CFD Trading Bot - FastAPI Backend
 Real-time signal generation using Finnhub data and technical indicators
+Simulated trading engine with PLN currency
 """
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,22 +11,24 @@ import asyncio
 from typing import List, Optional
 import os
 import json
+import uuid
 from dotenv import load_dotenv
 
 from models import Signal, SignalDirection, Component, ComponentType, SignalResponse
 from alpha_vantage import get_client as get_alpha_vantage_client
 from alpha_vantage_news import get_client as get_news_client
-from realistic_prices import get_feeder as get_realistic_price_feeder
 from indicators import TechnicalIndicators
 from imessage_alerts import AlertConfig, iMessageAlertDispatcher, get_dispatcher
 from openclaw_integration import set_openclaw_message_function, format_imessage_for_cfd_alert
+import database as db
+from broker_factory import create_broker, create_data_provider
 
 load_dotenv()
 
 app = FastAPI(
     title="CFD Trading Bot API",
-    description="Real-time trading signals for CFD instruments (Gold, Silver, Nasdaq)",
-    version="0.1.0"
+    description="Real-time trading signals for CFD instruments with simulated trading",
+    version="0.2.0"
 )
 
 # CORS configuration
@@ -37,293 +40,599 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# PLN/USD exchange rate (approximate)
+PLN_USD_RATE = 4.05
+
 # Global state
 signals_cache = {}
 alpha_client = None
-event_log = []
-account = {
-    "balance": 1000.0,
-    "equity": 1000.0,
-    "positions": 0,
-    "used_margin": 0.0,
-    "available": 1000.0,
-    "last_scan": datetime.utcnow().isoformat(),
-    "dry_run": True,  # Simulation mode - no real trades
-    "mode": "simulate"  # "simulate" or "live"
-}
+event_log = db.load_event_log()  # Restore log from DB on startup
+
+# Broker abstraction – switch via BROKER_TYPE env var ("sim" or "ibkr")
+data_provider = create_data_provider()
+broker = create_broker(data_provider)
+
+# Convenience references (broker owns this state)
+account = broker.get_account()
+open_positions = broker.get_open_positions() if hasattr(broker, 'open_positions') else []
+closed_positions = broker.get_closed_positions() if hasattr(broker, 'closed_positions') else []
+
+# For SimulatedBroker, keep direct references to the same lists
+if hasattr(broker, 'open_positions'):
+    open_positions = broker.open_positions
+if hasattr(broker, 'closed_positions'):
+    closed_positions = broker.closed_positions
+if hasattr(broker, 'account'):
+    account = broker.account
 
 # Signal history cache for trend analysis
-signal_history_cache = {}  # {symbol: [previous_scores...]}
+signal_history_cache = {}
 
 def load_signal_cache():
-    """Load signal history cache from file"""
+    """Load signal history cache from DB, fallback to JSON file"""
     global signal_history_cache
+    # Try MongoDB first
+    cached = db.load_signal_cache_db()
+    if cached:
+        signal_history_cache = cached
+        log_event(f"Loaded signal cache from DB ({len(signal_history_cache)} symbols)")
+        return
+    # Fallback to JSON file
     try:
         cache_file = "signal_cache.json"
         if os.path.exists(cache_file):
             with open(cache_file, 'r') as f:
                 signal_history_cache = json.load(f)
-            log_event(f"Loaded signal history cache with {len(signal_history_cache)} symbols")
+            log_event(f"Loaded signal cache from file ({len(signal_history_cache)} symbols)")
     except Exception as e:
         log_event(f"Failed to load signal cache: {e}", "warning")
         signal_history_cache = {}
 
 def save_signal_cache():
-    """Save signal history cache to file"""
+    """Save signal history cache to DB + JSON file"""
+    db.save_signal_cache_db(signal_history_cache)
     try:
         cache_file = "signal_cache.json"
         with open(cache_file, 'w') as f:
             json.dump(signal_history_cache, f)
-        log_event(f"Saved signal history cache with {len(signal_history_cache)} symbols")
-    except Exception as e:
-        log_event(f"Failed to save signal cache: {e}", "error")
+    except Exception:
+        pass  # File write is best-effort fallback
 
-# Instruments to monitor
+# Instruments to monitor — with per-instrument signal tuning
+# leverage: position multiplier (x20 = 5% margin requirement)
+# min_score: minimum |score| to enter (higher = fewer but better trades)
+# asset_class: "commodity" (mean-reverting) or "equity"/"crypto" (trending)
+# trailing_stop: enable trailing SL that locks in profits once in the green
 INSTRUMENTS = {
-    "XAU": {"name": "Gold", "multiplier": 1},
-    "XAG": {"name": "Silver", "multiplier": 1},
-    "US100": {"name": "Nasdaq-100", "multiplier": 1}
+    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 1,
+            "leverage": 20, "min_score": 0.30, "asset_class": "commodity",
+            "trailing_stop": True},
+    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 100,
+            "leverage": 20, "min_score": 0.28, "asset_class": "commodity",
+            "trailing_stop": True},
+    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 1,
+              "leverage": 20, "min_score": 0.20, "asset_class": "equity",
+              "trailing_stop": True},
+    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.01,
+            "leverage": 5, "min_score": 0.20, "asset_class": "crypto",
+            "trailing_stop": True},
 }
 
+_log_counter = 0
+
 def log_event(message: str, log_type: str = "info"):
-    """Log events for the console"""
+    """Log events for the console. Persists to DB every 10 entries."""
+    global _log_counter
     event_log.append({
         "id": str(len(event_log)),
         "timestamp": datetime.now().strftime("%H:%M:%S"),
         "message": message,
         "type": log_type
     })
-    # Keep only last 100 events
-    if len(event_log) > 100:
+    if len(event_log) > 200:
         event_log.pop(0)
     print(f"[{log_type.upper()}] {message}")
+    # Persist periodically (every 10 log entries) to avoid excessive DB writes
+    _log_counter += 1
+    if _log_counter % 10 == 0:
+        db.save_event_log(event_log)
 
-def calculate_signal_score(indicators: dict) -> tuple[float, List[Component]]:
+def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, List[Component]]:
     """
-    Calculate composite signal score from indicators
-    Returns score (-1 to +1) and components breakdown
+    Multi-factor signal scoring with regime-adaptive weighting.
+    Uses: RSI (corrected), MACD, Bollinger Bands, SMA trend, ADX trend strength,
+    StochRSI for timing, and volume confirmation.
+
+    In TRENDING markets (ADX > 25): momentum/trend components get higher weight.
+    In RANGING markets (ADX < 20): mean-reversion components (BB, RSI) get higher weight.
+
+    Returns score (-1 to +1) and components breakdown.
     """
     components = []
     scores = []
     weights = []
-    
-    # RSI component (0-100, normalize to -1 to +1)
-    if indicators.get("rsi_14"):
+
+    # --- Detect market regime via ADX ---
+    adx_data = indicators.get("adx")
+    adx_value = adx_data["adx"] if adx_data else 20
+    is_trending = adx_value > 25
+    is_strong_trend = adx_value > 40
+    regime = "TRENDING" if is_trending else "RANGING"
+
+    if adx_data:
+        trend_dir = "UP" if adx_data["plus_di"] > adx_data["minus_di"] else "DOWN"
+        components.append(Component(
+            type=ComponentType.TECHNICAL,
+            name="ADX (Trend)",
+            value=max(-1, min(1, (adx_value - 25) / 25)) if trend_dir == "UP" else max(-1, min(1, -(adx_value - 25) / 25)),
+            description=f"ADX {adx_value:.0f} ({regime}, {trend_dir}) +DI:{adx_data['plus_di']:.0f} -DI:{adx_data['minus_di']:.0f}",
+            confidence=0.8 if adx_value > 30 else 0.5,
+            indicators=adx_data
+        ))
+
+    # --- RSI Component (FIXED: oversold=BUY, overbought=SELL) ---
+    if indicators.get("rsi_14") is not None:
         rsi = indicators["rsi_14"]
-        # RSI: <30 = oversold (bearish), >70 = overbought (bullish)
-        rsi_score = (rsi - 50) / 50  # normalize to -1 to +1
+        # Correct interpretation: low RSI = oversold = buy opportunity
+        if rsi < 30:
+            rsi_score = (30 - rsi) / 30        # Oversold → positive (BUY)
+        elif rsi > 70:
+            rsi_score = -((rsi - 70) / 30)     # Overbought → negative (SELL)
+        elif rsi < 45:
+            rsi_score = (45 - rsi) / 45 * 0.3  # Mild bullish bias
+        elif rsi > 55:
+            rsi_score = -(rsi - 55) / 45 * 0.3 # Mild bearish bias
+        else:
+            rsi_score = 0                       # Dead neutral zone
+
+        rsi_score = max(-1, min(1, rsi_score))
+        zone = "OVERSOLD" if rsi < 30 else "OVERBOUGHT" if rsi > 70 else "NEUTRAL"
+
+        # RSI weight depends on regime: higher in ranging, lower in trending
+        rsi_weight = 0.15 if is_trending else 0.25
+
         components.append(Component(
             type=ComponentType.TECHNICAL,
             name="RSI (14)",
             value=rsi_score,
-            description=f"RSI at {rsi:.1f}",
-            confidence=0.8,
-            indicators={"value": rsi}
+            description=f"RSI {rsi:.1f} ({zone})",
+            confidence=0.85 if abs(rsi - 50) > 20 else 0.5,
+            indicators={"value": rsi, "zone": zone}
         ))
         scores.append(rsi_score)
-        weights.append(0.35)
-    
-    # MACD component
+        weights.append(rsi_weight)
+
+    # --- StochRSI Component (entry timing) ---
+    stoch = indicators.get("stoch_rsi")
+    if stoch:
+        k, d = stoch["k"], stoch["d"]
+        if k < 20:
+            stoch_score = 0.6 + (20 - k) / 50   # Oversold → BUY
+        elif k > 80:
+            stoch_score = -(0.6 + (k - 80) / 50) # Overbought → SELL
+        else:
+            stoch_score = 0
+
+        # Crossover confirmation: %K crossing above %D = bullish
+        if k > d and k < 30:
+            stoch_score = max(stoch_score, 0.5)
+        elif k < d and k > 70:
+            stoch_score = min(stoch_score, -0.5)
+
+        stoch_score = max(-1, min(1, stoch_score))
+        if abs(stoch_score) > 0.1:
+            components.append(Component(
+                type=ComponentType.TECHNICAL,
+                name="StochRSI",
+                value=stoch_score,
+                description=f"StochRSI K:{k:.0f} D:{d:.0f}",
+                confidence=0.7 if abs(k - 50) > 30 else 0.4,
+                indicators=stoch
+            ))
+            scores.append(stoch_score)
+            weights.append(0.10)
+
+    # --- MACD Component (normalized by ATR for cross-symbol consistency) ---
     if indicators.get("macd"):
         macd = indicators["macd"]
-        if macd.get("histogram") is not None:
-            # Positive histogram = bullish, negative = bearish
+        if macd.get("histogram") is not None and macd.get("macd_line") is not None:
             histogram = macd["histogram"]
-            # Normalize to -1 to +1
-            macd_score = max(-1, min(1, histogram / 100)) if histogram != 0 else 0
+            macd_line = macd["macd_line"]
+            signal_line = macd.get("signal_line", 0) or 0
+            atr = indicators.get("atr_14", 1) or 1
+
+            # Normalize histogram by ATR for consistent scaling across symbols
+            norm_hist = histogram / atr
+            macd_score = max(-1, min(1, norm_hist * 2))
+
+            cross = "BULLISH" if macd_line > signal_line else "BEARISH"
+            # MACD weight: higher in trending markets
+            macd_weight = 0.25 if is_trending else 0.15
+
             components.append(Component(
                 type=ComponentType.TECHNICAL,
                 name="MACD",
                 value=macd_score,
-                description=f"MACD histogram: {histogram:.4f}",
-                confidence=0.75,
+                description=f"MACD {cross} | hist/ATR: {norm_hist:.2f}",
+                confidence=0.8 if abs(norm_hist) > 0.5 else 0.5,
                 indicators=macd
             ))
             scores.append(macd_score)
-            weights.append(0.30)
-    
-    # Momentum component
-    if indicators.get("momentum_10"):
+            weights.append(macd_weight)
+
+    # --- Bollinger Bands Component (mean-reversion) ---
+    if indicators.get("bollinger_bands"):
+        bb = indicators["bollinger_bands"]
+        closes = indicators.get("_closes", [])
+        if closes:
+            current_price = closes[-1]
+            bb_upper = bb["upper"]
+            bb_lower = bb["lower"]
+            bb_range = bb_upper - bb_lower if bb_upper != bb_lower else 1
+
+            bb_position = ((current_price - bb_lower) / bb_range) * 2 - 1
+            bb_score = -bb_position * 0.8  # Near upper = sell, near lower = buy
+
+            zone = "UPPER" if current_price > bb_upper else "LOWER" if current_price < bb_lower else "MIDDLE"
+            # BB weight: higher in ranging markets
+            bb_weight = 0.15 if is_trending else 0.25
+
+            components.append(Component(
+                type=ComponentType.TECHNICAL,
+                name="Bollinger Bands",
+                value=max(-1, min(1, bb_score)),
+                description=f"BB {zone} (pos: {bb_position:.2f})",
+                confidence=0.75 if abs(bb_position) > 0.8 else 0.4,
+                indicators={"position": bb_position, "zone": zone}
+            ))
+            scores.append(max(-1, min(1, bb_score)))
+            weights.append(bb_weight)
+
+    # --- SMA Trend Component ---
+    if indicators.get("sma_20") is not None and indicators.get("sma_50") is not None:
+        sma_20 = indicators["sma_20"]
+        sma_50 = indicators["sma_50"]
+        if sma_50 > 0:
+            sma_diff_pct = ((sma_20 - sma_50) / sma_50) * 100
+            sma_score = max(-1, min(1, sma_diff_pct / 2))
+            trend = "BULLISH" if sma_20 > sma_50 else "BEARISH"
+            # SMA weight: higher in trending markets
+            sma_weight = 0.20 if is_trending else 0.10
+
+            components.append(Component(
+                type=ComponentType.TECHNICAL,
+                name="SMA Cross (20/50)",
+                value=sma_score,
+                description=f"SMA20/50: {sma_diff_pct:.2f}% ({trend})",
+                confidence=0.7,
+                indicators={"sma_20": sma_20, "sma_50": sma_50, "trend": trend}
+            ))
+            scores.append(sma_score)
+            weights.append(sma_weight)
+
+    # --- Volume Confirmation ---
+    vol = indicators.get("volume_profile")
+    if vol:
+        vol_ratio = vol["vol_ratio"]
+        up_down = vol["up_down_ratio"]
+
+        # High volume confirms the move; low volume weakens it
+        vol_multiplier = min(1.5, max(0.5, vol_ratio))
+        vol_bias = max(-0.5, min(0.5, (up_down - 1.0) * 0.3))
+
+        if vol_ratio > 1.5:
+            components.append(Component(
+                type=ComponentType.TECHNICAL,
+                name="Volume",
+                value=vol_bias,
+                description=f"Vol {vol_ratio:.1f}x avg | Up/Down: {up_down:.1f}",
+                confidence=0.6,
+                indicators=vol
+            ))
+            scores.append(vol_bias)
+            weights.append(0.10)
+
+    # --- Momentum (reduced weight, confirmation only) ---
+    if indicators.get("momentum_10") is not None:
         momentum = indicators["momentum_10"]
-        # Normalize momentum to -1 to +1
-        momentum_score = max(-1, min(1, momentum / 100)) if momentum != 0 else 0
+        base_price = indicators.get("sma_20", 1) or 1
+        mom_pct = (momentum / base_price) * 100 if base_price else 0
+        momentum_score = max(-1, min(1, mom_pct / 2))
+
         components.append(Component(
             type=ComponentType.TECHNICAL,
             name="Momentum (10)",
             value=momentum_score,
-            description=f"Momentum: {momentum:.4f}",
-            confidence=0.7,
-            indicators={"value": momentum}
+            description=f"Momentum: {mom_pct:.2f}%",
+            confidence=0.6,
+            indicators={"value": momentum, "pct": mom_pct}
         ))
         scores.append(momentum_score)
-        weights.append(0.35)
-    
-    # Calculate weighted composite score
+        weights.append(0.05)
+
+    # --- Candlestick Patterns ---
+    cp = indicators.get("candlestick_patterns")
+    if cp and cp.get("patterns") and abs(cp["net_bias"]) > 0.1:
+        pattern_names = ", ".join(p["name"] for p in cp["patterns"])
+        cp_score = max(-1, min(1, cp["net_bias"]))
+        components.append(Component(
+            type=ComponentType.TECHNICAL,
+            name="Candlestick Patterns",
+            value=cp_score,
+            description=f"Patterns: {pattern_names} (bias: {cp['net_bias']:.2f})",
+            confidence=0.7,
+            indicators={"patterns": [p["name"] for p in cp["patterns"]], "net_bias": cp["net_bias"]}
+        ))
+        scores.append(cp_score)
+        weights.append(0.15)
+
+    # --- Calculate weighted composite score ---
     if scores:
         total_weight = sum(weights)
         composite_score = sum(s * w for s, w in zip(scores, weights)) / total_weight if total_weight > 0 else 0
     else:
         composite_score = 0
-    
-    return composite_score, components
 
-def calculate_trend_score(current_score: float, previous_scores: List[float]) -> float:
-    """
-    Calculate trend-based score adjustment based on previous signal scores
-    """
-    if not previous_scores or len(previous_scores) < 2:
-        return 0.0
-    
-    # Calculate trend (moving average of recent changes)
-    recent_scores = previous_scores[-5:]  # Last 5 scores
-    if len(recent_scores) < 2:
-        return 0.0
-    
-    # Calculate momentum (rate of change)
-    score_changes = [recent_scores[i] - recent_scores[i-1] for i in range(1, len(recent_scores))]
-    avg_change = sum(score_changes) / len(score_changes)
-    
-    # Calculate consistency (how consistently the trend is moving in one direction)
-    positive_changes = sum(1 for change in score_changes if change > 0)
-    negative_changes = sum(1 for change in score_changes if change < 0)
-    consistency = abs(positive_changes - negative_changes) / len(score_changes)
-    
-    # Trend bonus: strengthen signals that are consistent with recent trend
-    trend_bonus = avg_change * consistency * 0.2  # 20% max adjustment
-    
-    # Mean reversion penalty: reduce signals that are far from recent average
-    recent_avg = sum(recent_scores) / len(recent_scores)
-    deviation = abs(current_score - recent_avg)
-    mean_reversion_penalty = -deviation * 0.1 if deviation > 0.3 else 0.0
-    
-    return trend_bonus + mean_reversion_penalty
+    # --- Component agreement bonus/penalty ---
+    # If most components agree on direction, boost confidence; if mixed, dampen
+    if len(scores) >= 3:
+        bullish = sum(1 for s in scores if s > 0.1)
+        bearish = sum(1 for s in scores if s < -0.1)
+        agreement = max(bullish, bearish) / len(scores)
+        if agreement > 0.7:
+            composite_score *= 1.15  # Boost when components agree
+        elif agreement < 0.4:
+            composite_score *= 0.7   # Dampen when components disagree
 
-def get_signal_direction(score: float) -> SignalDirection:
-    """Determine signal direction from score"""
-    if score > 0.6:
+    return max(-1, min(1, composite_score)), components
+
+
+def get_signal_direction(score: float, min_score: float = 0.15) -> SignalDirection:
+    """Determine signal direction from score with per-instrument thresholds."""
+    strong_threshold = max(0.45, min_score + 0.20)
+    if score > strong_threshold:
         return SignalDirection.STRONG_BUY
-    elif score > 0.2:
+    elif score > min_score:
         return SignalDirection.BUY
-    elif score < -0.6:
+    elif score < -strong_threshold:
         return SignalDirection.STRONG_SELL
-    elif score < -0.2:
+    elif score < -min_score:
         return SignalDirection.SELL
     else:
         return SignalDirection.NEUTRAL
 
+
+# ── Risk Management ──────────────────────────────────────────────────
+
+MAX_DRAWDOWN_PCT = 20.0      # Stop trading if account drops 20% from peak
+MAX_OPEN_POSITIONS = 3        # Max concurrent positions
+MAX_RISK_PER_TRADE_PCT = 2.0  # Risk max 2% of balance per trade
+INITIAL_BALANCE_PLN = 10000.0
+
+def check_circuit_breaker() -> tuple[bool, str]:
+    """Check if trading should be halted due to drawdown or position limits."""
+    peak_balance = max(INITIAL_BALANCE_PLN, account.get("peak_balance_pln", INITIAL_BALANCE_PLN))
+    current = account["balance_pln"]
+    drawdown_pct = ((peak_balance - current) / peak_balance) * 100 if peak_balance > 0 else 0
+
+    if drawdown_pct >= MAX_DRAWDOWN_PCT:
+        return False, f"CIRCUIT BREAKER: {drawdown_pct:.1f}% drawdown exceeds {MAX_DRAWDOWN_PCT}% limit"
+
+    if len(open_positions) >= MAX_OPEN_POSITIONS:
+        return False, f"Max {MAX_OPEN_POSITIONS} positions reached"
+
+    return True, "OK"
+
+def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -> float:
+    """
+    Calculate position size based on risk per trade and leverage.
+    Risks MAX_RISK_PER_TRADE_PCT of account balance per trade.
+    Leverage amplifies both gains and losses — size is adjusted so that
+    the max loss on a SL hit still equals the risk amount.
+    """
+    info = INSTRUMENTS.get(symbol, {})
+    leverage = info.get("leverage", 1)
+
+    risk_amount_pln = account["balance_pln"] * (MAX_RISK_PER_TRADE_PCT / 100)
+    risk_amount_usd = risk_amount_pln / PLN_USD_RATE
+
+    risk_per_unit = abs(entry_price - stop_loss)
+    if risk_per_unit <= 0:
+        return info.get("lot_size", 0.01)
+
+    # With leverage, P&L per unit = price_move * leverage
+    # So size = risk_amount / (risk_per_unit * leverage) to keep actual loss = risk_amount
+    size = risk_amount_usd / (risk_per_unit * leverage)
+
+    # Clamp to instrument limits
+    lot_size = info.get("lot_size", 0.01)
+    min_size = lot_size
+    max_size = lot_size * 10
+
+    return round(max(min_size, min(size, max_size)), 4)
+
+def update_account_equity():
+    """Update account equity based on open positions via broker."""
+    broker.update_prices(data_provider)
+
 async def generate_signals() -> List[Signal]:
-    """
-    Generate trading signals for all instruments
-    """
+    """Generate trading signals for all instruments using regime-adaptive scoring"""
     global alpha_client, account
-    
-    # Update last scan time
+
     account["last_scan"] = datetime.utcnow().isoformat()
-    
-    # Use realistic price feeder for now (Alpha Vantage doesn't support futures properly)
-    price_feeder = get_realistic_price_feeder()
+
+    # Track peak balance for drawdown calculation
+    if account["balance_pln"] > account.get("peak_balance_pln", INITIAL_BALANCE_PLN):
+        account["peak_balance_pln"] = account["balance_pln"]
+
     news_client_instance = get_news_client()
-    
+
     signals = []
-    
+
     for symbol, info in INSTRUMENTS.items():
         try:
-            log_event(f"Fetching data for {symbol} ({info['name']})...")
-            
-            # Get quote from realistic price feeder
-            quote = price_feeder.get_quote(symbol)
+            log_event(f"Analyzing {symbol} ({info['name']})...")
+
+            quote = data_provider.get_quote(symbol)
             if not quote:
                 log_event(f"Failed to generate price for {symbol}", "error")
                 continue
-            
+
             current_price = quote["price"]
-            
-            # Get candles (1 hour resolution, last 100 bars)
-            candles = price_feeder.get_candles(symbol, resolution="60", count=100)
-            if not candles or len(candles) < 26:
-                log_event(f"Insufficient candle data for {symbol}", "error")
+
+            candles = data_provider.get_candles(symbol, resolution="60", count=100)
+            if not candles or len(candles) < 50:
+                log_event(f"Insufficient candle data for {symbol} ({len(candles) if candles else 0} bars)", "error")
                 continue
-            
-            # Calculate indicators
+
             indicators = TechnicalIndicators.calculate_all(candles, period=14)
             if not indicators:
                 log_event(f"Failed to calculate indicators for {symbol}", "warning")
                 continue
-            
-            # Fetch news and calculate sentiment (async web scraping)
+
+            indicators["_closes"] = [c["close"] for c in candles]
+
+            # ── Multi-timeframe: fetch daily candles for higher-TF trend ──
+            htf_bias = 0.0  # -1 to +1 bias from higher timeframe
+            try:
+                htf_candles = data_provider.get_candles(symbol, resolution="D", count=60)
+                if htf_candles and len(htf_candles) >= 50:
+                    htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
+                    if htf_ind:
+                        htf_sma20 = htf_ind.get("sma_20")
+                        htf_sma50 = htf_ind.get("sma_50")
+                        htf_adx = htf_ind.get("adx")
+                        htf_price = htf_candles[-1]["close"]
+                        # Daily trend direction from SMA cross
+                        if htf_sma20 and htf_sma50 and htf_sma50 > 0:
+                            sma_diff = ((htf_sma20 - htf_sma50) / htf_sma50) * 100
+                            htf_bias = max(-1, min(1, sma_diff / 3))
+                        # Strengthen bias if daily ADX shows strong trend
+                        if htf_adx and htf_adx["adx"] > 30 and abs(htf_bias) > 0.1:
+                            htf_bias *= 1.3
+                            htf_bias = max(-1, min(1, htf_bias))
+                        log_event(f"[MTF] {symbol} daily bias: {htf_bias:+.2f}")
+            except Exception as e:
+                log_event(f"[MTF] Failed to get daily data for {symbol}: {e}", "warning")
+
+            # ── Volatility filter ──
+            atr = indicators.get("atr_14", current_price * 0.01)
+            atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
+            # Skip if volatility is extreme (>3% per candle = dangerous)
+            if atr_pct > 3.0:
+                log_event(f"[SKIP] {symbol} ATR {atr_pct:.1f}% too volatile", "warning")
+                continue
+
+            # ── Technical scoring (regime-adaptive) ──
+            technical_score, components = calculate_signal_score(indicators, symbol)
+
+            # ── News sentiment (capped influence: max 15% of final score) ──
             news_score = 0.0
             try:
-                # Use async web scraping - only real data, no mocks
                 news = await news_client_instance.get_news(symbol, limit=5)
                 if news and len(news) > 0:
-                    # Average sentiment across all news articles
                     sentiments = [article.get('sentiment', 0) for article in news]
                     news_score = sum(sentiments) / len(sentiments) if sentiments else 0
-                    log_event(f"News sentiment for {symbol}: {news_score:.2f} ({len(news)} articles)", "info")
-                else:
-                    log_event(f"No news available for {symbol}", "info")
-                    news_score = 0.0  # Neutral when no news
+                    log_event(f"News sentiment for {symbol}: {news_score:.2f} ({len(news)} articles)")
             except Exception as e:
                 log_event(f"Failed to fetch news for {symbol}: {e}", "warning")
-                news_score = 0.0  # Neutral when news fails
-            
-            # Generate signal with news sentiment
-            technical_score, components = calculate_signal_score(indicators)
-            
-            # Get previous scores for trend analysis
-            previous_scores = signal_history_cache.get(symbol, [])
-            
-            # Calculate trend-based score adjustment
-            trend_adjustment = calculate_trend_score(technical_score, previous_scores)
-            
-            # Apply trend adjustment to technical score
-            adjusted_technical_score = max(-1, min(1, technical_score + trend_adjustment))
-            
-            # Weighted composite: 40% technical (with trend), 20% price action, 40% news
-            # Only include news if it's significant (|news_score| > 0.1)
-            effective_news_score = news_score if abs(news_score) > 0.1 else 0.0
-            
-            score = (adjusted_technical_score * 0.4) + (0 * 0.2) + (effective_news_score * 0.4)
-            
-            direction = get_signal_direction(score)
-            
-            # Update signal history cache (keep last 10 scores)
+
+            # Final score: blend technical + news + higher-TF bias
+            effective_news = news_score if abs(news_score) > 0.1 else 0.0
+            if effective_news != 0:
+                score = technical_score * 0.80 + effective_news * 0.10 + htf_bias * 0.10
+            elif abs(htf_bias) > 0.1:
+                score = technical_score * 0.85 + htf_bias * 0.15
+            else:
+                score = technical_score  # 100% technical when no news/HTF
+            score = max(-1, min(1, score))
+
+            # ── Multi-timeframe alignment filter ──
+            # If HTF strongly opposes the signal direction, reject the trade
+            if abs(htf_bias) > 0.3:
+                is_buy_signal = score > 0
+                htf_bullish = htf_bias > 0
+                if is_buy_signal != htf_bullish:
+                    log_event(f"[MTF SKIP] {symbol} signal opposes daily trend (bias: {htf_bias:+.2f})", "info")
+                    score *= 0.5  # Halve the score, likely falls below threshold
+
+            # ── Per-instrument entry threshold ──
+            min_score = info.get("min_score", 0.15)
+            direction = get_signal_direction(score, min_score=min_score)
+
+            # ── Minimum indicator agreement filter (per-instrument) ──
+            component_vals = [c.value for c in components]
+            bullish_c = sum(1 for v in component_vals if v > 0.1)
+            bearish_c = sum(1 for v in component_vals if v < -0.1)
+            # Commodities need more agreement (3), equities/crypto need less (2)
+            min_agreement = 3 if info.get("asset_class") == "commodity" else 2
+            if direction != SignalDirection.NEUTRAL and max(bullish_c, bearish_c) < min_agreement:
+                log_event(f"[SKIP] {symbol} only {max(bullish_c, bearish_c)} indicators agree (need {min_agreement})", "info")
+                direction = SignalDirection.NEUTRAL
+
+            # ── Trend-alignment filter for commodities ──
+            # Commodities (gold, silver) mean-revert — only trade with the larger trend
+            sma_50 = indicators.get("sma_50")
+            if info.get("asset_class") == "commodity" and sma_50 and direction != SignalDirection.NEUTRAL:
+                price_above_sma50 = current_price > sma_50
+                is_buy = direction in (SignalDirection.BUY, SignalDirection.STRONG_BUY)
+                # Only allow buys when price is above SMA50 (uptrend), sells when below
+                if is_buy and not price_above_sma50:
+                    log_event(f"[SKIP] {symbol} BUY rejected: price below SMA50 (counter-trend)", "info")
+                    direction = SignalDirection.NEUTRAL
+                elif not is_buy and price_above_sma50:
+                    log_event(f"[SKIP] {symbol} SELL rejected: price above SMA50 (counter-trend)", "info")
+                    direction = SignalDirection.NEUTRAL
+
+            # ── Signal history tracking ──
             if symbol not in signal_history_cache:
                 signal_history_cache[symbol] = []
             signal_history_cache[symbol].append(score)
-            if len(signal_history_cache[symbol]) > 10:
+            if len(signal_history_cache[symbol]) > 20:
                 signal_history_cache[symbol].pop(0)
-            
-            # Save cache to file periodically (every 5 signals)
-            if len(signals) % 5 == 0:
+            if len(signals) % 4 == 0:
                 save_signal_cache()
-            
-            # Calculate confidence based on score strength and component consistency
-            base_confidence = min(0.95, abs(score) + 0.3)
-            
-            # Boost confidence if news sentiment aligns with technical analysis
-            if (effective_news_score > 0 and adjusted_technical_score > 0) or (effective_news_score < 0 and adjusted_technical_score < 0):
-                confidence = min(0.95, base_confidence * 1.1)  # 10% boost for aligned signals
+
+            # ── Confidence based on component agreement ──
+            component_values = [c.value for c in components]
+            if component_values:
+                bullish_count = sum(1 for v in component_values if v > 0.1)
+                bearish_count = sum(1 for v in component_values if v < -0.1)
+                total_opinionated = bullish_count + bearish_count
+                agreement = max(bullish_count, bearish_count) / max(total_opinionated, 1)
+                confidence = min(0.95, abs(score) * agreement + 0.1)
             else:
-                confidence = base_confidence
-            
-            # Calculate risk/reward
-            rsi = indicators.get("rsi_14", 50)
-            atr = indicators.get("atr_14", current_price * 0.01)  # Default to 1% of price
-            
+                confidence = 0.1
+
+            # ── TP/SL with ATR-based adaptive levels ──
+            # With trailing stop enabled: wider initial SL (3×ATR emergency)
+            # The trailing mechanism will tighten the SL once in profit
             entry_point = current_price
-            
-            if direction in [SignalDirection.BUY, SignalDirection.STRONG_BUY]:
-                stop_loss = entry_point - (atr * 2)
-                take_profit = entry_point + (atr * 3)
+            adx_data = indicators.get("adx")
+            is_trending = adx_data and adx_data["adx"] > 25
+            use_trailing = info.get("trailing_stop", False)
+
+            if use_trailing:
+                # Wide emergency SL — trailing stop manages the real exit
+                sl_mult = 3.0
+                tp_mult = 4.0 if is_trending else 3.5
             else:
-                stop_loss = entry_point + (atr * 2)
-                take_profit = entry_point - (atr * 3)
-            
+                if is_trending:
+                    sl_mult, tp_mult = 1.5, 3.5
+                else:
+                    sl_mult, tp_mult = 1.5, 3.0
+
+            if direction in [SignalDirection.BUY, SignalDirection.STRONG_BUY]:
+                stop_loss = entry_point - (atr * sl_mult)
+                take_profit = entry_point + (atr * tp_mult)
+            else:
+                stop_loss = entry_point + (atr * sl_mult)
+                take_profit = entry_point - (atr * tp_mult)
+
             risk = abs(entry_point - stop_loss)
             reward = abs(take_profit - entry_point)
             risk_reward_ratio = reward / risk if risk > 0 else 0
-            
+
             signal = Signal(
                 symbol=symbol,
                 direction=direction,
@@ -340,87 +649,231 @@ async def generate_signals() -> List[Signal]:
                 stop_loss=stop_loss,
                 risk_reward_ratio=risk_reward_ratio,
             )
-            
+
             signals.append(signal)
-            log_event(f"[SIGNAL] {symbol}: {direction.value} | Score: {score:.2f} | Price: ${current_price:.2f}", "event")
-            
-            # Send iMessage alert if conditions are met
+            signals_cache[symbol] = signal
+            log_event(f"[SIGNAL] {symbol}: {direction.value} | Score: {score:.2f} | Conf: {confidence:.0%} | ${current_price:.2f}", "event")
+
+            # Send alert
             try:
                 alert_dispatcher = get_dispatcher()
                 alert_result = alert_dispatcher.send_alert(
-                    symbol=symbol,
-                    direction=direction.value,
-                    score=score,
-                    confidence=confidence,
-                    current_price=current_price,
-                    entry_point=entry_point,
-                    take_profit=take_profit,
-                    stop_loss=stop_loss
+                    symbol=symbol, direction=direction.value, score=score,
+                    confidence=confidence, current_price=current_price,
+                    entry_point=entry_point, take_profit=take_profit, stop_loss=stop_loss
                 )
-                
                 if alert_result["status"] == "sent":
-                    log_event(f"[iMessage ALERT] Sent for {symbol} {direction.value}", "success")
-                elif alert_result["status"] == "filtered":
-                    log_event(f"[iMessage ALERT] Filtered for {symbol} (score too low)", "info")
-                else:
-                    log_event(f"[iMessage ALERT] Failed for {symbol}: {alert_result.get('error', 'Unknown error')}", "error")
-                    
+                    log_event(f"[ALERT] Sent for {symbol} {direction.value}", "success")
             except Exception as alert_error:
-                log_event(f"[iMessage ALERT] Error sending alert for {symbol}: {str(alert_error)}", "error")
-            
+                pass  # Silent alert failures
+
         except Exception as e:
             log_event(f"Error generating signal for {symbol}: {str(e)}", "error")
-    
+
+    # Update equity after signals
+    update_account_equity()
+
     return signals
+
+# =====================
+# AUTO-TRADING ENGINE
+# =====================
+
+AUTO_TRADE_INTERVAL_SEC = 300  # Scan every 5 minutes
+AUTO_TRADE_ENABLED = True      # Master switch — can be toggled via API
+_trading_task = None           # Reference to the background task
+
+async def auto_trade_loop():
+    """
+    Background loop that runs autonomously:
+    1. Updates prices & checks TP/SL on open positions (auto-closes hits)
+    2. Generates fresh signals for all instruments
+    3. Opens trades automatically when signal is strong enough
+    4. Persists account state to DB
+    """
+    global AUTO_TRADE_ENABLED
+
+    # Wait a few seconds for startup to finish
+    await asyncio.sleep(5)
+    log_event("[AUTO-TRADE] Background trading loop started", "event")
+
+    while True:
+        try:
+            if not AUTO_TRADE_ENABLED:
+                await asyncio.sleep(AUTO_TRADE_INTERVAL_SEC)
+                continue
+
+            # ── Step 1: Update prices & auto-close TP/SL ──
+            auto_closed = broker.update_prices(data_provider)
+            if auto_closed:
+                for closed in auto_closed:
+                    pos = closed.get("position", {})
+                    reason = closed.get("exit_reason", "TP/SL")
+                    pnl = pos.get("pnl_usd", 0)
+                    sym = pos.get("symbol", "?")
+                    log_event(
+                        f"[AUTO-CLOSE] {sym} {pos.get('direction', '').upper()} hit {reason} "
+                        f"| P&L: {'+'if pnl>=0 else ''}{pnl:.2f} USD",
+                        "success" if pnl >= 0 else "warning"
+                    )
+                db.save_account(account)
+
+            # ── Step 2: Generate fresh signals ──
+            signals = await generate_signals()
+
+            # ── Step 3: Auto-execute trades on strong signals ──
+            can_trade, reason = check_circuit_breaker()
+            if can_trade:
+                for signal in signals:
+                    if signal.direction in (SignalDirection.NEUTRAL,):
+                        continue
+
+                    sym = signal.symbol
+                    info = INSTRUMENTS.get(sym, {})
+                    min_score = info.get("min_score", 0.15)
+
+                    # Only auto-trade on signals that clear the threshold
+                    if abs(signal.score) < min_score:
+                        continue
+
+                    # Determine trade direction
+                    if signal.direction in (SignalDirection.BUY, SignalDirection.STRONG_BUY):
+                        direction = "buy"
+                    elif signal.direction in (SignalDirection.SELL, SignalDirection.STRONG_SELL):
+                        direction = "sell"
+                    else:
+                        continue
+
+                    # Skip if already have a position on this symbol in same direction
+                    already_open = any(
+                        p["symbol"] == sym and p["direction"] == direction
+                        for p in open_positions
+                    )
+                    if already_open:
+                        continue
+
+                    # Calculate position size and open trade
+                    entry_price = signal.entry_point
+                    size = calculate_position_size(sym, entry_price, signal.stop_loss)
+
+                    result = broker.open_position(
+                        symbol=sym, direction=direction, size=size,
+                        take_profit=signal.take_profit, stop_loss=signal.stop_loss,
+                        entry_price=entry_price,
+                    )
+                    if "error" not in result:
+                        log_event(
+                            f"[AUTO-TRADE] Opened {direction.upper()} {sym} @ {entry_price:.2f} "
+                            f"| Score: {signal.score:.3f} | SL: {signal.stop_loss:.2f} TP: {signal.take_profit:.2f}",
+                            "success"
+                        )
+                    else:
+                        log_event(f"[AUTO-TRADE] Failed to open {sym}: {result['error']}", "warning")
+            else:
+                log_event(f"[AUTO-TRADE] Skipping: {reason}", "info")
+
+            # ── Step 4: Persist state ──
+            db.save_account(account)
+            save_signal_cache()
+
+            log_event(
+                f"[AUTO-TRADE] Scan complete | Balance: {account['balance_pln']:.2f} PLN "
+                f"| Open: {len(open_positions)} | Closed: {len(closed_positions)}",
+                "info"
+            )
+
+        except Exception as e:
+            log_event(f"[AUTO-TRADE] Error in trading loop: {str(e)}", "error")
+
+        await asyncio.sleep(AUTO_TRADE_INTERVAL_SEC)
+
+
+@app.get("/api/auto-trade")
+async def get_auto_trade_status():
+    """Get auto-trading status."""
+    return {
+        "enabled": AUTO_TRADE_ENABLED,
+        "interval_sec": AUTO_TRADE_INTERVAL_SEC,
+        "last_scan": account.get("last_scan"),
+        "open_positions": len(open_positions),
+    }
+
+@app.post("/api/auto-trade")
+async def set_auto_trade(enabled: bool):
+    """Enable/disable auto-trading."""
+    global AUTO_TRADE_ENABLED
+    AUTO_TRADE_ENABLED = enabled
+    log_event(f"[AUTO-TRADE] {'ENABLED' if enabled else 'DISABLED'}", "event")
+    return {"enabled": AUTO_TRADE_ENABLED}
+
+@app.post("/api/auto-trade/interval")
+async def set_auto_trade_interval(seconds: int):
+    """Set auto-trade scan interval (min 60s, max 3600s)."""
+    global AUTO_TRADE_INTERVAL_SEC
+    if seconds < 60 or seconds > 3600:
+        return {"error": "Interval must be between 60 and 3600 seconds"}
+    AUTO_TRADE_INTERVAL_SEC = seconds
+    log_event(f"[AUTO-TRADE] Interval set to {seconds}s", "event")
+    return {"interval_sec": AUTO_TRADE_INTERVAL_SEC}
+
 
 @app.on_event("startup")
 async def startup():
     """Initialize on startup"""
-    log_event("[CFD TRADING BOT v0.1.0 - WEB SCRAPING EDITION]", "event")
-    log_event("Initializing Alpha Vantage client...", "info")
-    global alpha_client, account
+    global _trading_task
+
+    log_event("[CFD TRADING BOT v0.2.0 - PLN SIMULATION]", "event")
+    log_event("Instruments: XAU (Gold), XAG (Silver), US100 (Nasdaq), BTC (Bitcoin)", "info")
+
+    # Database status
+    if db.is_connected():
+        log_event("MongoDB connected – trades & account persisted", "success")
+        log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
+        db.ensure_candle_indexes()
+        log_event("Candle history indexes ensured", "info")
+    else:
+        log_event("MongoDB not configured – using in-memory storage (set MONGO_URI)", "warning")
+
+    global alpha_client
     alpha_client = get_alpha_vantage_client()
     if alpha_client:
-        log_event("✓ Connected to Alpha Vantage API", "success")
-    else:
-        log_event("✗ Failed to connect to Alpha Vantage API", "error")
-    
-    # Load signal history cache
+        log_event("Connected to Alpha Vantage API", "success")
     load_signal_cache()
-    
-    # Initialize web scraping news client
     try:
-        news_client = get_news_client()
-        log_event("✓ Web scraping news client initialized", "success")
+        get_news_client()
+        log_event("Web scraping news client initialized", "success")
     except Exception as e:
-        log_event(f"✗ Failed to initialize web scraping news client: {e}", "error")
-    
-    # Initialize account
+        log_event(f"Failed to initialize news client: {e}", "error")
     account["last_scan"] = datetime.utcnow().isoformat()
-    log_event(f"✓ Account initialized: Balance ${account['balance']}", "success")
+    log_event(f"Account loaded: {account['balance_pln']:.2f} PLN ({account['balance_usd']:.2f} USD)", "success")
+
+    # Start autonomous trading loop
+    _trading_task = asyncio.create_task(auto_trade_loop())
+    log_event("[AUTO-TRADE] Background task launched (5 min interval)", "success")
 
 @app.on_event("shutdown")
 async def shutdown():
     """Cleanup on shutdown"""
-    log_event("Shutting down CFD Trading Bot...", "info")
-    
-    # Save signal history cache
+    global _trading_task
+    if _trading_task:
+        _trading_task.cancel()
+        try:
+            await _trading_task
+        except asyncio.CancelledError:
+            pass
     save_signal_cache()
-    
-    # Close news client session
+    db.save_account(account)
+    db.save_event_log(event_log)
     try:
         news_client = get_news_client()
         if hasattr(news_client, 'close'):
             await news_client.close()
-            log_event("✓ News client session closed", "success")
-    except Exception as e:
-        log_event(f"Error closing news client: {e}", "warning")
-    
-    log_event("✓ Shutdown complete", "success")
+    except Exception:
+        pass
 
 @app.get("/")
 async def root():
-    return {"message": "CFD Trading Bot API", "status": "running", "version": "0.1.0"}
+    return {"message": "CFD Trading Bot API", "status": "running", "version": "0.2.0"}
 
 @app.get("/health")
 async def health():
@@ -428,300 +881,427 @@ async def health():
 
 @app.get("/api/signals", response_model=SignalResponse)
 async def get_signals():
-    """
-    Fetch real trading signals
-    """
-    log_event("Generating signals on demand...", "info")
+    """Fetch real trading signals"""
+    log_event("Generating signals...", "info")
     signals = await generate_signals()
     return SignalResponse(signals=signals)
 
 @app.get("/api/logs")
 async def get_logs():
-    """
-    Get event logs for console
-    """
     return {"logs": event_log}
 
 @app.get("/api/account")
 async def get_account():
-    """
-    Get account info (balance, equity, positions)
-    """
+    """Get account info with PLN balance"""
+    update_account_equity()
     return account
 
 @app.post("/api/account/mode")
 async def set_account_mode(mode: str):
-    """
-    Set trading mode: "simulate" or "live"
-    """
     global account
     if mode not in ["simulate", "live"]:
         return {"error": "Invalid mode. Use 'simulate' or 'live'"}
-    
     account["mode"] = mode
     account["dry_run"] = (mode == "simulate")
-    
+    db.save_account(account)
     log_event(f"Trading mode changed to: {mode.upper()}", "event")
-    
+    return {"mode": account["mode"], "dry_run": account["dry_run"]}
+
+# =====================
+# INSTRUMENT SETTINGS
+# =====================
+
+@app.get("/api/instruments")
+async def get_instruments():
+    """Get all instruments with their settings (leverage, lot_size, etc.)."""
     return {
-        "mode": account["mode"],
-        "dry_run": account["dry_run"],
-        "message": f"Now in {mode.upper()} mode"
+        symbol: {
+            "name": info["name"],
+            "leverage": info.get("leverage", 1),
+            "lot_size": info.get("lot_size", 1),
+            "pip_size": info.get("pip_size", 0.01),
+            "asset_class": info.get("asset_class", ""),
+            "trailing_stop": info.get("trailing_stop", False),
+        }
+        for symbol, info in INSTRUMENTS.items()
     }
+
+@app.post("/api/instruments/{symbol}/leverage")
+async def set_leverage(symbol: str, leverage: int):
+    """Update leverage for an instrument. Valid values: 1-100."""
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown instrument: {symbol}"}
+    if leverage < 1 or leverage > 100:
+        return {"error": "Leverage must be between 1 and 100"}
+    INSTRUMENTS[symbol]["leverage"] = leverage
+    log_event(f"[SETTINGS] {symbol} leverage set to x{leverage}", "event")
+    return {"symbol": symbol, "leverage": leverage}
+
+@app.post("/api/instruments/{symbol}/trailing_stop")
+async def set_trailing_stop(symbol: str, enabled: bool):
+    """Enable/disable trailing stop for an instrument."""
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown instrument: {symbol}"}
+    INSTRUMENTS[symbol]["trailing_stop"] = enabled
+    log_event(f"[SETTINGS] {symbol} trailing stop {'enabled' if enabled else 'disabled'}", "event")
+    return {"symbol": symbol, "trailing_stop": enabled}
+
+# =====================
+# SIMULATED TRADING API
+# =====================
+
+@app.post("/api/trade/open")
+async def open_trade(symbol: str, direction: str, size: float = 0):
+    """
+    Open a simulated trade position.
+    size: lot size - if 0, automatically calculated from risk management rules.
+    """
+    global account
+
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown instrument: {symbol}"}
+    if direction not in ["buy", "sell"]:
+        return {"error": "Direction must be 'buy' or 'sell'"}
+
+    # Circuit breaker check
+    can_trade, reason = check_circuit_breaker()
+    if not can_trade:
+        log_event(f"[BLOCKED] {reason}", "warning")
+        return {"error": reason}
+
+    # Check for duplicate position on same symbol+direction
+    for pos in open_positions:
+        if pos["symbol"] == symbol and pos["direction"] == direction:
+            return {"error": f"Already have an open {direction} position on {symbol}"}
+
+    quote = data_provider.get_quote(symbol)
+    if not quote:
+        return {"error": f"Cannot get price for {symbol}"}
+
+    entry_price = quote["price"]
+
+    # Get signal data for TP/SL
+    signal = signals_cache.get(symbol)
+    if signal:
+        take_profit = signal.take_profit
+        stop_loss = signal.stop_loss
+    else:
+        atr = entry_price * 0.01
+        if direction == "buy":
+            take_profit = entry_price + (atr * 3)
+            stop_loss = entry_price - (atr * 2)
+        else:
+            take_profit = entry_price - (atr * 3)
+            stop_loss = entry_price + (atr * 2)
+
+    if size <= 0:
+        size = calculate_position_size(symbol, entry_price, stop_loss)
+
+    result = broker.open_position(
+        symbol=symbol, direction=direction, size=size,
+        take_profit=take_profit, stop_loss=stop_loss, entry_price=entry_price,
+    )
+    if "error" in result:
+        return result
+
+    log_event(f"[TRADE] Opened {direction.upper()} {symbol} @ {entry_price:.2f} | Size: {size}", "success")
+    return result
+
+@app.post("/api/trade/close/{position_id}")
+async def close_trade(position_id: str):
+    """Close an open trade position via broker"""
+    # Get current price for the position
+    position = next((p for p in open_positions if p["id"] == position_id), None)
+    if not position:
+        return {"error": f"Position {position_id} not found"}
+
+    quote = data_provider.get_quote(position["symbol"])
+    exit_price = quote["price"] if quote else None
+
+    result = broker.close_position(position_id, exit_price=exit_price)
+    if "error" in result:
+        return result
+
+    closed_pos = result["position"]
+    pnl_pln = closed_pos.get("pnl_pln", 0)
+    pnl_usd = closed_pos.get("pnl_usd", 0)
+    emoji = "+" if pnl_usd >= 0 else ""
+    log_event(
+        f"[TRADE] Closed {position['direction'].upper()} {position['symbol']} @ {exit_price:.2f} | P&L: {emoji}{pnl_pln:.2f} PLN ({emoji}{pnl_usd:.2f} USD)",
+        "success" if pnl_usd >= 0 else "warning"
+    )
+
+    update_account_equity()
+    return result
+
+@app.get("/api/trades/open")
+async def get_open_trades():
+    """Get all open positions with live P&L"""
+    update_account_equity()
+    return {"positions": open_positions, "count": len(open_positions)}
+
+@app.get("/api/trades/history")
+async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
+    """Get closed trade history. Queries DB for full history beyond in-memory cache."""
+    # For first page, use fast in-memory list; beyond that, query DB
+    if offset == 0 and limit <= len(closed_positions):
+        trades = closed_positions[:limit]
+    else:
+        # Query DB directly for paginated access
+        trades = db.load_closed_positions(limit=limit + offset)
+        trades = trades[offset:offset + limit] if offset < len(trades) else []
+
+    total_in_db = db.count_closed_positions() or len(closed_positions)
+
+    return {
+        "trades": trades,
+        "total": total_in_db,
+        "offset": offset,
+        "win_count": account["win_count"],
+        "loss_count": account["loss_count"],
+        "win_rate": account["win_rate"],
+        "total_pnl_pln": account["total_pnl_pln"],
+        "total_pnl_usd": account["total_pnl_usd"]
+    }
+
+@app.post("/api/account/reset")
+async def reset_account():
+    """Reset simulated account to starting balance"""
+    if not hasattr(broker, 'reset'):
+        return {"error": "Reset not supported for live brokers"}
+    result = broker.reset()
+    log_event("[ACCOUNT] Reset to 10,000.00 PLN", "event")
+    return {"status": "reset", "account": account}
+
+# =====================
+# NEWS & CHART ENDPOINTS
+# =====================
 
 @app.get("/api/news/all")
 async def get_all_news():
-    """
-    Get latest news for all symbols (combined list) - concurrent web scraping
-    """
+    """Get latest news for all symbols"""
     log_event("Fetching news for all symbols...", "info")
     news_client = get_news_client()
-    
     all_news = []
-    
-    # Fetch news concurrently with web scraping
+
     for i, (symbol, info) in enumerate(INSTRUMENTS.items()):
         try:
-            log_event(f"Scraping news for {symbol} ({info['name']})...")
             news = await news_client.get_news(symbol, limit=5)
             if news:
-                # Add symbol + name to each article
                 for article in news:
                     article["symbol"] = symbol
                     article["name"] = info["name"]
                 all_news.extend(news)
-                log_event(f"Scraped {len(news)} articles for {symbol}")
-            else:
-                log_event(f"No news scraped for {symbol}", "info")
-                # No mock news fallback - only real data
-            
-            # Small delay between requests to be respectful to websites
             if i < len(INSTRUMENTS) - 1:
-                await asyncio.sleep(0.5)  # 500ms delay
-                
+                await asyncio.sleep(0.5)
         except Exception as e:
             log_event(f"Failed to scrape news for {symbol}: {e}", "error")
-            # No mock news fallback - only real data
-    
-    # Sort by importance (highest first)
+
     all_news.sort(key=lambda x: x.get("importance", 0), reverse=True)
-    
-    log_event(f"Found {len(all_news)} total articles across all symbols", "success")
-    
-    return {
-        "news": all_news,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    return {"news": all_news, "timestamp": datetime.utcnow().isoformat()}
 
 @app.get("/api/news/{symbol}")
 async def get_news(symbol: str):
-    """
-    Get latest news and sentiment for a symbol (web scraping)
-    """
-    log_event(f"Scraping news for {symbol}...", "info")
     news_client = get_news_client()
-    
     try:
         news = await news_client.get_news(symbol, limit=5)
-        if not news:
-            log_event(f"No news scraped for {symbol}", "info")
-            news = []  # Empty list when no real news available
-        else:
-            log_event(f"Scraped {len(news)} articles for {symbol}", "success")
-        
-        return {
-            "symbol": symbol,
-            "news": news if news else [],
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
+        return {"symbol": symbol, "news": news or [], "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
-        log_event(f"Failed to scrape news for {symbol}: {e}", "error")
-        # Return empty news list on complete failure
-        return {
-            "symbol": symbol,
-            "news": [],
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"symbol": symbol, "news": [], "timestamp": datetime.utcnow().isoformat()}
 
 @app.get("/api/quote/{symbol}")
 async def get_quote(symbol: str):
-    """
-    Get current quote for a symbol
-    """
     global alpha_client
     if alpha_client is None:
         alpha_client = get_alpha_vantage_client()
-    
     quote = alpha_client.get_quote(symbol)
     return quote if quote else {"error": f"Failed to fetch quote for {symbol}"}
 
 @app.get("/api/chart/{symbol}")
 async def get_chart_data(symbol: str, resolution: str = "60", count: int = 50):
-    """
-    Get historical chart data for a symbol
-    resolution: 1, 5, 15, 30, 60 (minutes) or D (daily)
-    count: number of data points to return
-    """
+    """Get historical chart data for a symbol. Returns real data only (never synthetic)."""
     global alpha_client
     if alpha_client is None:
         alpha_client = get_alpha_vantage_client()
-    
-    log_event(f"Fetching chart data for {symbol} (resolution: {resolution}, count: {count})")
-    print(f"[DEBUG] Chart endpoint called with symbol={symbol}")
-    
-    try:
-        # Try Alpha Vantage first for real data
-        candles = alpha_client.get_candles(symbol, resolution, count)
-        
-        if candles and len(candles) > 0:
-            log_event(f"Retrieved {len(candles)} candles from Alpha Vantage for {symbol}")
-            
-            # Format for frontend chart with proper timestamp formatting
-            chart_data = []
-            for i, candle in enumerate(candles):
-                # Format timestamp based on resolution for consistent X-axis labels
-                timestamp = candle["timestamp"]
+
+    def _format_candles(candles):
+        chart_data = []
+        for candle in candles:
+            timestamp = candle.get("timestamp", "")
+            time_str = candle.get("time", "")
+            if not time_str and timestamp:
                 try:
                     dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    if resolution in ['1', '5', '15']:
-                        # For intraday: show HH:MM
-                        time_str = dt.strftime('%H:%M')
-                    elif resolution in ['30', '60']:
-                        # For hourly: show HH:00
-                        time_str = dt.strftime('%H:00')
-                    elif resolution == 'D':
-                        # For daily: show MM/DD
-                        time_str = dt.strftime('%m/%d')
-                    else:
-                        # Default fallback
-                        time_str = dt.strftime('%H:%M')
-                except:
-                    # Fallback to original timestamp if parsing fails
+                    time_str = dt.strftime('%m/%d') if resolution == 'D' else dt.strftime('%H:%M')
+                except Exception:
                     time_str = timestamp[:5] if len(timestamp) >= 5 else timestamp
-                
-                chart_data.append({
-                    "time": time_str,
-                    "close": round(candle["close"], 2),
-                    "open": round(candle["open"], 2),
-                    "high": round(candle["high"], 2),
-                    "low": round(candle["low"], 2),
-                    "volume": candle["volume"]
-                })
-            
-            return {
-                "symbol": symbol,
-                "data": chart_data,
-                "resolution": resolution,
-                "count": len(chart_data),
-                "source": "alpha_vantage"
-            }
-        else:
-            # Fallback to realistic price feeder
-            log_event(f"Alpha Vantage data unavailable, using realistic feeder for {symbol}")
-            price_feeder = get_realistic_price_feeder()
-            candles = price_feeder.get_candles(symbol, resolution, count)
-            
-            if candles:
-                chart_data = []
-                for i, candle in enumerate(candles):
-                    # Use the already formatted time from realistic feeder
-                    chart_data.append({
-                        "time": candle["time"],  # Already formatted by realistic feeder
-                        "close": round(candle["close"], 2),
-                        "open": round(candle["open"], 2),
-                        "high": round(candle["high"], 2),
-                        "low": round(candle["low"], 2),
-                        "volume": candle["volume"]
-                    })
-                
-                return {
-                    "symbol": symbol,
-                    "data": chart_data,
-                    "resolution": resolution,
-                    "count": len(chart_data),
-                    "source": "realistic_feeder"
-                }
-            else:
-                return {"error": f"No chart data available for {symbol}"}
-                
-    except Exception as e:
-        log_event(f"Error fetching chart data for {symbol}: {e}", "error")
-        return {"error": f"Failed to fetch chart data for {symbol}"}
+            chart_data.append({
+                "time": time_str,
+                "close": round(candle["close"], 2),
+                "open": round(candle["open"], 2),
+                "high": round(candle["high"], 2),
+                "low": round(candle["low"], 2),
+                "volume": candle.get("volume", 0)
+            })
+        return chart_data
 
-# iMessage Alert Endpoints
+    # Try live Alpha Vantage data
+    try:
+        candles = alpha_client.get_candles(symbol, resolution, count)
+        if candles and len(candles) > 0:
+            chart_data = _format_candles(candles)
+            fetched_at = datetime.utcnow().isoformat()
+            # Cache to DB for future fallback + accumulate history
+            db.save_candles(symbol, resolution, chart_data, "alpha_vantage")
+            db.store_candles(symbol, resolution, candles, "alpha_vantage")
+            return {
+                "symbol": symbol, "data": chart_data, "resolution": resolution,
+                "count": len(chart_data), "source": "alpha_vantage",
+                "fetched_at": fetched_at,
+            }
+    except Exception as e:
+        log_event(f"Alpha Vantage chart fetch failed for {symbol}: {e}", "warning")
+
+    # Fallback: load last cached real data from DB
+    cached = db.load_candles(symbol, resolution)
+    if cached and cached.get("candles"):
+        return {
+            "symbol": symbol, "data": cached["candles"], "resolution": resolution,
+            "count": len(cached["candles"]), "source": "cache",
+            "fetched_at": cached["fetched_at"],
+        }
+
+    return {"error": f"No real data available for {symbol}. Check API key or try again later."}
+
+# Alert Endpoints
 @app.get("/api/alerts/config")
 async def get_alert_config():
-    """Get current iMessage alert configuration"""
     dispatcher = get_dispatcher()
     return dispatcher.config.dict()
 
 @app.post("/api/alerts/config")
 async def update_alert_config(config: AlertConfig):
-    """Update iMessage alert configuration"""
     dispatcher = get_dispatcher()
     dispatcher.update_config(config)
-    log_event(f"Alert config updated: enabled={config.enabled}, recipient={config.recipient_phone}", "info")
     return {"status": "updated", "config": dispatcher.config.dict()}
 
 @app.post("/api/alerts/test")
 async def send_test_alert():
-    """Send a test iMessage alert"""
     dispatcher = get_dispatcher()
-    
     if not dispatcher.config.enabled:
-        return {"status": "error", "message": "Alerts are disabled. Enable them first."}
-    
+        return {"status": "error", "message": "Alerts are disabled"}
     try:
         result = dispatcher.send_alert(
-            symbol="TEST",
-            direction="buy",
-            score=0.8,
-            confidence=0.85,
-            current_price=50000.0,
-            entry_point=49500.0,
-            take_profit=51000.0,
-            stop_loss=49000.0
+            symbol="TEST", direction="buy", score=0.8, confidence=0.85,
+            current_price=50000.0, entry_point=49500.0, take_profit=51000.0, stop_loss=49000.0
         )
-        
         if result["status"] == "sent":
-            log_event("Test iMessage alert sent successfully", "success")
             return {"status": "sent", "message_id": result.get("message_id")}
-        else:
-            return {"status": "error", "message": result.get("error", "Failed to send test alert")}
-            
+        return {"status": "error", "message": result.get("error", "Failed")}
     except Exception as e:
-        log_event(f"Error sending test alert: {e}", "error")
         return {"status": "error", "message": str(e)}
 
 @app.get("/api/alerts/history")
-async def get_alert_history(
-    symbol: Optional[str] = None,
-    limit: int = Query(20, ge=1, le=100)
-):
-    """Get iMessage alert history"""
+async def get_alert_history(symbol: Optional[str] = None, limit: int = Query(20, ge=1, le=100)):
     dispatcher = get_dispatcher()
     history = dispatcher.get_alert_history(symbol=symbol, limit=limit)
-    return {
-        "history": history,
-        "total": len(history),
-        "symbol_filter": symbol
-    }
+    return {"history": history, "total": len(history), "symbol_filter": symbol}
 
 @app.delete("/api/alerts/history")
 async def clear_alert_history():
-    """Clear iMessage alert history"""
     dispatcher = get_dispatcher()
     dispatcher.clear_history()
-    log_event("Alert history cleared", "info")
     return {"status": "cleared"}
+
+# =====================
+# CANDLE HISTORY
+# =====================
+
+@app.get("/api/candles/stats")
+async def get_candle_stats():
+    """Get stored candle history statistics for all instruments."""
+    stats = {}
+    resolutions = ["1", "5", "15", "30", "60", "D"]
+    for symbol in INSTRUMENTS:
+        symbol_stats = {}
+        for res in resolutions:
+            cnt = db.count_candles(symbol, res)
+            if cnt > 0:
+                date_range = db.get_candle_date_range(symbol, res)
+                symbol_stats[res] = {"count": cnt, "range": date_range}
+        if symbol_stats:
+            stats[symbol] = symbol_stats
+    return {"stats": stats}
+
+
+@app.get("/api/candles/{symbol}")
+async def get_candle_history(
+    symbol: str,
+    resolution: str = "60",
+    count: int = Query(100, ge=1, le=5000),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    """
+    Get stored candle history for a symbol.
+    Supports aggregation: request any resolution and it will be built from
+    the smallest available stored interval.
+    """
+    # Direct fetch from accumulated history
+    candles = db.load_candle_history(symbol, resolution, start=start, end=end, limit=count)
+
+    # Try aggregation from smaller intervals if not enough data
+    if len(candles) < min(10, count):
+        source_candidates = {
+            "5": ["1"],
+            "15": ["5", "1"],
+            "30": ["15", "5", "1"],
+            "60": ["30", "15", "5", "1"],
+            "240": ["60", "30", "15"],
+            "D": ["60", "30", "15", "5", "1"],
+        }
+        for src_res in source_candidates.get(resolution, []):
+            stored = db.load_candle_history(symbol, src_res, start=start, end=end)
+            if stored and len(stored) >= 2:
+                aggregated = db.aggregate_candles(stored, resolution)
+                if len(aggregated) > len(candles):
+                    candles = aggregated[-count:]
+                    break
+
+    return {
+        "symbol": symbol,
+        "resolution": resolution,
+        "count": len(candles),
+        "candles": candles,
+    }
+
+
+# =====================
+# SERVE FRONTEND (production)
+# =====================
+# In production, the backend serves the built frontend as static files.
+# Build with: cd frontend && npm run build
+# The dist/ folder is served at / and all non-API routes fall back to index.html (SPA)
+
+import pathlib
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_frontend_dist = pathlib.Path(__file__).parent.parent / "frontend" / "dist"
+
+if _frontend_dist.is_dir():
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """Serve frontend SPA – all non-API routes get index.html"""
+        file_path = _frontend_dist / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(_frontend_dist / "index.html")
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     args = parser.parse_args()
-    
-    log_event(f"Starting CFD Trading Bot API server on {args.host}:{args.port}...", "info")
     uvicorn.run(app, host=args.host, port=args.port)
