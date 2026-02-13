@@ -343,6 +343,22 @@ def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, L
         scores.append(momentum_score)
         weights.append(0.05)
 
+    # --- Candlestick Patterns ---
+    cp = indicators.get("candlestick_patterns")
+    if cp and cp.get("patterns") and abs(cp["net_bias"]) > 0.1:
+        pattern_names = ", ".join(p["name"] for p in cp["patterns"])
+        cp_score = max(-1, min(1, cp["net_bias"]))
+        components.append(Component(
+            type=ComponentType.TECHNICAL,
+            name="Candlestick Patterns",
+            value=cp_score,
+            description=f"Patterns: {pattern_names} (bias: {cp['net_bias']:.2f})",
+            confidence=0.7,
+            indicators={"patterns": [p["name"] for p in cp["patterns"]], "net_bias": cp["net_bias"]}
+        ))
+        scores.append(cp_score)
+        weights.append(0.15)
+
     # --- Calculate weighted composite score ---
     if scores:
         total_weight = sum(weights)
@@ -469,6 +485,29 @@ async def generate_signals() -> List[Signal]:
 
             indicators["_closes"] = [c["close"] for c in candles]
 
+            # ── Multi-timeframe: fetch daily candles for higher-TF trend ──
+            htf_bias = 0.0  # -1 to +1 bias from higher timeframe
+            try:
+                htf_candles = data_provider.get_candles(symbol, resolution="D", count=60)
+                if htf_candles and len(htf_candles) >= 50:
+                    htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
+                    if htf_ind:
+                        htf_sma20 = htf_ind.get("sma_20")
+                        htf_sma50 = htf_ind.get("sma_50")
+                        htf_adx = htf_ind.get("adx")
+                        htf_price = htf_candles[-1]["close"]
+                        # Daily trend direction from SMA cross
+                        if htf_sma20 and htf_sma50 and htf_sma50 > 0:
+                            sma_diff = ((htf_sma20 - htf_sma50) / htf_sma50) * 100
+                            htf_bias = max(-1, min(1, sma_diff / 3))
+                        # Strengthen bias if daily ADX shows strong trend
+                        if htf_adx and htf_adx["adx"] > 30 and abs(htf_bias) > 0.1:
+                            htf_bias *= 1.3
+                            htf_bias = max(-1, min(1, htf_bias))
+                        log_event(f"[MTF] {symbol} daily bias: {htf_bias:+.2f}")
+            except Exception as e:
+                log_event(f"[MTF] Failed to get daily data for {symbol}: {e}", "warning")
+
             # ── Volatility filter ──
             atr = indicators.get("atr_14", current_price * 0.01)
             atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
@@ -491,13 +530,24 @@ async def generate_signals() -> List[Signal]:
             except Exception as e:
                 log_event(f"Failed to fetch news for {symbol}: {e}", "warning")
 
-            # Final score: 85% technical + 15% news (only if news is available and meaningful)
+            # Final score: blend technical + news + higher-TF bias
             effective_news = news_score if abs(news_score) > 0.1 else 0.0
             if effective_news != 0:
-                score = technical_score * 0.85 + effective_news * 0.15
+                score = technical_score * 0.80 + effective_news * 0.10 + htf_bias * 0.10
+            elif abs(htf_bias) > 0.1:
+                score = technical_score * 0.85 + htf_bias * 0.15
             else:
-                score = technical_score  # 100% technical when no news
+                score = technical_score  # 100% technical when no news/HTF
             score = max(-1, min(1, score))
+
+            # ── Multi-timeframe alignment filter ──
+            # If HTF strongly opposes the signal direction, reject the trade
+            if abs(htf_bias) > 0.3:
+                is_buy_signal = score > 0
+                htf_bullish = htf_bias > 0
+                if is_buy_signal != htf_bullish:
+                    log_event(f"[MTF SKIP] {symbol} signal opposes daily trend (bias: {htf_bias:+.2f})", "info")
+                    score *= 0.5  # Halve the score, likely falls below threshold
 
             # ── Per-instrument entry threshold ──
             min_score = info.get("min_score", 0.15)

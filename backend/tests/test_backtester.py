@@ -161,6 +161,51 @@ class TestIndicators:
         assert "bollinger_bands" in result
         assert "adx" in result
         assert "stoch_rsi" in result
+        assert "candlestick_patterns" in result
+
+    def test_candlestick_patterns(self, gold_candles):
+        cp = TechnicalIndicators.candlestick_patterns(gold_candles)
+        assert cp is not None
+        assert "patterns" in cp
+        assert "net_bias" in cp
+        assert -1 <= cp["net_bias"] <= 1
+        for p in cp["patterns"]:
+            assert "name" in p
+            assert "bias" in p
+            assert "strength" in p
+
+    def test_candlestick_bullish_engulfing(self):
+        """Test that a bullish engulfing pattern is detected."""
+        candles = [
+            {"open": 105, "high": 106, "low": 99, "close": 100, "volume": 100},  # bearish
+            {"open": 102, "high": 103, "low": 98, "close": 99, "volume": 100},   # bearish
+            {"open": 98,  "high": 107, "low": 97, "close": 106, "volume": 200},  # big bullish engulfing
+        ]
+        cp = TechnicalIndicators.candlestick_patterns(candles)
+        assert cp is not None
+        names = [p["name"] for p in cp["patterns"]]
+        assert "BULLISH_ENGULFING" in names
+        assert cp["net_bias"] > 0
+
+    def test_candlestick_bearish_engulfing(self):
+        """Test that a bearish engulfing pattern is detected."""
+        candles = [
+            {"open": 100, "high": 107, "low": 99, "close": 106, "volume": 100},  # bullish
+            {"open": 104, "high": 108, "low": 103, "close": 107, "volume": 100},  # bullish
+            {"open": 108, "high": 109, "low": 100, "close": 101, "volume": 200},  # big bearish engulfing
+        ]
+        cp = TechnicalIndicators.candlestick_patterns(candles)
+        assert cp is not None
+        names = [p["name"] for p in cp["patterns"]]
+        assert "BEARISH_ENGULFING" in names
+        assert cp["net_bias"] < 0
+
+    def test_candlestick_too_few_candles(self):
+        """Need at least 3 candles."""
+        candles = [
+            {"open": 100, "high": 105, "low": 95, "close": 102, "volume": 100},
+        ]
+        assert TechnicalIndicators.candlestick_patterns(candles) is None
 
 
 # ── Signal scoring tests ──

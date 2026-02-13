@@ -263,6 +263,102 @@ class TechnicalIndicators:
         }
 
     @staticmethod
+    def candlestick_patterns(candles: List[Dict]) -> Optional[Dict]:
+        """
+        Detect candlestick formations on the last few bars.
+        Returns a dict with pattern name, direction bias (-1 to +1), and strength.
+
+        Patterns detected:
+        - Engulfing (bullish/bearish)
+        - Hammer / Inverted Hammer
+        - Doji (indecision)
+        - Morning Star / Evening Star (3-bar reversal)
+        - Three White Soldiers / Three Black Crows (3-bar continuation)
+        """
+        if len(candles) < 3:
+            return None
+
+        patterns = []
+
+        c0 = candles[-3]  # oldest of last 3
+        c1 = candles[-2]  # middle
+        c2 = candles[-1]  # most recent
+
+        body2 = c2["close"] - c2["open"]
+        body1 = c1["close"] - c1["open"]
+        body0 = c0["close"] - c0["open"]
+        range2 = c2["high"] - c2["low"] or 0.0001
+        range1 = c1["high"] - c1["low"] or 0.0001
+        abs_body2 = abs(body2)
+        abs_body1 = abs(body1)
+        abs_body0 = abs(body0)
+
+        # --- Engulfing ---
+        # Bullish: previous bearish, current bullish body engulfs previous body
+        if body1 < 0 and body2 > 0 and c2["open"] <= c1["close"] and c2["close"] >= c1["open"]:
+            patterns.append({"name": "BULLISH_ENGULFING", "bias": 0.7, "strength": abs_body2 / range2})
+        # Bearish: previous bullish, current bearish body engulfs previous body
+        if body1 > 0 and body2 < 0 and c2["open"] >= c1["close"] and c2["close"] <= c1["open"]:
+            patterns.append({"name": "BEARISH_ENGULFING", "bias": -0.7, "strength": abs_body2 / range2})
+
+        # --- Hammer / Inverted Hammer ---
+        lower_wick2 = min(c2["open"], c2["close"]) - c2["low"]
+        upper_wick2 = c2["high"] - max(c2["open"], c2["close"])
+        # Hammer: small body at top, long lower wick (>2x body), short upper wick
+        if abs_body2 > 0 and lower_wick2 >= abs_body2 * 2 and upper_wick2 < abs_body2 * 0.5:
+            patterns.append({"name": "HAMMER", "bias": 0.6, "strength": lower_wick2 / range2})
+        # Inverted Hammer / Shooting Star: small body at bottom, long upper wick
+        if abs_body2 > 0 and upper_wick2 >= abs_body2 * 2 and lower_wick2 < abs_body2 * 0.5:
+            # Shooting star if after uptrend (bearish), inverted hammer if after downtrend (bullish)
+            if c1["close"] > c0["close"]:  # after uptick = shooting star
+                patterns.append({"name": "SHOOTING_STAR", "bias": -0.6, "strength": upper_wick2 / range2})
+            else:
+                patterns.append({"name": "INVERTED_HAMMER", "bias": 0.5, "strength": upper_wick2 / range2})
+
+        # --- Doji ---
+        # Very small body relative to range (<10%)
+        if range2 > 0 and abs_body2 / range2 < 0.10:
+            patterns.append({"name": "DOJI", "bias": 0.0, "strength": 1.0 - abs_body2 / range2})
+
+        # --- Morning Star (bullish 3-bar reversal) ---
+        # Bar 0: large bearish, Bar 1: small body (star), Bar 2: large bullish closing above bar0 midpoint
+        mid0 = (c0["open"] + c0["close"]) / 2
+        if (body0 < 0 and abs_body0 > range2 * 0.3
+                and abs_body1 < abs_body0 * 0.4
+                and body2 > 0 and c2["close"] > mid0):
+            patterns.append({"name": "MORNING_STAR", "bias": 0.8, "strength": abs_body2 / range2})
+
+        # --- Evening Star (bearish 3-bar reversal) ---
+        if (body0 > 0 and abs_body0 > range2 * 0.3
+                and abs_body1 < abs_body0 * 0.4
+                and body2 < 0 and c2["close"] < mid0):
+            patterns.append({"name": "EVENING_STAR", "bias": -0.8, "strength": abs_body2 / range2})
+
+        # --- Three White Soldiers (bullish continuation) ---
+        if body0 > 0 and body1 > 0 and body2 > 0:
+            if c1["close"] > c0["close"] and c2["close"] > c1["close"]:
+                if c1["open"] > c0["open"] and c2["open"] > c1["open"]:
+                    patterns.append({"name": "THREE_WHITE_SOLDIERS", "bias": 0.7, "strength": 0.8})
+
+        # --- Three Black Crows (bearish continuation) ---
+        if body0 < 0 and body1 < 0 and body2 < 0:
+            if c1["close"] < c0["close"] and c2["close"] < c1["close"]:
+                if c1["open"] < c0["open"] and c2["open"] < c1["open"]:
+                    patterns.append({"name": "THREE_BLACK_CROWS", "bias": -0.7, "strength": 0.8})
+
+        if not patterns:
+            return {"patterns": [], "net_bias": 0.0}
+
+        # Net bias: weighted average by strength
+        total_strength = sum(p["strength"] for p in patterns)
+        net_bias = sum(p["bias"] * p["strength"] for p in patterns) / total_strength if total_strength > 0 else 0
+
+        return {
+            "patterns": patterns,
+            "net_bias": round(max(-1, min(1, net_bias)), 4),
+        }
+
+    @staticmethod
     def calculate_all(
         candles: List[Dict],
         period: int = 14
@@ -288,4 +384,5 @@ class TechnicalIndicators:
             "adx": TechnicalIndicators.adx(highs, lows, closes, 14),
             "stoch_rsi": TechnicalIndicators.stochastic_rsi(closes, 14, 14),
             "volume_profile": TechnicalIndicators.volume_profile(candles, 20),
+            "candlestick_patterns": TechnicalIndicators.candlestick_patterns(candles),
         }

@@ -122,6 +122,12 @@ def calculate_signal_score(indicators: dict) -> Tuple[float, str]:
         scores.append(max(-1, min(1, mom_pct / 2)))
         weights.append(0.05)
 
+    # Candlestick Patterns
+    cp = indicators.get("candlestick_patterns")
+    if cp and cp.get("patterns") and abs(cp["net_bias"]) > 0.1:
+        scores.append(max(-1, min(1, cp["net_bias"])))
+        weights.append(0.15)
+
     # Composite
     if scores:
         total_w = sum(weights)
@@ -230,15 +236,33 @@ def run_backtest(
     risk_per_trade_pct: float = 2.0,
     max_concurrent: int = 1,
     verbose: bool = False,
+    htf_candles: Optional[List[Dict]] = None,
 ) -> BacktestResult:
     """
     Run backtest over historical candle data.
 
     Walks forward through candles, computing indicators on the trailing window,
     generating signals, and simulating trades with TP/SL exits.
+
+    htf_candles: optional higher-timeframe (e.g. daily) candles for multi-TF filter.
     """
     if len(candles) < LOOKBACK + 10:
         raise ValueError(f"Need at least {LOOKBACK + 10} candles, got {len(candles)}")
+
+    # Pre-compute higher-timeframe (daily) trend bias if HTF candles provided
+    htf_bias = 0.0
+    if htf_candles and len(htf_candles) >= 50:
+        htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
+        if htf_ind:
+            htf_sma20 = htf_ind.get("sma_20")
+            htf_sma50 = htf_ind.get("sma_50")
+            htf_adx = htf_ind.get("adx")
+            if htf_sma20 and htf_sma50 and htf_sma50 > 0:
+                sma_diff = ((htf_sma20 - htf_sma50) / htf_sma50) * 100
+                htf_bias = max(-1, min(1, sma_diff / 3))
+            if htf_adx and htf_adx["adx"] > 30 and abs(htf_bias) > 0.1:
+                htf_bias *= 1.3
+                htf_bias = max(-1, min(1, htf_bias))
 
     trades: List[BacktestTrade] = []
     open_trades: List[BacktestTrade] = []
@@ -364,6 +388,16 @@ def run_backtest(
 
         score, component_scores = calculate_signal_score(ind)
         total_signals += 1
+
+        # Blend in higher-TF bias (if available)
+        if abs(htf_bias) > 0.1:
+            score = score * 0.85 + htf_bias * 0.15
+            score = max(-1, min(1, score))
+
+        # Multi-TF alignment filter: halve score if opposing daily trend
+        if abs(htf_bias) > 0.3:
+            if (score > 0) != (htf_bias > 0):
+                score *= 0.5
 
         # Per-instrument threshold
         inst_config = INSTRUMENT_CONFIG.get(symbol, {})

@@ -120,6 +120,20 @@ function calculateMACD(prices: number[], fast = 12, slow = 26, signal = 9) {
   return { macdLine, signalLine, histogram };
 }
 
+// Trading sessions (UTC hours)
+const TRADING_SESSIONS = [
+  { name: 'Tokyo',  start: 0,  end: 9,  color: '#f97316', abbr: 'TKY' },  // orange
+  { name: 'London', start: 7,  end: 16, color: '#3b82f6', abbr: 'LDN' },  // blue
+  { name: 'NY',     start: 13, end: 22, color: '#22c55e', abbr: 'NY' },   // green
+];
+
+function getSessionForHour(hour: number) {
+  return TRADING_SESSIONS.filter(s => {
+    if (s.start < s.end) return hour >= s.start && hour < s.end;
+    return hour >= s.start || hour < s.end; // wraps midnight
+  });
+}
+
 export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   symbol,
   data,
@@ -132,6 +146,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     bb: true,
     sma: true,
     macd: true,
+    sessions: true,
   });
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -174,6 +189,41 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       macd: calculateMACD(closes),
     };
   }, [validData]);
+
+  // Compute session bands from candle times (HH:MM format)
+  const sessionBands = useMemo(() => {
+    if (!overlays.sessions || validData.length === 0) return [];
+    // Parse hours from time strings
+    const hours = validData.map(d => {
+      const match = d.time.match(/^(\d{1,2}):(\d{2})/);
+      return match ? parseInt(match[1], 10) : -1;
+    });
+    // If no valid hours (daily data shows MM/DD), skip sessions
+    if (hours.every(h => h < 0)) return [];
+
+    type Band = { session: typeof TRADING_SESSIONS[0]; startIdx: number; endIdx: number };
+    const bands: Band[] = [];
+
+    for (const session of TRADING_SESSIONS) {
+      let inSession = false;
+      let startIdx = 0;
+      for (let i = 0; i < hours.length; i++) {
+        const h = hours[i];
+        const active = h >= 0 && getSessionForHour(h).some(s => s.name === session.name);
+        if (active && !inSession) {
+          startIdx = i;
+          inSession = true;
+        } else if (!active && inSession) {
+          bands.push({ session, startIdx, endIdx: i - 1 });
+          inSession = false;
+        }
+      }
+      if (inSession) {
+        bands.push({ session, startIdx, endIdx: hours.length - 1 });
+      }
+    }
+    return bands;
+  }, [validData, overlays.sessions]);
 
   if (!data || data.length === 0 || validData.length === 0) {
     return (
@@ -379,6 +429,17 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           >
             MACD
           </button>
+          <button
+            onClick={() => toggleOverlay('sessions')}
+            className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
+            style={{
+              color: overlays.sessions ? '#94a3b8' : '#374151',
+              backgroundColor: overlays.sessions ? '#1a1f35' : 'transparent',
+              border: `1px solid ${overlays.sessions ? '#94a3b833' : '#1a1f35'}`,
+            }}
+          >
+            SESS
+          </button>
         </div>
 
         {/* Hover info — wraps on mobile, inline on desktop */}
@@ -395,6 +456,16 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             {overlays.macd && hoveredMacd?.macd !== null && hoveredMacd?.macd !== undefined && (
               <span className="hidden sm:inline" style={{ color: '#fb923c' }}>MACD:{hoveredMacd.macd.toFixed(2)}</span>
             )}
+            {overlays.sessions && (() => {
+              const t = candlesticks[hoveredCandle].data.time;
+              const m = t.match(/^(\d{1,2}):(\d{2})/);
+              if (!m) return null;
+              const sessions = getSessionForHour(parseInt(m[1], 10));
+              if (sessions.length === 0) return null;
+              return sessions.map(s => (
+                <span key={s.name} className="hidden sm:inline" style={{ color: s.color }}>{s.abbr}</span>
+              ));
+            })()}
           </div>
         )}
       </div>
@@ -415,6 +486,38 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           onTouchEnd={() => setHoveredCandle(null)}
           style={{ cursor: 'crosshair', minWidth: isMobile ? `${chartWidth}px` : undefined }}
         >
+        {/* ── Session Background Bands ── */}
+        {overlays.sessions && sessionBands.length > 0 && (
+          <g>
+            {sessionBands.map((band, i) => {
+              const x1 = (band.startIdx / Math.max(validData.length - 1, 1)) * usableWidth;
+              const x2 = (band.endIdx / Math.max(validData.length - 1, 1)) * usableWidth;
+              const w = Math.max(x2 - x1, 2);
+              return (
+                <g key={`sess-${i}`}>
+                  {/* Full-height session band */}
+                  <rect
+                    x={x1} y={0} width={w} height={priceChartH}
+                    fill={band.session.color} fillOpacity="0.04"
+                  />
+                  {/* Session start line */}
+                  <line
+                    x1={x1} y1={0} x2={x1} y2={priceChartH}
+                    stroke={band.session.color} strokeWidth="0.5" strokeDasharray="3,3" opacity="0.3"
+                  />
+                  {/* Session label at top */}
+                  <text
+                    x={x1 + 3} y={10}
+                    fill={band.session.color} fontSize="7" fontFamily="monospace" opacity="0.5"
+                  >
+                    {band.session.abbr}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        )}
+
         {/* ── Price Chart Grid ── */}
         <g stroke="#131825" strokeWidth="1">
           {priceLevels.map((l, i) => (
