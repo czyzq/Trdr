@@ -46,7 +46,7 @@ PLN_USD_RATE = 4.05
 # Global state
 signals_cache = {}
 alpha_client = None
-event_log = []
+event_log = db.load_event_log()  # Restore log from DB on startup
 
 # Broker abstraction – switch via BROKER_TYPE env var ("sim" or "ibkr")
 data_provider = create_data_provider()
@@ -118,17 +118,24 @@ INSTRUMENTS = {
             "trailing_stop": True},
 }
 
+_log_counter = 0
+
 def log_event(message: str, log_type: str = "info"):
-    """Log events for the console"""
+    """Log events for the console. Persists to DB every 10 entries."""
+    global _log_counter
     event_log.append({
         "id": str(len(event_log)),
         "timestamp": datetime.now().strftime("%H:%M:%S"),
         "message": message,
         "type": log_type
     })
-    if len(event_log) > 100:
+    if len(event_log) > 200:
         event_log.pop(0)
     print(f"[{log_type.upper()}] {message}")
+    # Persist periodically (every 10 log entries) to avoid excessive DB writes
+    _log_counter += 1
+    if _log_counter % 10 == 0:
+        db.save_event_log(event_log)
 
 def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, List[Component]]:
     """
@@ -854,6 +861,7 @@ async def shutdown():
             pass
     save_signal_cache()
     db.save_account(account)
+    db.save_event_log(event_log)
     try:
         news_client = get_news_client()
         if hasattr(news_client, 'close'):
@@ -1031,11 +1039,22 @@ async def get_open_trades():
     return {"positions": open_positions, "count": len(open_positions)}
 
 @app.get("/api/trades/history")
-async def get_trade_history(limit: int = Query(50, ge=1, le=200)):
-    """Get closed trade history"""
+async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
+    """Get closed trade history. Queries DB for full history beyond in-memory cache."""
+    # For first page, use fast in-memory list; beyond that, query DB
+    if offset == 0 and limit <= len(closed_positions):
+        trades = closed_positions[:limit]
+    else:
+        # Query DB directly for paginated access
+        trades = db.load_closed_positions(limit=limit + offset)
+        trades = trades[offset:offset + limit] if offset < len(trades) else []
+
+    total_in_db = db.count_closed_positions() or len(closed_positions)
+
     return {
-        "trades": closed_positions[:limit],
-        "total": len(closed_positions),
+        "trades": trades,
+        "total": total_in_db,
+        "offset": offset,
         "win_count": account["win_count"],
         "loss_count": account["loss_count"],
         "win_rate": account["win_rate"],

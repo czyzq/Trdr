@@ -300,6 +300,11 @@ class SimulatedBroker(Broker):
         self.account["open_trades"] = len(self.open_positions)
         self.account["positions"] = len(self.open_positions)
 
+        # Persist updated open positions (live prices, P&L) to DB
+        for pos in self.open_positions:
+            db.save_trade(pos)
+        db.save_account(self.account)
+
         return auto_closed
 
     # ── Reset ────────────────────────────────────────────────────────

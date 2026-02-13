@@ -113,6 +113,14 @@ def save_trade(trade: dict):
     db.trades.replace_one({"id": trade["id"]}, trade, upsert=True)
 
 
+def count_closed_positions() -> int:
+    """Count total closed trades in DB."""
+    db = get_db()
+    if db is None:
+        return 0
+    return db.trades.count_documents({"status": "closed"})
+
+
 def delete_all_trades():
     """Remove all trades (used by account reset)."""
     db = get_db()
@@ -213,3 +221,31 @@ def load_quote(symbol: str) -> Optional[dict]:
             doc.pop("_id", None)
             return doc
     return _quote_mem_cache.get(symbol)
+
+
+# ── Event Log ──────────────────────────────────────────────────────
+# Persists the last N log entries so they survive restarts.
+
+def save_event_log(events: list, max_entries: int = 200):
+    """Persist recent event log entries to DB."""
+    db = get_db()
+    if db is None:
+        return
+    # Keep only the most recent entries
+    trimmed = events[-max_entries:] if len(events) > max_entries else events
+    db.event_log.replace_one(
+        {"_id": "log"},
+        {"_id": "log", "entries": trimmed, "updated_at": datetime.utcnow().isoformat()},
+        upsert=True,
+    )
+
+
+def load_event_log() -> list:
+    """Load persisted event log entries from DB."""
+    db = get_db()
+    if db is None:
+        return []
+    doc = db.event_log.find_one({"_id": "log"})
+    if doc and "entries" in doc:
+        return doc["entries"]
+    return []
