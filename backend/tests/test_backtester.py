@@ -229,7 +229,7 @@ class TestBacktestEngine:
             assert trade.entry_price > 0
             assert trade.exit_price is not None
             assert trade.exit_price > 0
-            assert trade.exit_reason in ("TP", "SL", "TIMEOUT", "END")
+            assert trade.exit_reason in ("TP", "SL", "TRAIL", "TIMEOUT", "END")
             assert trade.entry_idx >= LOOKBACK
             assert trade.exit_idx >= trade.entry_idx
 

@@ -16,10 +16,10 @@ PLN_USD_RATE = 4.05
 INITIAL_BALANCE_PLN = 10000.0
 
 INSTRUMENTS = {
-    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 1},
-    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 100},
-    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 1},
-    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.01},
+    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 1, "leverage": 20},
+    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 100, "leverage": 20},
+    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 1, "leverage": 20},
+    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.01, "leverage": 5},
 }
 
 
@@ -96,8 +96,9 @@ class SimulatedBroker(Broker):
         if entry_price is None:
             return {"error": "entry_price is required"}
 
-        # Margin calculation (1% for CFDs)
-        margin_usd = entry_price * size * 0.01
+        # Margin calculation: margin = notional / leverage
+        leverage = INSTRUMENTS[symbol].get("leverage", 20)
+        margin_usd = entry_price * size / leverage
         margin_pln = margin_usd * PLN_USD_RATE
 
         if margin_pln > self.account.get("available_pln", 0):
@@ -124,6 +125,7 @@ class SimulatedBroker(Broker):
             "name": INSTRUMENTS[symbol]["name"],
             "direction": direction,
             "size": size,
+            "leverage": leverage,
             "entry_price": entry_price,
             "current_price": entry_price,
             "take_profit": round(take_profit, 2),
@@ -167,11 +169,12 @@ class SimulatedBroker(Broker):
         if exit_price is None:
             exit_price = position.get("current_price", position["entry_price"])
 
-        # P&L calculation
+        # P&L calculation: price_move * size * leverage
+        pos_leverage = position.get("leverage", 1)
         if position["direction"] == "buy":
-            pnl_usd = (exit_price - position["entry_price"]) * position["size"]
+            pnl_usd = (exit_price - position["entry_price"]) * position["size"] * pos_leverage
         else:
-            pnl_usd = (position["entry_price"] - exit_price) * position["size"]
+            pnl_usd = (position["entry_price"] - exit_price) * position["size"] * pos_leverage
 
         pnl_pln = pnl_usd * PLN_USD_RATE
 
@@ -243,10 +246,11 @@ class SimulatedBroker(Broker):
             quote = data_provider.get_quote(pos["symbol"])
             if quote:
                 price = quote["price"]
+                pos_leverage = pos.get("leverage", 1)
                 if pos["direction"] == "buy":
-                    pnl = (price - pos["entry_price"]) * pos["size"]
+                    pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage
                 else:
-                    pnl = (pos["entry_price"] - price) * pos["size"]
+                    pnl = (pos["entry_price"] - price) * pos["size"] * pos_leverage
                 pos["current_price"] = price
                 pos["unrealized_pnl_usd"] = round(pnl, 2)
                 pos["unrealized_pnl_pln"] = round(pnl * PLN_USD_RATE, 2)

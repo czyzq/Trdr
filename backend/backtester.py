@@ -171,10 +171,14 @@ class BacktestTrade:
     stop_loss: float
     take_profit: float
     score: float
+    initial_sl: float = 0.0       # Original SL before trailing
+    atr_at_entry: float = 0.0     # ATR at entry for trailing distance
+    best_price: float = 0.0       # Best price seen (for trailing)
+    trailing_active: bool = False  # Whether trailing stop is active
     exit_idx: Optional[int] = None
     exit_price: Optional[float] = None
     exit_time: Optional[str] = None
-    exit_reason: Optional[str] = None  # "TP", "SL", "TIMEOUT", "END"
+    exit_reason: Optional[str] = None  # "TP", "SL", "TRAIL", "TIMEOUT", "END"
     pnl_pct: float = 0.0
 
 
@@ -208,10 +212,14 @@ MAX_HOLD_CANDLES = 20
 # min_agreement: how many indicators must agree to enter
 # asset_class: "commodity" gets trend-alignment filter
 INSTRUMENT_CONFIG = {
-    "XAU":  {"min_score": 0.30, "min_agreement": 3, "asset_class": "commodity"},
-    "XAG":  {"min_score": 0.28, "min_agreement": 3, "asset_class": "commodity"},
-    "US100": {"min_score": 0.20, "min_agreement": 2, "asset_class": "equity"},
-    "BTC":  {"min_score": 0.20, "min_agreement": 2, "asset_class": "crypto"},
+    "XAU":  {"min_score": 0.30, "min_agreement": 3, "asset_class": "commodity",
+             "leverage": 20, "trailing_stop": True},
+    "XAG":  {"min_score": 0.28, "min_agreement": 3, "asset_class": "commodity",
+             "leverage": 20, "trailing_stop": True},
+    "US100": {"min_score": 0.20, "min_agreement": 2, "asset_class": "equity",
+              "leverage": 20, "trailing_stop": True},
+    "BTC":  {"min_score": 0.20, "min_agreement": 2, "asset_class": "crypto",
+             "leverage": 5, "trailing_stop": True},
 }
 
 
@@ -249,11 +257,38 @@ def run_backtest(
         current_high = current["high"]
         current_low = current["low"]
 
-        # Check TP/SL on open trades
+        # Check TP/SL and trailing stop on open trades
         closed_this_bar = []
         for trade in open_trades:
             hit_tp = False
             hit_sl = False
+
+            # Update best price for trailing stop
+            if trade.direction == "BUY":
+                trade.best_price = max(trade.best_price, current_high)
+            else:
+                trade.best_price = min(trade.best_price, current_low)
+
+            # Trailing stop logic:
+            # Phase 1: price moves 1×ATR in favor → move SL to breakeven
+            # Phase 2: trail SL at 1.5×ATR behind best price
+            if trade.atr_at_entry > 0:
+                atr = trade.atr_at_entry
+                if trade.direction == "BUY":
+                    profit_distance = trade.best_price - trade.entry_price
+                    if profit_distance >= atr:
+                        # At least breakeven
+                        new_sl = max(trade.entry_price, trade.best_price - atr * 1.5)
+                        if new_sl > trade.stop_loss:
+                            trade.stop_loss = round(new_sl, 2)
+                            trade.trailing_active = True
+                else:  # SELL
+                    profit_distance = trade.entry_price - trade.best_price
+                    if profit_distance >= atr:
+                        new_sl = min(trade.entry_price, trade.best_price + atr * 1.5)
+                        if new_sl < trade.stop_loss:
+                            trade.stop_loss = round(new_sl, 2)
+                            trade.trailing_active = True
 
             if trade.direction == "BUY":
                 hit_tp = current_high >= trade.take_profit
@@ -268,7 +303,7 @@ def run_backtest(
 
             if hit_sl:
                 trade.exit_price = trade.stop_loss
-                trade.exit_reason = "SL"
+                trade.exit_reason = "TRAIL" if trade.trailing_active else "SL"
             elif hit_tp:
                 trade.exit_price = trade.take_profit
                 trade.exit_reason = "TP"
@@ -281,17 +316,21 @@ def run_backtest(
             trade.exit_idx = i
             trade.exit_time = current.get("timestamp", current.get("time", ""))
 
+            # P&L % includes leverage effect
+            leverage = INSTRUMENT_CONFIG.get(symbol, {}).get("leverage", 1)
             if trade.direction == "BUY":
-                trade.pnl_pct = ((trade.exit_price - trade.entry_price) / trade.entry_price) * 100
+                raw_pct = ((trade.exit_price - trade.entry_price) / trade.entry_price) * 100
             else:
-                trade.pnl_pct = ((trade.entry_price - trade.exit_price) / trade.entry_price) * 100
+                raw_pct = ((trade.entry_price - trade.exit_price) / trade.entry_price) * 100
+            trade.pnl_pct = raw_pct * leverage
 
-            # Update balance
+            # Update balance using initial SL for position sizing
             risk_amount = balance * (risk_per_trade_pct / 100)
-            risk_per_unit = abs(trade.entry_price - trade.stop_loss)
+            initial_sl = trade.initial_sl if trade.initial_sl else trade.stop_loss
+            risk_per_unit = abs(trade.entry_price - initial_sl)
             if risk_per_unit > 0:
-                position_value = risk_amount / risk_per_unit * trade.entry_price
-                dollar_pnl = position_value * (trade.pnl_pct / 100)
+                position_value = risk_amount / (risk_per_unit * leverage) * trade.entry_price
+                dollar_pnl = position_value * (raw_pct / 100) * leverage
             else:
                 dollar_pnl = 0
             balance += dollar_pnl
@@ -358,13 +397,22 @@ def run_backtest(
                 neutral_skipped += 1
                 continue
 
-        # Determine TP/SL using ATR — maintain min 1.67:1 R:R
+        # Determine TP/SL using ATR
+        # With trailing stop: wider initial SL (3×ATR emergency) since trailing will tighten
+        # Without trailing: standard 1.5×ATR SL
         adx_data = ind.get("adx")
         is_trending = adx_data and adx_data["adx"] > 25
-        if is_trending:
-            sl_mult, tp_mult = 1.5, 3.5  # 1:2.3 R:R
+        use_trailing = inst_config.get("trailing_stop", True)
+
+        if use_trailing:
+            # Wide emergency SL — trailing stop will manage the real exit
+            sl_mult = 3.0
+            tp_mult = 4.0 if is_trending else 3.5
         else:
-            sl_mult, tp_mult = 1.5, 3.0  # 1:2.0 R:R
+            if is_trending:
+                sl_mult, tp_mult = 1.5, 3.5
+            else:
+                sl_mult, tp_mult = 1.5, 3.0
 
         if direction in ("BUY", "STRONG_BUY"):
             stop_loss = current_price - (atr * sl_mult)
@@ -383,6 +431,9 @@ def run_backtest(
             stop_loss=round(stop_loss, 2),
             take_profit=round(take_profit, 2),
             score=round(score, 4),
+            initial_sl=round(stop_loss, 2),
+            atr_at_entry=atr if use_trailing else 0.0,
+            best_price=current_price,
         )
         open_trades.append(trade)
 
@@ -392,15 +443,17 @@ def run_backtest(
 
     # Force-close any remaining open trades at last candle price
     last_price = candles[-1]["close"]
+    leverage = INSTRUMENT_CONFIG.get(symbol, {}).get("leverage", 1)
     for trade in open_trades:
         trade.exit_idx = len(candles) - 1
         trade.exit_price = last_price
         trade.exit_time = candles[-1].get("timestamp", "")
         trade.exit_reason = "END"
         if trade.direction == "BUY":
-            trade.pnl_pct = ((last_price - trade.entry_price) / trade.entry_price) * 100
+            raw_pct = ((last_price - trade.entry_price) / trade.entry_price) * 100
         else:
-            trade.pnl_pct = ((trade.entry_price - last_price) / trade.entry_price) * 100
+            raw_pct = ((trade.entry_price - last_price) / trade.entry_price) * 100
+        trade.pnl_pct = raw_pct * leverage
         trades.append(trade)
 
     # Compute stats

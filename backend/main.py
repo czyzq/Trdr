@@ -99,17 +99,23 @@ def save_signal_cache():
         pass  # File write is best-effort fallback
 
 # Instruments to monitor — with per-instrument signal tuning
+# leverage: position multiplier (x20 = 5% margin requirement)
 # min_score: minimum |score| to enter (higher = fewer but better trades)
 # asset_class: "commodity" (mean-reverting) or "equity"/"crypto" (trending)
+# trailing_stop: enable trailing SL that locks in profits once in the green
 INSTRUMENTS = {
     "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 1,
-            "min_score": 0.30, "asset_class": "commodity"},
+            "leverage": 20, "min_score": 0.30, "asset_class": "commodity",
+            "trailing_stop": True},
     "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 100,
-            "min_score": 0.28, "asset_class": "commodity"},
+            "leverage": 20, "min_score": 0.28, "asset_class": "commodity",
+            "trailing_stop": True},
     "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 1,
-              "min_score": 0.20, "asset_class": "equity"},
+              "leverage": 20, "min_score": 0.20, "asset_class": "equity",
+              "trailing_stop": True},
     "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.01,
-            "min_score": 0.20, "asset_class": "crypto"},
+            "leverage": 5, "min_score": 0.20, "asset_class": "crypto",
+            "trailing_stop": True},
 }
 
 def log_event(message: str, log_type: str = "info"):
@@ -396,20 +402,27 @@ def check_circuit_breaker() -> tuple[bool, str]:
 
 def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -> float:
     """
-    Calculate position size based on risk per trade.
+    Calculate position size based on risk per trade and leverage.
     Risks MAX_RISK_PER_TRADE_PCT of account balance per trade.
+    Leverage amplifies both gains and losses — size is adjusted so that
+    the max loss on a SL hit still equals the risk amount.
     """
+    info = INSTRUMENTS.get(symbol, {})
+    leverage = info.get("leverage", 1)
+
     risk_amount_pln = account["balance_pln"] * (MAX_RISK_PER_TRADE_PCT / 100)
     risk_amount_usd = risk_amount_pln / PLN_USD_RATE
 
     risk_per_unit = abs(entry_price - stop_loss)
     if risk_per_unit <= 0:
-        return INSTRUMENTS.get(symbol, {}).get("lot_size", 0.01)
+        return info.get("lot_size", 0.01)
 
-    size = risk_amount_usd / risk_per_unit
+    # With leverage, P&L per unit = price_move * leverage
+    # So size = risk_amount / (risk_per_unit * leverage) to keep actual loss = risk_amount
+    size = risk_amount_usd / (risk_per_unit * leverage)
 
     # Clamp to instrument limits
-    lot_size = INSTRUMENTS.get(symbol, {}).get("lot_size", 0.01)
+    lot_size = info.get("lot_size", 0.01)
     min_size = lot_size
     max_size = lot_size * 10
 
@@ -535,16 +548,22 @@ async def generate_signals() -> List[Signal]:
                 confidence = 0.1
 
             # ── TP/SL with ATR-based adaptive levels ──
+            # With trailing stop enabled: wider initial SL (3×ATR emergency)
+            # The trailing mechanism will tighten the SL once in profit
             entry_point = current_price
             adx_data = indicators.get("adx")
             is_trending = adx_data and adx_data["adx"] > 25
+            use_trailing = info.get("trailing_stop", False)
 
-            # Trending: wider TP (let profits run), tighter SL
-            # Ranging: moderate TP/SL — maintain min 1.67:1 R:R
-            if is_trending:
-                sl_mult, tp_mult = 1.5, 3.5  # 1:2.3 R:R in trends
+            if use_trailing:
+                # Wide emergency SL — trailing stop manages the real exit
+                sl_mult = 3.0
+                tp_mult = 4.0 if is_trending else 3.5
             else:
-                sl_mult, tp_mult = 1.5, 3.0  # 1:2.0 R:R in ranges
+                if is_trending:
+                    sl_mult, tp_mult = 1.5, 3.5
+                else:
+                    sl_mult, tp_mult = 1.5, 3.0
 
             if direction in [SignalDirection.BUY, SignalDirection.STRONG_BUY]:
                 stop_loss = entry_point - (atr * sl_mult)
@@ -672,6 +691,45 @@ async def set_account_mode(mode: str):
     db.save_account(account)
     log_event(f"Trading mode changed to: {mode.upper()}", "event")
     return {"mode": account["mode"], "dry_run": account["dry_run"]}
+
+# =====================
+# INSTRUMENT SETTINGS
+# =====================
+
+@app.get("/api/instruments")
+async def get_instruments():
+    """Get all instruments with their settings (leverage, lot_size, etc.)."""
+    return {
+        symbol: {
+            "name": info["name"],
+            "leverage": info.get("leverage", 1),
+            "lot_size": info.get("lot_size", 1),
+            "pip_size": info.get("pip_size", 0.01),
+            "asset_class": info.get("asset_class", ""),
+            "trailing_stop": info.get("trailing_stop", False),
+        }
+        for symbol, info in INSTRUMENTS.items()
+    }
+
+@app.post("/api/instruments/{symbol}/leverage")
+async def set_leverage(symbol: str, leverage: int):
+    """Update leverage for an instrument. Valid values: 1-100."""
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown instrument: {symbol}"}
+    if leverage < 1 or leverage > 100:
+        return {"error": "Leverage must be between 1 and 100"}
+    INSTRUMENTS[symbol]["leverage"] = leverage
+    log_event(f"[SETTINGS] {symbol} leverage set to x{leverage}", "event")
+    return {"symbol": symbol, "leverage": leverage}
+
+@app.post("/api/instruments/{symbol}/trailing_stop")
+async def set_trailing_stop(symbol: str, enabled: bool):
+    """Enable/disable trailing stop for an instrument."""
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown instrument: {symbol}"}
+    INSTRUMENTS[symbol]["trailing_stop"] = enabled
+    log_event(f"[SETTINGS] {symbol} trailing stop {'enabled' if enabled else 'disabled'}", "event")
+    return {"symbol": symbol, "trailing_stop": enabled}
 
 # =====================
 # SIMULATED TRADING API
