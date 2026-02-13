@@ -683,8 +683,31 @@ def main():
             )
             print(f"  WARNING: Using synthetic sample data ({len(candles)} candles) — not real market data")
 
+        # Generate/fetch daily candles for multi-timeframe filter
+        htf_candles = None
+        if args.resolution != "D":
+            print(f"  Loading daily candles for multi-timeframe filter...")
+            if args.sample:
+                htf_candles = generate_sample_data(
+                    symbol, days=max(args.days, 300),
+                    base_price=base_prices.get(symbol, 1000),
+                    resolution="D",
+                )
+                print(f"  HTF: {len(htf_candles)} daily candles (sample)")
+            else:
+                # Try real sources for daily data
+                htf_candles = fetch_yahoo_historical(symbol, period_days=365, interval="1d")
+                if not htf_candles:
+                    htf_candles = fetch_alpha_vantage_historical(symbol, count=200)
+                if not htf_candles:
+                    htf_candles = fetch_from_db_cache(symbol, "D")
+                if htf_candles:
+                    print(f"  HTF: {len(htf_candles)} daily candles loaded")
+                else:
+                    print(f"  HTF: No daily data — running without multi-timeframe filter")
+
         try:
-            result = run_backtest(candles, symbol=symbol, verbose=args.verbose)
+            result = run_backtest(candles, symbol=symbol, verbose=args.verbose, htf_candles=htf_candles)
             all_results.append(result)
 
             if args.json:
