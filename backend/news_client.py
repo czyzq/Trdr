@@ -99,7 +99,7 @@ class NewsClient:
             symbol_map = {
                 "XAU": "gold price news",
                 "XAG": "silver price news",
-                "US100": "nasdaq nasdaq-100 news"}   
+                "US100": "nasdaq nasdaq-100 news",
             }
             
             query = symbol_map.get(symbol, symbol)

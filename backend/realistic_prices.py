@@ -10,8 +10,9 @@ from typing import Dict, Any, Optional
 # Proper trading symbols with current market values
 BASE_PRICES = {
     "XAU": 2035.50,   # Gold (XAU/USD) - current ~$2035/oz
-    "XAG": 22.85,     # Silver (XAG/USD) - current ~$22.85/oz  
-    "US100": 17525.0,    # Nasdaq-100 (US100) - current ~17525
+    "XAG": 22.85,     # Silver (XAG/USD) - current ~$22.85/oz
+    "US100": 17525.0,  # Nasdaq-100 (US100) - current ~17525
+    "BTC": 97250.0,    # Bitcoin (BTC/USD) - current ~$97250
 }
 
 # Warsaw timezone (UTC+1) for proper local time display
@@ -54,6 +55,7 @@ class RealisticPriceFeeder:
             "XAU": random.randint(50000, 150000),
             "XAG": random.randint(100000, 300000),
             "US100": random.randint(1000000, 3000000),
+            "BTC": random.randint(500000, 2000000),
         }
         
         return {
@@ -109,21 +111,19 @@ class RealisticPriceFeeder:
         # Use the time hash to ensure same time = same prices
         time_seed = int(current_time.timestamp())
         random.seed(time_seed)
-        
+
         # Get current price with some variation based on time
         current_price = base_price * (1 + random.uniform(-0.002, 0.002))
-        
+
         # Generate candles in proper chronological order (oldest to newest) for left-to-right chart display
-        # This creates the proper "now-NUMBER_OF_CANDLES" dynamic display
+        # Use rounded current_time so candle timestamps align to interval boundaries
+        # e.g. 60m candles: 14:00, 13:00, 12:00 instead of 14:37, 13:37, 12:37
         candles = []
-        
+
         for i in range(count):
             # Calculate timestamp from oldest (now - total_duration) to newest (now)
-            # i=0 = oldest candle, i=count-1 = newest candle (current time)
-            if resolution == 'D':
-                candle_time = warsaw_now - (interval * (count - 1 - i))
-            else:
-                candle_time = warsaw_now - (interval * (count - 1 - i))
+            # i=0 = oldest candle, i=count-1 = newest candle (current rounded time)
+            candle_time = current_time - (interval * (count - 1 - i))
             
             # Generate OHLCV data (same logic as before)
             close = current_price
@@ -174,9 +174,8 @@ class RealisticPriceFeeder:
             if candles[i]["high"] < prev_close:
                 candles[i]["high"] = prev_close
         
-        # Return candles in proper chronological order for left-to-right chart display
-        # First candle = oldest time, Last candle = newest time (current)
-        return candles[::-1]  # Reverse to get oldest first, newest last
+        # Candles are already in chronological order: oldest first, newest last
+        return candles
     
     def _format_time_for_resolution(self, dt: datetime, resolution: str) -> str:
         """Format time based on resolution for proper display in Warsaw timezone"""

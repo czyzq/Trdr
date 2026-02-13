@@ -1,228 +1,200 @@
 import React, { useState, useEffect } from 'react';
 
 interface SidebarProps {
-  balance?: number;
-  activePositions?: number;
-  activeSignals?: number;
-  equity?: number;
-  marginUsed?: number;
-  winRate?: number;
-  lastScan?: string;
+  accountData?: any;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({
-  balance: propBalance,
-  activePositions: propActivePositions,
-  activeSignals: propActiveSignals,
-  equity: propEquity,
-  marginUsed: propMarginUsed,
-  winRate: propWinRate,
-  lastScan: propLastScan,
-}) => {
-  const [balance, setBalance] = useState(propBalance || 1000);
-  const [equity, setEquity] = useState(propEquity || 1000);
-  const [activePositions, setActivePositions] = useState(propActivePositions || 0);
-  const [lastScan, setLastScan] = useState(propLastScan || "Just now");
+export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
+  const [lastScan, setLastScan] = useState("--");
   const [isScanning, setIsScanning] = useState(false);
-  const [mode, setMode] = useState<'simulate' | 'live'>('simulate');
-  const marginUsed = propMarginUsed || 0;
-  const winRate = propWinRate || 0;
-  const activeSignals = propActiveSignals || 0;
+
+  const balance = accountData?.balance_pln ?? 10000;
+  const equity = accountData?.equity_pln ?? 10000;
+  const balanceUsd = accountData?.balance_usd ?? 2469.14;
+  const openTrades = accountData?.open_trades ?? 0;
+  const closedTrades = accountData?.closed_trades ?? 0;
+  const winRate = accountData?.win_rate ?? 0;
+  const totalPnl = accountData?.total_pnl_pln ?? 0;
+  const mode = accountData?.mode ?? 'simulate';
+
+  useEffect(() => {
+    const updateScan = () => {
+      if (accountData?.last_scan) {
+        const scanTime = new Date(accountData.last_scan);
+        const now = new Date();
+        const diffSecs = Math.floor((now.getTime() - scanTime.getTime()) / 1000);
+        if (diffSecs < 5) setLastScan("Now");
+        else if (diffSecs < 60) setLastScan(`${diffSecs}s ago`);
+        else if (diffSecs < 3600) setLastScan(`${Math.floor(diffSecs / 60)}m ago`);
+        else setLastScan(`${Math.floor(diffSecs / 3600)}h ago`);
+      }
+    };
+    updateScan();
+    const interval = setInterval(updateScan, 1000);
+    return () => clearInterval(interval);
+  }, [accountData]);
 
   const toggleMode = async () => {
     const newMode = mode === 'simulate' ? 'live' : 'simulate';
     try {
-      const response = await fetch(`/api/account/mode?mode=${newMode}`, {
-        method: 'POST'
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setMode(data.mode);
-        console.log(`Mode changed to: ${data.mode}`);
-      }
+      await fetch(`/api/account/mode?mode=${newMode}`, { method: 'POST' });
     } catch (error) {
       console.error('Failed to toggle mode:', error);
     }
   };
 
-  useEffect(() => {
-    // Fetch account data and check scanning status from backend
-    const fetchData = async () => {
-      try {
-        // Fetch account
-        const accResponse = await fetch('/api/account');
-        if (accResponse.ok) {
-          const data = await accResponse.json();
-          setBalance(data.balance || 1000);
-          setEquity(data.equity || 1000);
-          setActivePositions(data.positions || 0);
-          setMode(data.mode || 'simulate');
-          if (data.last_scan) {
-            const scanTime = new Date(data.last_scan);
-            const now = new Date();
-            const diffSecs = Math.floor((now.getTime() - scanTime.getTime()) / 1000);
-            if (diffSecs < 10) {
-              setLastScan("Now");
-            } else if (diffSecs < 60) {
-              setLastScan(`${diffSecs}s ago`);
-            } else if (diffSecs < 3600) {
-              const mins = Math.floor(diffSecs / 60);
-              setLastScan(`${mins}m ${diffSecs % 60}s ago`);
-            } else {
-              const hours = Math.floor(diffSecs / 3600);
-              const mins = Math.floor((diffSecs % 3600) / 60);
-              setLastScan(`${hours}h ${mins}m ago`);
-            }
-          }
-        }
+  const resetAccount = async () => {
+    try {
+      await fetch('/api/account/reset', { method: 'POST' });
+    } catch (error) {
+      console.error('Failed to reset account:', error);
+    }
+  };
 
-        // Fetch logs to check if scanning
-        const logsResponse = await fetch('/api/logs');
-        if (logsResponse.ok) {
-          const logsData = await logsResponse.json();
-          if (logsData.logs && logsData.logs.length > 0) {
-            const recentLogs = logsData.logs.slice(-10);
-            const scanning = recentLogs.some((log: any) =>
-              log.message.includes('Fetching data') ||
-              log.message.includes('Fetching news') ||
-              log.message.includes('Generating signals')
-            );
-            setIsScanning(scanning);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch data:', error);
-      }
-    };
-
-    fetchData();
-    // Update more frequently to show accurate time difference
-    const interval = setInterval(fetchData, 1000); // Poll every second
-    return () => clearInterval(interval);
-  }, []);
-  const statItems = [
-    { label: 'Balance', value: `$${balance.toLocaleString()}`, highlight: true },
-    { label: 'Equity', value: `$${equity.toLocaleString()}` },
-    { label: 'Active Positions', value: activePositions.toString(), highlight: true },
-    { label: 'Active Signals', value: activeSignals.toString(), highlight: true },
-    { label: 'Margin Used', value: `${marginUsed}%` },
-    { label: 'Win Rate', value: `${winRate}%` },
-  ];
+  const pnlColor = totalPnl >= 0 ? '#22c55e' : '#ef4444';
+  const equityChange = equity - 10000;
+  const equityChangePct = ((equity - 10000) / 10000 * 100);
 
   return (
     <div
-      className="w-56 border-r"
-      style={{
-        backgroundColor: '#0a0e27',
-        borderColor: '#00ff41',
-      }}
+      className="w-60 h-full flex flex-col overflow-y-auto"
+      style={{ backgroundColor: '#0d1220', borderRight: '1px solid #1a1f35' }}
     >
-      {/* Header */}
-      <div className="p-4 border-b" style={{ borderColor: '#00ff41' }}>
-        <h2
-          className="font-mono text-xs uppercase tracking-widest font-bold"
-          style={{ color: '#00ff41' }}
-        >
-          Account Stats
-        </h2>
+      {/* Balance Section */}
+      <div className="p-4" style={{ borderBottom: '1px solid #1a1f35' }}>
+        <div className="text-[10px] uppercase tracking-widest mb-1.5" style={{ color: '#4a5568' }}>
+          Balance
+        </div>
+        <div className="text-lg font-bold mb-0.5" style={{ color: '#e2e8f0' }}>
+          {balance.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} <span className="text-xs font-normal" style={{ color: '#64748b' }}>PLN</span>
+        </div>
+        <div className="text-[11px]" style={{ color: '#64748b' }}>
+          ${balanceUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+        </div>
+      </div>
+
+      {/* Equity Section */}
+      <div className="p-4" style={{ borderBottom: '1px solid #1a1f35' }}>
+        <div className="text-[10px] uppercase tracking-widest mb-1.5" style={{ color: '#4a5568' }}>
+          Equity
+        </div>
+        <div className="text-base font-bold" style={{ color: '#e2e8f0' }}>
+          {equity.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} <span className="text-[10px] font-normal" style={{ color: '#64748b' }}>PLN</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
+          <span className="text-[11px] font-medium" style={{ color: pnlColor }}>
+            {equityChange >= 0 ? '+' : ''}{equityChange.toFixed(2)} PLN
+          </span>
+          <span className="text-[10px]" style={{ color: pnlColor }}>
+            ({equityChangePct >= 0 ? '+' : ''}{equityChangePct.toFixed(2)}%)
+          </span>
+        </div>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="p-4 grid grid-cols-2 gap-3" style={{ borderBottom: '1px solid #1a1f35' }}>
+        <StatBox label="Open" value={openTrades.toString()} color="#3b82f6" />
+        <StatBox label="Closed" value={closedTrades.toString()} color="#64748b" />
+        <StatBox label="Win Rate" value={`${winRate}%`} color={winRate >= 50 ? '#22c55e' : winRate > 0 ? '#ef4444' : '#64748b'} />
+        <StatBox label="Total P&L" value={`${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(0)}`} color={pnlColor} />
       </div>
 
       {/* Mode Toggle */}
-      <div className="px-4 py-3 border-b" style={{ borderColor: '#1a1f2e' }}>
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: '#888' }}>
-            Mode
-          </span>
-          <button
-            onClick={toggleMode}
-            className="font-mono text-xs font-bold px-3 py-1 rounded border transition"
-            style={{
-              backgroundColor: mode === 'simulate' ? 'rgba(255, 193, 7, 0.1)' : 'rgba(255, 0, 0, 0.1)',
-              borderColor: mode === 'simulate' ? '#ffc107' : '#ff0000',
-              color: mode === 'simulate' ? '#ffc107' : '#ff0000',
-            }}
-          >
-            {mode === 'simulate' ? '🧪 SIMULATE' : '⚡ LIVE'}
-          </button>
+      <div className="p-4" style={{ borderBottom: '1px solid #1a1f35' }}>
+        <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: '#4a5568' }}>
+          Trading Mode
         </div>
-        <div className="font-mono text-[9px] mt-1" style={{ color: '#666' }}>
-          {mode === 'simulate' ? 'Paper trading - no real money' : 'Real trading - USE CAUTION'}
-        </div>
-      </div>
-
-      {/* Stats List */}
-      <div className="p-4 space-y-4">
-        {statItems.map((item, idx) => (
-          <div key={idx} className="border-b pb-3" style={{ borderColor: '#1a1f2e' }}>
-            <div
-              className="font-mono text-[10px] uppercase tracking-widest mb-1"
-              style={{ color: '#888' }}
-            >
-              {item.label}
-            </div>
-            <div
-              className={`font-mono font-bold text-sm ${
-                item.highlight ? 'text-lg' : ''
-              }`}
-              style={{ color: item.highlight ? '#00ff41' : '#aaa' }}
-            >
-              {item.value}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Scanner Info Section */}
-      <div className="p-4 mt-4 border-t" style={{ borderColor: '#1a1f2e' }}>
-        <h3
-          className="font-mono text-xs uppercase tracking-widest font-bold mb-3"
-          style={{ color: '#00ff41' }}
+        <button
+          onClick={toggleMode}
+          className="w-full text-[11px] font-bold py-2 rounded-sm border transition-all"
+          style={{
+            backgroundColor: mode === 'simulate' ? 'rgba(234, 179, 8, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+            borderColor: mode === 'simulate' ? 'rgba(234, 179, 8, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+            color: mode === 'simulate' ? '#eab308' : '#ef4444',
+          }}
         >
-          Scan Config
-        </h3>
-        <div className="space-y-2 text-[10px] font-mono">
-          <div className="flex justify-between">
-            <span style={{ color: '#888' }}>Min Volume</span>
-            <span style={{ color: '#00ff41' }}>$100K</span>
-          </div>
-          <div className="flex justify-between">
-            <span style={{ color: '#888' }}>Volatility</span>
-            <span style={{ color: '#00ff41' }}>5-20%</span>
-          </div>
-          <div className="flex justify-between">
-            <span style={{ color: '#888' }}>Lookback</span>
-            <span style={{ color: '#00ff41' }}>4h</span>
-          </div>
-          <div className="flex justify-between">
-            <span style={{ color: '#888' }}>Score Min</span>
-            <span style={{ color: '#00ff41' }}>0.50</span>
-          </div>
+          {mode === 'simulate' ? 'SIMULATION MODE' : 'LIVE MODE'}
+        </button>
+        <div className="text-[9px] mt-1.5 text-center" style={{ color: '#374151' }}>
+          {mode === 'simulate' ? 'Paper trading with virtual PLN' : 'Real trading - use caution'}
         </div>
       </div>
 
-      {/* Status Indicator */}
-      <div className="p-4 mt-4 border-t border-l-4" 
-        style={{ 
-          borderTopColor: '#1a1f2e',
-          borderLeftColor: '#00ff41',
-          backgroundColor: 'rgba(0, 255, 65, 0.05)'
-        }}>
-        <div className="flex items-center gap-2 mb-1">
-          <div 
-            className={`w-2 h-2 rounded-full ${isScanning ? 'animate-pulse' : ''}`}
-            style={{ backgroundColor: isScanning ? '#00ff41' : '#666' }}
-          />
-          <span 
-            className="font-mono text-xs" 
-            style={{ color: isScanning ? '#00ff41' : '#666' }}
-          >
-            {isScanning ? 'SCANNING' : 'IDLE'}
-          </span>
+      {/* Instruments */}
+      <div className="p-4" style={{ borderBottom: '1px solid #1a1f35' }}>
+        <div className="text-[10px] uppercase tracking-widest mb-2.5" style={{ color: '#4a5568' }}>
+          Instruments
         </div>
-        <div className="font-mono text-[9px]" style={{ color: '#666' }}>
+        <div className="space-y-1.5">
+          {[
+            { symbol: 'XAU', name: 'Gold', color: '#eab308' },
+            { symbol: 'XAG', name: 'Silver', color: '#94a3b8' },
+            { symbol: 'US100', name: 'Nasdaq', color: '#3b82f6' },
+            { symbol: 'BTC', name: 'Bitcoin', color: '#f97316' },
+          ].map((inst) => (
+            <div key={inst.symbol} className="flex items-center justify-between py-1">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: inst.color }} />
+                <span className="text-[11px] font-medium" style={{ color: '#c8cdd8' }}>
+                  {inst.symbol}
+                </span>
+              </div>
+              <span className="text-[10px]" style={{ color: '#4a5568' }}>
+                {inst.name}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Scanner Status */}
+      <div className="p-4" style={{ borderBottom: '1px solid #1a1f35' }}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] uppercase tracking-widest" style={{ color: '#4a5568' }}>
+            Scanner
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div
+              className={`w-1.5 h-1.5 rounded-full ${isScanning ? 'animate-pulse' : ''}`}
+              style={{ backgroundColor: '#22c55e' }}
+            />
+            <span className="text-[10px]" style={{ color: '#22c55e' }}>
+              Active
+            </span>
+          </div>
+        </div>
+        <div className="text-[10px]" style={{ color: '#374151' }}>
           Last scan: {lastScan}
         </div>
+      </div>
+
+      {/* Reset Button */}
+      <div className="p-4 mt-auto">
+        <button
+          onClick={resetAccount}
+          className="w-full text-[10px] py-1.5 rounded-sm border transition-all hover:bg-opacity-10"
+          style={{
+            borderColor: '#1a1f35',
+            color: '#4a5568',
+          }}
+        >
+          Reset Account
+        </button>
       </div>
     </div>
   );
 };
+
+const StatBox: React.FC<{ label: string; value: string; color: string }> = ({ label, value, color }) => (
+  <div
+    className="p-2.5 rounded-sm"
+    style={{ backgroundColor: '#0b0f1a' }}
+  >
+    <div className="text-[9px] uppercase tracking-widest mb-1" style={{ color: '#4a5568' }}>
+      {label}
+    </div>
+    <div className="text-sm font-bold" style={{ color }}>
+      {value}
+    </div>
+  </div>
+);
