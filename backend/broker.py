@@ -81,6 +81,7 @@ class Broker(ABC):
         ...
 
     @abstractmethod
-    def update_prices(self, data_provider: DataProvider) -> None:
-        """Update open positions with latest prices from data provider."""
+    def update_prices(self, data_provider: DataProvider):
+        """Update open positions with latest prices from data provider.
+        May return a list of auto-closed positions (TP/SL hits)."""
         ...

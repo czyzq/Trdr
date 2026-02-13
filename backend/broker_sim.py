@@ -238,23 +238,57 @@ class SimulatedBroker(Broker):
 
     # ── Price update ─────────────────────────────────────────────────
 
-    def update_prices(self, data_provider: DataProvider) -> None:
-        """Update open positions with latest quotes."""
+    def update_prices(self, data_provider: DataProvider) -> List[Dict[str, Any]]:
+        """
+        Update open positions with latest quotes.
+        Auto-closes positions that hit TP or SL.
+        Returns list of auto-closed positions (for logging).
+        """
         unrealized_usd = 0.0
+        auto_closed = []
+        to_close = []
 
         for pos in self.open_positions:
             quote = data_provider.get_quote(pos["symbol"])
-            if quote:
-                price = quote["price"]
-                pos_leverage = pos.get("leverage", 1)
-                if pos["direction"] == "buy":
-                    pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage
-                else:
-                    pnl = (pos["entry_price"] - price) * pos["size"] * pos_leverage
-                pos["current_price"] = price
-                pos["unrealized_pnl_usd"] = round(pnl, 2)
-                pos["unrealized_pnl_pln"] = round(pnl * PLN_USD_RATE, 2)
-                unrealized_usd += pnl
+            if not quote:
+                continue
+
+            price = quote["price"]
+            pos_leverage = pos.get("leverage", 1)
+            if pos["direction"] == "buy":
+                pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage
+            else:
+                pnl = (pos["entry_price"] - price) * pos["size"] * pos_leverage
+            pos["current_price"] = price
+            pos["unrealized_pnl_usd"] = round(pnl, 2)
+            pos["unrealized_pnl_pln"] = round(pnl * PLN_USD_RATE, 2)
+            unrealized_usd += pnl
+
+            # Check TP/SL
+            tp = pos.get("take_profit")
+            sl = pos.get("stop_loss")
+            if pos["direction"] == "buy":
+                if tp and price >= tp:
+                    to_close.append((pos["id"], tp, "TP"))
+                elif sl and price <= sl:
+                    to_close.append((pos["id"], sl, "SL"))
+            else:  # sell
+                if tp and price <= tp:
+                    to_close.append((pos["id"], tp, "TP"))
+                elif sl and price >= sl:
+                    to_close.append((pos["id"], sl, "SL"))
+
+        # Auto-close hit positions
+        for pos_id, exit_price, reason in to_close:
+            result = self.close_position(pos_id, exit_price=exit_price)
+            if "error" not in result:
+                result["exit_reason"] = reason
+                auto_closed.append(result)
+
+        # Recalculate unrealized after closes
+        unrealized_usd = 0.0
+        for pos in self.open_positions:
+            unrealized_usd += pos.get("unrealized_pnl_usd", 0)
 
         unrealized_pln = unrealized_usd * PLN_USD_RATE
         self.account["equity_pln"] = round(
@@ -265,6 +299,8 @@ class SimulatedBroker(Broker):
         )
         self.account["open_trades"] = len(self.open_positions)
         self.account["positions"] = len(self.open_positions)
+
+        return auto_closed
 
     # ── Reset ────────────────────────────────────────────────────────
 

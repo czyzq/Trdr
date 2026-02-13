@@ -668,9 +668,153 @@ async def generate_signals() -> List[Signal]:
 
     return signals
 
+# =====================
+# AUTO-TRADING ENGINE
+# =====================
+
+AUTO_TRADE_INTERVAL_SEC = 300  # Scan every 5 minutes
+AUTO_TRADE_ENABLED = True      # Master switch — can be toggled via API
+_trading_task = None           # Reference to the background task
+
+async def auto_trade_loop():
+    """
+    Background loop that runs autonomously:
+    1. Updates prices & checks TP/SL on open positions (auto-closes hits)
+    2. Generates fresh signals for all instruments
+    3. Opens trades automatically when signal is strong enough
+    4. Persists account state to DB
+    """
+    global AUTO_TRADE_ENABLED
+
+    # Wait a few seconds for startup to finish
+    await asyncio.sleep(5)
+    log_event("[AUTO-TRADE] Background trading loop started", "event")
+
+    while True:
+        try:
+            if not AUTO_TRADE_ENABLED:
+                await asyncio.sleep(AUTO_TRADE_INTERVAL_SEC)
+                continue
+
+            # ── Step 1: Update prices & auto-close TP/SL ──
+            auto_closed = broker.update_prices(data_provider)
+            if auto_closed:
+                for closed in auto_closed:
+                    pos = closed.get("position", {})
+                    reason = closed.get("exit_reason", "TP/SL")
+                    pnl = pos.get("pnl_usd", 0)
+                    sym = pos.get("symbol", "?")
+                    log_event(
+                        f"[AUTO-CLOSE] {sym} {pos.get('direction', '').upper()} hit {reason} "
+                        f"| P&L: {'+'if pnl>=0 else ''}{pnl:.2f} USD",
+                        "success" if pnl >= 0 else "warning"
+                    )
+                db.save_account(account)
+
+            # ── Step 2: Generate fresh signals ──
+            signals = await generate_signals()
+
+            # ── Step 3: Auto-execute trades on strong signals ──
+            can_trade, reason = check_circuit_breaker()
+            if can_trade:
+                for signal in signals:
+                    if signal.direction in (SignalDirection.NEUTRAL,):
+                        continue
+
+                    sym = signal.symbol
+                    info = INSTRUMENTS.get(sym, {})
+                    min_score = info.get("min_score", 0.15)
+
+                    # Only auto-trade on signals that clear the threshold
+                    if abs(signal.score) < min_score:
+                        continue
+
+                    # Determine trade direction
+                    if signal.direction in (SignalDirection.BUY, SignalDirection.STRONG_BUY):
+                        direction = "buy"
+                    elif signal.direction in (SignalDirection.SELL, SignalDirection.STRONG_SELL):
+                        direction = "sell"
+                    else:
+                        continue
+
+                    # Skip if already have a position on this symbol in same direction
+                    already_open = any(
+                        p["symbol"] == sym and p["direction"] == direction
+                        for p in open_positions
+                    )
+                    if already_open:
+                        continue
+
+                    # Calculate position size and open trade
+                    entry_price = signal.entry_point
+                    size = calculate_position_size(sym, entry_price, signal.stop_loss)
+
+                    result = broker.open_position(
+                        symbol=sym, direction=direction, size=size,
+                        take_profit=signal.take_profit, stop_loss=signal.stop_loss,
+                        entry_price=entry_price,
+                    )
+                    if "error" not in result:
+                        log_event(
+                            f"[AUTO-TRADE] Opened {direction.upper()} {sym} @ {entry_price:.2f} "
+                            f"| Score: {signal.score:.3f} | SL: {signal.stop_loss:.2f} TP: {signal.take_profit:.2f}",
+                            "success"
+                        )
+                    else:
+                        log_event(f"[AUTO-TRADE] Failed to open {sym}: {result['error']}", "warning")
+            else:
+                log_event(f"[AUTO-TRADE] Skipping: {reason}", "info")
+
+            # ── Step 4: Persist state ──
+            db.save_account(account)
+            save_signal_cache()
+
+            log_event(
+                f"[AUTO-TRADE] Scan complete | Balance: {account['balance_pln']:.2f} PLN "
+                f"| Open: {len(open_positions)} | Closed: {len(closed_positions)}",
+                "info"
+            )
+
+        except Exception as e:
+            log_event(f"[AUTO-TRADE] Error in trading loop: {str(e)}", "error")
+
+        await asyncio.sleep(AUTO_TRADE_INTERVAL_SEC)
+
+
+@app.get("/api/auto-trade")
+async def get_auto_trade_status():
+    """Get auto-trading status."""
+    return {
+        "enabled": AUTO_TRADE_ENABLED,
+        "interval_sec": AUTO_TRADE_INTERVAL_SEC,
+        "last_scan": account.get("last_scan"),
+        "open_positions": len(open_positions),
+    }
+
+@app.post("/api/auto-trade")
+async def set_auto_trade(enabled: bool):
+    """Enable/disable auto-trading."""
+    global AUTO_TRADE_ENABLED
+    AUTO_TRADE_ENABLED = enabled
+    log_event(f"[AUTO-TRADE] {'ENABLED' if enabled else 'DISABLED'}", "event")
+    return {"enabled": AUTO_TRADE_ENABLED}
+
+@app.post("/api/auto-trade/interval")
+async def set_auto_trade_interval(seconds: int):
+    """Set auto-trade scan interval (min 60s, max 3600s)."""
+    global AUTO_TRADE_INTERVAL_SEC
+    if seconds < 60 or seconds > 3600:
+        return {"error": "Interval must be between 60 and 3600 seconds"}
+    AUTO_TRADE_INTERVAL_SEC = seconds
+    log_event(f"[AUTO-TRADE] Interval set to {seconds}s", "event")
+    return {"interval_sec": AUTO_TRADE_INTERVAL_SEC}
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize on startup"""
+    global _trading_task
+
     log_event("[CFD TRADING BOT v0.2.0 - PLN SIMULATION]", "event")
     log_event("Instruments: XAU (Gold), XAG (Silver), US100 (Nasdaq), BTC (Bitcoin)", "info")
 
@@ -694,9 +838,20 @@ async def startup():
     account["last_scan"] = datetime.utcnow().isoformat()
     log_event(f"Account loaded: {account['balance_pln']:.2f} PLN ({account['balance_usd']:.2f} USD)", "success")
 
+    # Start autonomous trading loop
+    _trading_task = asyncio.create_task(auto_trade_loop())
+    log_event("[AUTO-TRADE] Background task launched (5 min interval)", "success")
+
 @app.on_event("shutdown")
 async def shutdown():
     """Cleanup on shutdown"""
+    global _trading_task
+    if _trading_task:
+        _trading_task.cancel()
+        try:
+            await _trading_task
+        except asyncio.CancelledError:
+            pass
     save_signal_cache()
     db.save_account(account)
     try:
