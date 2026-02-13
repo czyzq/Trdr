@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 
 interface CandleData {
   time: string;
+  timestamp?: string;
   open: number;
   high: number;
   low: number;
@@ -15,28 +16,43 @@ interface CandlestickChartProps {
   height?: number;
   showVolume?: boolean;
   showRSI?: boolean;
+  resolution?: string;
 }
 
 // ── Client-side indicator calculations ──
 
-function calculateRSI(prices: number[], period: number): number[] {
-  const rsi: number[] = [];
+function calculateRSI(prices: number[], period: number): (number | null)[] {
+  // Returns array aligned with prices (null for warmup period)
+  const result: (number | null)[] = [];
   const gains: number[] = [];
   const losses: number[] = [];
-  for (let i = 1; i < prices.length; i++) {
+  for (let i = 0; i < prices.length; i++) {
+    if (i === 0) { result.push(null); continue; }
     const change = prices[i] - prices[i - 1];
     gains.push(change > 0 ? change : 0);
     losses.push(change < 0 ? Math.abs(change) : 0);
+    if (gains.length < period) { result.push(null); continue; }
+    if (gains.length === period) {
+      const avgGain = gains.reduce((a, b) => a + b, 0) / period;
+      const avgLoss = losses.reduce((a, b) => a + b, 0) / period;
+      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+      result.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + rs)));
+    } else {
+      // Use Wilder smoothing
+      const prevRsi = result[result.length - 1];
+      if (prevRsi === null) { result.push(null); continue; }
+      // Recalculate with smoothing
+      let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      for (let j = period; j < gains.length; j++) {
+        avgGain = (avgGain * (period - 1) + gains[j]) / period;
+        avgLoss = (avgLoss * (period - 1) + losses[j]) / period;
+      }
+      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+      result.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + rs)));
+    }
   }
-  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < gains.length; i++) {
-    avgGain = (avgGain * (period - 1) + gains[i]) / period;
-    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
-    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    rsi.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + rs)));
-  }
-  return rsi;
+  return result;
 }
 
 function calculateSMA(prices: number[], period: number): (number | null)[] {
@@ -52,7 +68,6 @@ function calculateEMA(prices: number[], period: number): number[] {
   const multiplier = 2 / (period + 1);
   const ema: number[] = [];
   let val = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  // Fill leading nulls
   for (let i = 0; i < period - 1; i++) ema.push(NaN);
   ema.push(val);
   for (let i = period; i < prices.length; i++) {
@@ -69,9 +84,7 @@ function calculateBollingerBands(prices: number[], period: number = 20, stdDevMu
 
   for (let i = 0; i < prices.length; i++) {
     if (i < period - 1) {
-      upper.push(null);
-      middle.push(null);
-      lower.push(null);
+      upper.push(null); middle.push(null); lower.push(null);
       continue;
     }
     const slice = prices.slice(i - period + 1, i + 1);
@@ -98,7 +111,6 @@ function calculateMACD(prices: number[], fast = 12, slow = 26, signal = 9) {
     }
   }
 
-  // Signal line = EMA of MACD line (ignoring nulls)
   const validMacd = macdLine.filter((v): v is number => v !== null);
   const signalEma = calculateEMA(validMacd, signal);
 
@@ -122,16 +134,33 @@ function calculateMACD(prices: number[], fast = 12, slow = 26, signal = 9) {
 
 // Trading sessions (UTC hours)
 const TRADING_SESSIONS = [
-  { name: 'Tokyo',  start: 0,  end: 9,  color: '#f97316', abbr: 'TKY' },  // orange
-  { name: 'London', start: 7,  end: 16, color: '#3b82f6', abbr: 'LDN' },  // blue
-  { name: 'NY',     start: 13, end: 22, color: '#22c55e', abbr: 'NY' },   // green
+  { name: 'Tokyo',  start: 0,  end: 9,  color: '#f97316', abbr: 'TKY' },
+  { name: 'London', start: 7,  end: 16, color: '#3b82f6', abbr: 'LDN' },
+  { name: 'NY',     start: 13, end: 22, color: '#22c55e', abbr: 'NY' },
 ];
 
 function getSessionForHour(hour: number) {
   return TRADING_SESSIONS.filter(s => {
     if (s.start < s.end) return hour >= s.start && hour < s.end;
-    return hour >= s.start || hour < s.end; // wraps midnight
+    return hour >= s.start || hour < s.end;
   });
+}
+
+/** Parse an ISO timestamp or HH:MM time string into { hour, date } */
+function parseTimestamp(candle: CandleData): { hour: number; dateStr: string } | null {
+  // Prefer ISO timestamp
+  if (candle.timestamp) {
+    try {
+      const dt = new Date(candle.timestamp);
+      if (!isNaN(dt.getTime())) {
+        return { hour: dt.getUTCHours(), dateStr: candle.timestamp.split('T')[0] || '' };
+      }
+    } catch { /* fall through */ }
+  }
+  // Fallback: parse HH:MM from time field
+  const m = candle.time.match(/^(\d{1,2}):(\d{2})/);
+  if (m) return { hour: parseInt(m[1], 10), dateStr: '' };
+  return null;
 }
 
 export const CandlestickChart: React.FC<CandlestickChartProps> = ({
@@ -140,6 +169,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   height = 300,
   showVolume = true,
   showRSI = true,
+  resolution = '60',
 }) => {
   const [hoveredCandle, setHoveredCandle] = useState<number | null>(null);
   const [overlays, setOverlays] = useState({
@@ -155,9 +185,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
+      for (const entry of entries) setContainerWidth(entry.contentRect.width);
     });
     ro.observe(el);
     setContainerWidth(el.clientWidth);
@@ -168,6 +196,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     setOverlays(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const isDaily = resolution === 'D';
+
   // Validate data
   const validData = useMemo(() =>
     (data || []).filter(d =>
@@ -177,12 +207,12 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       d.high >= d.low
     ), [data]);
 
-  // Compute all indicators
+  // Compute all indicators on FULL data (including warmup candles)
   const indicators = useMemo(() => {
     if (validData.length === 0) return null;
     const closes = validData.map(d => d.close);
     return {
-      rsi: closes.length >= 14 ? calculateRSI(closes, 14) : [],
+      rsi: calculateRSI(closes, 14),
       sma20: calculateSMA(closes, 20),
       sma50: calculateSMA(closes, 50),
       bb: calculateBollingerBands(closes, 20, 2),
@@ -190,16 +220,13 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     };
   }, [validData]);
 
-  // Compute session bands from candle times (HH:MM format)
+  // Compute session bands using timestamps (with date-awareness)
   const sessionBands = useMemo(() => {
-    if (!overlays.sessions || validData.length === 0) return [];
-    // Parse hours from time strings
-    const hours = validData.map(d => {
-      const match = d.time.match(/^(\d{1,2}):(\d{2})/);
-      return match ? parseInt(match[1], 10) : -1;
-    });
-    // If no valid hours (daily data shows MM/DD), skip sessions
-    if (hours.every(h => h < 0)) return [];
+    if (!overlays.sessions || validData.length === 0 || isDaily) return [];
+
+    const parsed = validData.map(d => parseTimestamp(d));
+    // If no valid timestamps, skip sessions
+    if (parsed.every(p => p === null)) return [];
 
     type Band = { session: typeof TRADING_SESSIONS[0]; startIdx: number; endIdx: number };
     const bands: Band[] = [];
@@ -207,9 +234,20 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     for (const session of TRADING_SESSIONS) {
       let inSession = false;
       let startIdx = 0;
-      for (let i = 0; i < hours.length; i++) {
-        const h = hours[i];
-        const active = h >= 0 && getSessionForHour(h).some(s => s.name === session.name);
+      let prevDate = '';
+      for (let i = 0; i < parsed.length; i++) {
+        const p = parsed[i];
+        if (!p) {
+          if (inSession) { bands.push({ session, startIdx, endIdx: i - 1 }); inSession = false; }
+          continue;
+        }
+        const active = getSessionForHour(p.hour).some(s => s.name === session.name);
+        // Break session when date changes (new day = new session band)
+        const dateChanged = p.dateStr && prevDate && p.dateStr !== prevDate;
+        if (dateChanged && inSession) {
+          bands.push({ session, startIdx, endIdx: i - 1 });
+          inSession = false;
+        }
         if (active && !inSession) {
           startIdx = i;
           inSession = true;
@@ -217,13 +255,12 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           bands.push({ session, startIdx, endIdx: i - 1 });
           inSession = false;
         }
+        prevDate = p.dateStr;
       }
-      if (inSession) {
-        bands.push({ session, startIdx, endIdx: hours.length - 1 });
-      }
+      if (inSession) bands.push({ session, startIdx, endIdx: parsed.length - 1 });
     }
     return bands;
-  }, [validData, overlays.sessions]);
+  }, [validData, overlays.sessions, isDaily]);
 
   if (!data || data.length === 0 || validData.length === 0) {
     return (
@@ -235,59 +272,44 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   if (!indicators) return null;
 
-  const prices = validData.map(d => d.close);
+  const n = validData.length;
   const volumes = validData.map(d => d.volume);
 
-  // Include BB bands in price range calculation when BB overlay is on
+  // Include BB bands in price range
   let maxPrice = Math.max(...validData.map(d => d.high));
   let minPrice = Math.min(...validData.map(d => d.low));
   if (overlays.bb) {
-    for (const v of indicators.bb.upper) {
-      if (v !== null && v > maxPrice) maxPrice = v;
-    }
-    for (const v of indicators.bb.lower) {
-      if (v !== null && v < minPrice) minPrice = v;
-    }
+    for (const v of indicators.bb.upper) { if (v !== null && v > maxPrice) maxPrice = v; }
+    for (const v of indicators.bb.lower) { if (v !== null && v < minPrice) minPrice = v; }
   }
 
   const maxVolume = Math.max(...volumes);
   const priceRange = maxPrice - minPrice || 1;
 
-  // Layout — responsive: use container width on mobile, 1100 on desktop
+  // Layout
   const isMobile = containerWidth > 0 && containerWidth < 600;
   const showMACD = overlays.macd;
-  // On mobile, set chart width to at least 600 for readability (scrollable)
-  const chartWidth = containerWidth > 0
-    ? Math.max(600, containerWidth)
-    : 1100;
+  const chartWidth = containerWidth > 0 ? Math.max(600, containerWidth) : 1100;
   const macdH = showMACD ? 45 : 0;
   const volumeH = showVolume ? 35 : 0;
   const rsiH = showRSI ? 45 : 0;
   const gapH = 6;
-  const headerH = 0;
-  // Price chart takes remaining space
-  const priceChartH = Math.max(120,
-    (showMACD ? 180 : 220)
-    - (showVolume ? 0 : -30)
-    - (showRSI ? 0 : -30)
-  );
-  const totalH = priceChartH
-    + (showVolume ? volumeH + gapH : 0)
-    + (showMACD ? macdH + gapH : 0)
-    + (showRSI ? rsiH + gapH : 0)
-    + 20; // time labels
+  const priceChartH = Math.max(120, (showMACD ? 180 : 220) - (showVolume ? 0 : -30) - (showRSI ? 0 : -30));
+  const totalH = priceChartH + (showVolume ? volumeH + gapH : 0) + (showMACD ? macdH + gapH : 0) + (showRSI ? rsiH + gapH : 0) + 20;
   const rightPad = isMobile ? 45 : 55;
   const usableWidth = chartWidth - rightPad;
 
-  const currentPrice = validData[validData.length - 1].close;
-  const prevClose = validData.length > 1 ? validData[validData.length - 2].close : currentPrice;
+  const currentPrice = validData[n - 1].close;
+  const prevClose = n > 1 ? validData[n - 2].close : currentPrice;
   const priceChange = currentPrice - prevClose;
   const priceChangeStr = `${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}`;
 
-  // Helper: map price to Y in price chart area
   const priceToY = (p: number) => priceChartH - ((p - minPrice) / priceRange) * priceChartH;
 
-  // Price levels
+  // Index to x coordinate
+  const idxToX = (i: number) => n > 1 ? (i / (n - 1)) * usableWidth : usableWidth / 2;
+
+  // Price grid levels
   const priceLevels = [];
   const levelCount = 6;
   for (let i = 0; i <= levelCount; i++) {
@@ -295,28 +317,44 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     priceLevels.push({ price, y: priceToY(price) });
   }
 
-  // Time labels — fewer on mobile to avoid overlap
+  // Time labels — resolution-aware formatting
   const timeLabels: { time: string; x: number }[] = [];
   const maxLabels = isMobile ? 6 : 10;
-  const step = Math.max(1, Math.floor(validData.length / maxLabels));
-  for (let i = 0; i < validData.length; i += step) {
-    timeLabels.push({
-      time: validData[i].time,
-      x: (i / (validData.length - 1)) * usableWidth,
-    });
+  const step = Math.max(1, Math.floor(n / maxLabels));
+  for (let i = 0; i < n; i += step) {
+    let label = validData[i].time;
+    // For daily charts prefer MM/DD, for intraday prefer HH:MM
+    if (validData[i].timestamp) {
+      try {
+        const dt = new Date(validData[i].timestamp!);
+        if (!isNaN(dt.getTime())) {
+          if (isDaily) {
+            label = `${(dt.getUTCMonth() + 1).toString().padStart(2, '0')}/${dt.getUTCDate().toString().padStart(2, '0')}`;
+          } else {
+            label = `${dt.getUTCHours().toString().padStart(2, '0')}:${dt.getUTCMinutes().toString().padStart(2, '0')}`;
+            // Show date prefix at day boundaries
+            if (i === 0 || (i > 0 && validData[i].timestamp!.split('T')[0] !== validData[i - step]?.timestamp?.split('T')[0])) {
+              label = `${dt.getUTCDate()}/${(dt.getUTCMonth() + 1)} ${label}`;
+            }
+          }
+        }
+      } catch { /* use fallback */ }
+    }
+    timeLabels.push({ time: label, x: idxToX(i) });
   }
 
   // Candlesticks
-  const candleSpacing = usableWidth / validData.length;
+  const candleSpacing = usableWidth / n;
   const candleWidth = Math.max(2, candleSpacing * 0.7);
 
   const candlesticks = validData.map((candle, index) => {
-    const x = (index / (validData.length - 1)) * usableWidth;
+    const x = idxToX(index);
     const openY = priceToY(candle.open);
     const closeY = priceToY(candle.close);
     const highY = priceToY(candle.high);
     const lowY = priceToY(candle.low);
     const isBullish = candle.close >= candle.open;
+    const rsiVal = indicators.rsi[index];
 
     return {
       index, x, openY, closeY, highY, lowY, isBullish,
@@ -325,18 +363,17 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       color: isBullish ? '#22c55e' : '#ef4444',
       volume: candle.volume,
       data: candle,
-      rsi: indicators.rsi[index - 14],
+      rsi: rsiVal,
     };
   });
 
-  // Build polyline strings for overlays
+  // Build polyline string for indicator overlay (aligned to candle indices)
   const toPolyline = (values: (number | null)[], mapY: (v: number) => number): string => {
     const pts: string[] = [];
     for (let i = 0; i < values.length; i++) {
       const v = values[i];
       if (v === null || isNaN(v)) continue;
-      const x = (i / (validData.length - 1)) * usableWidth;
-      pts.push(`${x},${mapY(v)}`);
+      pts.push(`${idxToX(i)},${mapY(v)}`);
     }
     return pts.join(' ');
   };
@@ -361,8 +398,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const chartX = (x / rect.width) * chartWidth;
-    const idx = Math.round((chartX / usableWidth) * (candlesticks.length - 1));
-    if (idx >= 0 && idx < candlesticks.length) setHoveredCandle(idx);
+    const idx = Math.round((chartX / usableWidth) * (n - 1));
+    if (idx >= 0 && idx < n) setHoveredCandle(idx);
   };
 
   const handleTouchMove = useCallback((event: React.TouchEvent<SVGElement>) => {
@@ -371,20 +408,32 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     const rect = event.currentTarget.getBoundingClientRect();
     const x = touch.clientX - rect.left;
     const chartX = (x / rect.width) * chartWidth;
-    const idx = Math.round((chartX / usableWidth) * (candlesticks.length - 1));
-    if (idx >= 0 && idx < candlesticks.length) setHoveredCandle(idx);
-  }, [chartWidth, usableWidth, candlesticks.length]);
+    const idx = Math.round((chartX / usableWidth) * (n - 1));
+    if (idx >= 0 && idx < n) setHoveredCandle(idx);
+  }, [chartWidth, usableWidth, n]);
 
-  // Hovered MACD values
   const hoveredMacd = hoveredCandle !== null ? {
     macd: indicators.macd.macdLine[hoveredCandle],
     signal: indicators.macd.signalLine[hoveredCandle],
     hist: indicators.macd.histogram[hoveredCandle],
   } : null;
 
+  // RSI polyline aligned to candle x-axis
+  const rsiPolyline = useMemo(() => {
+    const pts: string[] = [];
+    for (let i = 0; i < indicators.rsi.length; i++) {
+      const v = indicators.rsi[i];
+      if (v === null) continue;
+      const x = idxToX(i);
+      const y = rsiTop + rsiH - (v / 100) * rsiH;
+      pts.push(`${x},${y}`);
+    }
+    return pts.join(' ');
+  }, [indicators.rsi, rsiTop, rsiH, usableWidth, n]);
+
   return (
     <div className="h-full relative" ref={containerRef}>
-      {/* Header: Price Info + Overlay Toggles */}
+      {/* Header */}
       <div className="flex flex-wrap items-center gap-1 sm:gap-3 mb-1 px-1">
         <span className="text-xs sm:text-sm font-bold" style={{ color: '#e2e8f0' }}>{symbol}</span>
         <span className="text-xs sm:text-sm font-bold" style={{ color: priceChange >= 0 ? '#22c55e' : '#ef4444' }}>
@@ -396,53 +445,24 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
         {/* Overlay toggles */}
         <div className="flex items-center gap-1 ml-1 sm:ml-2">
-          <button
-            onClick={() => toggleOverlay('bb')}
-            className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
-            style={{
-              color: overlays.bb ? '#a78bfa' : '#374151',
-              backgroundColor: overlays.bb ? '#1a1f35' : 'transparent',
-              border: `1px solid ${overlays.bb ? '#a78bfa33' : '#1a1f35'}`,
-            }}
-          >
-            BB
-          </button>
-          <button
-            onClick={() => toggleOverlay('sma')}
-            className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
-            style={{
-              color: overlays.sma ? '#38bdf8' : '#374151',
-              backgroundColor: overlays.sma ? '#1a1f35' : 'transparent',
-              border: `1px solid ${overlays.sma ? '#38bdf833' : '#1a1f35'}`,
-            }}
-          >
-            SMA
-          </button>
-          <button
-            onClick={() => toggleOverlay('macd')}
-            className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
-            style={{
-              color: overlays.macd ? '#fb923c' : '#374151',
-              backgroundColor: overlays.macd ? '#1a1f35' : 'transparent',
-              border: `1px solid ${overlays.macd ? '#fb923c33' : '#1a1f35'}`,
-            }}
-          >
-            MACD
-          </button>
-          <button
-            onClick={() => toggleOverlay('sessions')}
-            className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
-            style={{
-              color: overlays.sessions ? '#94a3b8' : '#374151',
-              backgroundColor: overlays.sessions ? '#1a1f35' : 'transparent',
-              border: `1px solid ${overlays.sessions ? '#94a3b833' : '#1a1f35'}`,
-            }}
-          >
-            SESS
-          </button>
+          {(['bb', 'sma', 'macd', 'sessions'] as const).map(key => {
+            const colors: Record<string, string> = { bb: '#a78bfa', sma: '#38bdf8', macd: '#fb923c', sessions: '#94a3b8' };
+            const labels: Record<string, string> = { bb: 'BB', sma: 'SMA', macd: 'MACD', sessions: 'SESS' };
+            const c = colors[key];
+            return (
+              <button key={key} onClick={() => toggleOverlay(key)}
+                className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
+                style={{
+                  color: overlays[key] ? c : '#374151',
+                  backgroundColor: overlays[key] ? '#1a1f35' : 'transparent',
+                  border: `1px solid ${overlays[key] ? c + '33' : '#1a1f35'}`,
+                }}
+              >{labels[key]}</button>
+            );
+          })}
         </div>
 
-        {/* Hover info — wraps on mobile, inline on desktop */}
+        {/* Hover info */}
         {hoveredCandle !== null && candlesticks[hoveredCandle] && (
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 ml-auto text-[9px] sm:text-[10px]" style={{ color: '#64748b' }}>
             <span>O:{candlesticks[hoveredCandle].data.open.toFixed(2)}</span>
@@ -450,31 +470,18 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             <span>L:{candlesticks[hoveredCandle].data.low.toFixed(2)}</span>
             <span>C:{candlesticks[hoveredCandle].data.close.toFixed(2)}</span>
             <span className="hidden sm:inline">V:{(candlesticks[hoveredCandle].data.volume / 1000).toFixed(0)}K</span>
-            {candlesticks[hoveredCandle].rsi !== undefined && (
-              <span className="hidden sm:inline">RSI:{candlesticks[hoveredCandle].rsi.toFixed(1)}</span>
+            {candlesticks[hoveredCandle].rsi != null && (
+              <span className="hidden sm:inline">RSI:{candlesticks[hoveredCandle].rsi!.toFixed(1)}</span>
             )}
-            {overlays.macd && hoveredMacd?.macd !== null && hoveredMacd?.macd !== undefined && (
+            {overlays.macd && hoveredMacd?.macd != null && (
               <span className="hidden sm:inline" style={{ color: '#fb923c' }}>MACD:{hoveredMacd.macd.toFixed(2)}</span>
             )}
-            {overlays.sessions && (() => {
-              const t = candlesticks[hoveredCandle].data.time;
-              const m = t.match(/^(\d{1,2}):(\d{2})/);
-              if (!m) return null;
-              const sessions = getSessionForHour(parseInt(m[1], 10));
-              if (sessions.length === 0) return null;
-              return sessions.map(s => (
-                <span key={s.name} className="hidden sm:inline" style={{ color: s.color }}>{s.abbr}</span>
-              ));
-            })()}
           </div>
         )}
       </div>
 
-      {/* Scrollable chart container for mobile */}
-      <div
-        className="overflow-x-auto"
-        style={{ WebkitOverflowScrolling: 'touch' }}
-      >
+      {/* Scrollable chart */}
+      <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
         <svg
           width={isMobile ? chartWidth : '100%'}
           height={height}
@@ -490,26 +497,17 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         {overlays.sessions && sessionBands.length > 0 && (
           <g>
             {sessionBands.map((band, i) => {
-              const x1 = (band.startIdx / Math.max(validData.length - 1, 1)) * usableWidth;
-              const x2 = (band.endIdx / Math.max(validData.length - 1, 1)) * usableWidth;
+              const x1 = idxToX(band.startIdx);
+              const x2 = idxToX(band.endIdx);
               const w = Math.max(x2 - x1, 2);
               return (
                 <g key={`sess-${i}`}>
-                  {/* Full-height session band */}
-                  <rect
-                    x={x1} y={0} width={w} height={priceChartH}
-                    fill={band.session.color} fillOpacity="0.04"
-                  />
-                  {/* Session start line */}
-                  <line
-                    x1={x1} y1={0} x2={x1} y2={priceChartH}
-                    stroke={band.session.color} strokeWidth="0.5" strokeDasharray="3,3" opacity="0.3"
-                  />
-                  {/* Session label at top */}
-                  <text
-                    x={x1 + 3} y={10}
-                    fill={band.session.color} fontSize="7" fontFamily="monospace" opacity="0.5"
-                  >
+                  <rect x={x1} y={0} width={w} height={priceChartH}
+                    fill={band.session.color} fillOpacity="0.04" />
+                  <line x1={x1} y1={0} x2={x1} y2={priceChartH}
+                    stroke={band.session.color} strokeWidth="0.5" strokeDasharray="3,3" opacity="0.3" />
+                  <text x={x1 + 3} y={10}
+                    fill={band.session.color} fontSize="7" fontFamily="monospace" opacity="0.5">
                     {band.session.abbr}
                   </text>
                 </g>
@@ -534,75 +532,52 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           ))}
         </g>
 
-        {/* ── Bollinger Bands Overlay ── */}
+        {/* ── Bollinger Bands ── */}
         {overlays.bb && (
           <g>
-            {/* Filled area between upper and lower bands */}
             <path
               d={(() => {
                 const upperPts: string[] = [];
                 const lowerPts: string[] = [];
-                for (let i = 0; i < validData.length; i++) {
+                for (let i = 0; i < n; i++) {
                   const u = indicators.bb.upper[i];
                   const l = indicators.bb.lower[i];
                   if (u === null || l === null) continue;
-                  const x = (i / (validData.length - 1)) * usableWidth;
+                  const x = idxToX(i);
                   upperPts.push(`${x},${priceToY(u)}`);
                   lowerPts.unshift(`${x},${priceToY(l)}`);
                 }
                 if (upperPts.length === 0) return '';
                 return `M${upperPts.join(' L')} L${lowerPts.join(' L')}Z`;
               })()}
-              fill="#a78bfa"
-              fillOpacity="0.06"
+              fill="#a78bfa" fillOpacity="0.06"
             />
-            {/* Upper band */}
-            <polyline
-              points={toPolyline(indicators.bb.upper, priceToY)}
-              fill="none" stroke="#a78bfa" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.6"
-            />
-            {/* Middle band (SMA 20) */}
-            <polyline
-              points={toPolyline(indicators.bb.middle, priceToY)}
-              fill="none" stroke="#a78bfa" strokeWidth="0.6" opacity="0.4"
-            />
-            {/* Lower band */}
-            <polyline
-              points={toPolyline(indicators.bb.lower, priceToY)}
-              fill="none" stroke="#a78bfa" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.6"
-            />
+            <polyline points={toPolyline(indicators.bb.upper, priceToY)}
+              fill="none" stroke="#a78bfa" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.6" />
+            <polyline points={toPolyline(indicators.bb.middle, priceToY)}
+              fill="none" stroke="#a78bfa" strokeWidth="0.6" opacity="0.4" />
+            <polyline points={toPolyline(indicators.bb.lower, priceToY)}
+              fill="none" stroke="#a78bfa" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.6" />
           </g>
         )}
 
-        {/* ── SMA 20/50 Lines ── */}
+        {/* ── SMA Lines ── */}
         {overlays.sma && (
           <g>
-            <polyline
-              points={toPolyline(indicators.sma20, priceToY)}
-              fill="none" stroke="#38bdf8" strokeWidth="1" opacity="0.7"
-            />
-            <polyline
-              points={toPolyline(indicators.sma50, priceToY)}
-              fill="none" stroke="#f472b6" strokeWidth="1" opacity="0.7"
-            />
-            {/* Legend */}
+            <polyline points={toPolyline(indicators.sma20, priceToY)}
+              fill="none" stroke="#38bdf8" strokeWidth="1" opacity="0.7" />
+            <polyline points={toPolyline(indicators.sma50, priceToY)}
+              fill="none" stroke="#f472b6" strokeWidth="1" opacity="0.7" />
             <text x={usableWidth + 5} y={12} fill="#38bdf8" fontSize="8" fontFamily="monospace" opacity="0.7">SMA20</text>
             <text x={usableWidth + 5} y={22} fill="#f472b6" fontSize="8" fontFamily="monospace" opacity="0.7">SMA50</text>
           </g>
         )}
 
         {/* Current Price Line */}
-        <line
-          x1={0} y1={priceToY(currentPrice)}
-          x2={usableWidth} y2={priceToY(currentPrice)}
-          stroke={priceChange >= 0 ? '#22c55e' : '#ef4444'}
-          strokeWidth="0.5" strokeDasharray="3,3" opacity="0.6"
-        />
-        <text
-          x={usableWidth + 5} y={priceToY(currentPrice) + 3}
-          fill={priceChange >= 0 ? '#22c55e' : '#ef4444'}
-          fontSize="10" fontFamily="monospace" fontWeight="bold"
-        >
+        <line x1={0} y1={priceToY(currentPrice)} x2={usableWidth} y2={priceToY(currentPrice)}
+          stroke={priceChange >= 0 ? '#22c55e' : '#ef4444'} strokeWidth="0.5" strokeDasharray="3,3" opacity="0.6" />
+        <text x={usableWidth + 5} y={priceToY(currentPrice) + 3}
+          fill={priceChange >= 0 ? '#22c55e' : '#ef4444'} fontSize="10" fontFamily="monospace" fontWeight="bold">
           {currentPrice.toFixed(2)}
         </text>
 
@@ -612,13 +587,11 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             <g key={`c-${c.index}`}>
               <line x1={c.x} y1={c.highY} x2={c.x} y2={c.lowY}
                 stroke={c.color} strokeWidth={hoveredCandle === c.index ? '1' : '0.5'}
-                opacity={hoveredCandle === null || hoveredCandle === c.index ? '1' : '0.5'}
-              />
+                opacity={hoveredCandle === null || hoveredCandle === c.index ? '1' : '0.5'} />
               <rect
                 x={c.x - candleWidth / 2} y={c.bodyY} width={candleWidth} height={Math.max(1, c.bodyH)}
                 fill={c.color} stroke={c.color} strokeWidth="0.3"
-                opacity={hoveredCandle === null || hoveredCandle === c.index ? '1' : '0.5'}
-              />
+                opacity={hoveredCandle === null || hoveredCandle === c.index ? '1' : '0.5'} />
             </g>
           ))}
         </g>
@@ -628,8 +601,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           <line
             x1={candlesticks[hoveredCandle].x} y1={0}
             x2={candlesticks[hoveredCandle].x} y2={totalH - 20}
-            stroke="#374151" strokeWidth="0.5" strokeDasharray="2,2"
-          />
+            stroke="#374151" strokeWidth="0.5" strokeDasharray="2,2" />
         )}
 
         {/* ── Volume ── */}
@@ -640,12 +612,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               const barH = maxVolume > 0 ? (c.volume / maxVolume) * volumeH : 0;
               return (
                 <rect key={`v-${c.index}`}
-                  x={c.x - candleWidth / 2}
-                  y={volumeTop + volumeH - barH}
+                  x={c.x - candleWidth / 2} y={volumeTop + volumeH - barH}
                   width={candleWidth} height={barH}
-                  fill={c.color}
-                  fillOpacity={hoveredCandle === c.index ? '0.7' : '0.3'}
-                />
+                  fill={c.color} fillOpacity={hoveredCandle === c.index ? '0.7' : '0.3'} />
               );
             })}
           </g>
@@ -655,41 +624,26 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         {showMACD && macdVals.length > 0 && (
           <g>
             <rect x={0} y={macdTop} width={usableWidth} height={macdH} fill="#0d1220" fillOpacity="0.5" />
-            {/* Zero line */}
-            <line
-              x1={0} y1={macdTop + macdH / 2}
-              x2={usableWidth} y2={macdTop + macdH / 2}
-              stroke="#1a1f35" strokeWidth="0.5"
-            />
-            {/* Histogram bars */}
+            <line x1={0} y1={macdTop + macdH / 2} x2={usableWidth} y2={macdTop + macdH / 2}
+              stroke="#1a1f35" strokeWidth="0.5" />
             {validData.map((_, i) => {
               const h = indicators.macd.histogram[i];
               if (h === null) return null;
-              const x = (i / (validData.length - 1)) * usableWidth;
+              const x = idxToX(i);
               const barH = Math.abs(h / (macdMax || 1)) * (macdH / 2 - 2);
               const barColor = h >= 0 ? '#22c55e' : '#ef4444';
               return (
                 <rect key={`mh-${i}`}
                   x={x - candleWidth / 2}
                   y={h >= 0 ? macdToY(h) : macdTop + macdH / 2}
-                  width={candleWidth}
-                  height={Math.max(0.5, barH)}
-                  fill={barColor}
-                  fillOpacity="0.5"
-                />
+                  width={candleWidth} height={Math.max(0.5, barH)}
+                  fill={barColor} fillOpacity="0.5" />
               );
             })}
-            {/* MACD line */}
-            <polyline
-              points={toPolyline(indicators.macd.macdLine, macdToY)}
-              fill="none" stroke="#38bdf8" strokeWidth="1"
-            />
-            {/* Signal line */}
-            <polyline
-              points={toPolyline(indicators.macd.signalLine, macdToY)}
-              fill="none" stroke="#fb923c" strokeWidth="1" strokeDasharray="2,1"
-            />
-            {/* Labels */}
+            <polyline points={toPolyline(indicators.macd.macdLine, macdToY)}
+              fill="none" stroke="#38bdf8" strokeWidth="1" />
+            <polyline points={toPolyline(indicators.macd.signalLine, macdToY)}
+              fill="none" stroke="#fb923c" strokeWidth="1" strokeDasharray="2,1" />
             <text x={5} y={macdTop + 10} fill="#374151" fontSize="9" fontFamily="monospace">MACD</text>
             <text x={usableWidth + 5} y={macdTop + 10} fill="#38bdf8" fontSize="7" fontFamily="monospace">MACD</text>
             <text x={usableWidth + 5} y={macdTop + 19} fill="#fb923c" fontSize="7" fontFamily="monospace">Signal</text>
@@ -697,41 +651,32 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         )}
 
         {/* ── RSI Panel ── */}
-        {showRSI && indicators.rsi.length > 0 && (
+        {showRSI && indicators.rsi.some(v => v !== null) && (
           <g>
             <rect x={0} y={rsiTop} width={usableWidth} height={rsiH} fill="#0d1220" fillOpacity="0.5" />
-            {/* Overbought zone */}
             <rect x={0} y={rsiTop} width={usableWidth} height={rsiH * 0.3} fill="#ef4444" fillOpacity="0.05" />
-            {/* Oversold zone */}
             <rect x={0} y={rsiTop + rsiH * 0.7} width={usableWidth} height={rsiH * 0.3} fill="#22c55e" fillOpacity="0.05" />
-            {/* Reference lines */}
             <line x1={0} y1={rsiTop + rsiH * 0.3} x2={usableWidth} y2={rsiTop + rsiH * 0.3} stroke="#1a1f35" strokeWidth="0.5" strokeDasharray="2,2" />
             <line x1={0} y1={rsiTop + rsiH * 0.5} x2={usableWidth} y2={rsiTop + rsiH * 0.5} stroke="#1a1f35" strokeWidth="0.5" strokeDasharray="4,4" />
             <line x1={0} y1={rsiTop + rsiH * 0.7} x2={usableWidth} y2={rsiTop + rsiH * 0.7} stroke="#1a1f35" strokeWidth="0.5" strokeDasharray="2,2" />
-            {/* RSI line */}
-            <polyline
-              points={indicators.rsi.map((rsi, i) => {
-                const x = (i / (indicators.rsi.length - 1)) * usableWidth;
-                const y = rsiTop + rsiH - (rsi / 100) * rsiH;
-                return `${x},${y}`;
-              }).join(' ')}
-              fill="none" stroke="#eab308" strokeWidth="1.5"
-            />
-            {/* Labels */}
+            {/* RSI line — aligned to candle x-axis */}
+            <polyline points={rsiPolyline} fill="none" stroke="#eab308" strokeWidth="1.5" />
             <text x={5} y={rsiTop + 10} fill="#374151" fontSize="9" fontFamily="monospace">RSI</text>
             <text x={usableWidth + 5} y={rsiTop + rsiH * 0.3 + 3} fill="#374151" fontSize="8" fontFamily="monospace">70</text>
             <text x={usableWidth + 5} y={rsiTop + rsiH * 0.5 + 3} fill="#374151" fontSize="8" fontFamily="monospace">50</text>
             <text x={usableWidth + 5} y={rsiTop + rsiH * 0.7 + 3} fill="#374151" fontSize="8" fontFamily="monospace">30</text>
             {/* Current RSI value */}
-            {indicators.rsi.length > 0 && (
-              <text
-                x={usableWidth + 5}
-                y={rsiTop + rsiH - (indicators.rsi[indicators.rsi.length - 1] / 100) * rsiH + 3}
-                fill="#eab308" fontSize="9" fontFamily="monospace" fontWeight="bold"
-              >
-                {indicators.rsi[indicators.rsi.length - 1].toFixed(0)}
-              </text>
-            )}
+            {(() => {
+              const lastRsi = [...indicators.rsi].reverse().find(v => v !== null);
+              if (lastRsi == null) return null;
+              return (
+                <text x={usableWidth + 5}
+                  y={rsiTop + rsiH - (lastRsi / 100) * rsiH + 3}
+                  fill="#eab308" fontSize="9" fontFamily="monospace" fontWeight="bold">
+                  {lastRsi.toFixed(0)}
+                </text>
+              );
+            })()}
           </g>
         )}
 

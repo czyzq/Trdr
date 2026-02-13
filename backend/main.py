@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
 import uvicorn
 import asyncio
-from typing import List, Optional
+from typing import Dict, List, Optional
 import os
 import json
 import uuid
@@ -18,6 +18,7 @@ from models import Signal, SignalDirection, Component, ComponentType, SignalResp
 from alpha_vantage import get_client as get_alpha_vantage_client
 from alpha_vantage_news import get_client as get_news_client
 from indicators import TechnicalIndicators
+from strategies import get_strategy, list_strategies, mms_on_trade_result
 from imessage_alerts import AlertConfig, iMessageAlertDispatcher, get_dispatcher
 from openclaw_integration import set_openclaw_message_function, format_imessage_for_cfd_alert
 import database as db
@@ -67,6 +68,15 @@ if hasattr(broker, 'account'):
 
 # Signal history cache for trend analysis
 signal_history_cache = {}
+
+# Strategy selection per symbol (default: adaptive_regime)
+_strategy_selection: Dict[str, str] = {}
+
+def get_symbol_strategy(symbol: str) -> str:
+    return _strategy_selection.get(symbol, "adaptive_regime")
+
+def set_symbol_strategy(symbol: str, strategy_id: str):
+    _strategy_selection[symbol] = strategy_id
 
 def load_signal_cache():
     """Load signal history cache from DB, fallback to JSON file"""
@@ -544,15 +554,11 @@ async def generate_signals() -> List[Signal]:
             # ── Volatility filter ──
             atr = indicators.get("atr_14", current_price * 0.01)
             atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
-            # Skip if volatility is extreme (>3% per candle = dangerous)
             if atr_pct > 3.0:
                 log_event(f"[SKIP] {symbol} ATR {atr_pct:.1f}% too volatile", "warning")
                 continue
 
-            # ── Technical scoring (regime-adaptive) ──
-            technical_score, components = calculate_signal_score(indicators, symbol)
-
-            # ── News sentiment (capped influence: max 15% of final score) ──
+            # ── News sentiment ──
             news_score = 0.0
             try:
                 news = await news_client_instance.get_news(symbol, limit=5)
@@ -563,52 +569,25 @@ async def generate_signals() -> List[Signal]:
             except Exception as e:
                 log_event(f"Failed to fetch news for {symbol}: {e}", "warning")
 
-            # Final score: blend technical + news + higher-TF bias
-            effective_news = news_score if abs(news_score) > 0.1 else 0.0
-            if effective_news != 0:
-                score = technical_score * 0.80 + effective_news * 0.10 + htf_bias * 0.10
-            elif abs(htf_bias) > 0.1:
-                score = technical_score * 0.85 + htf_bias * 0.15
-            else:
-                score = technical_score  # 100% technical when no news/HTF
-            score = max(-1, min(1, score))
+            # ── Run selected strategy ──
+            strategy_id = get_symbol_strategy(symbol)
+            strategy = get_strategy(strategy_id)
+            indicators["_closes"] = [c["close"] for c in candles]
 
-            # ── Multi-timeframe alignment filter ──
-            # If HTF strongly opposes the signal direction, reject the trade
-            if abs(htf_bias) > 0.3:
-                is_buy_signal = score > 0
-                htf_bullish = htf_bias > 0
-                if is_buy_signal != htf_bullish:
-                    log_event(f"[MTF SKIP] {symbol} signal opposes daily trend (bias: {htf_bias:+.2f})", "info")
-                    score *= 0.5  # Halve the score, likely falls below threshold
+            result = strategy.score(
+                candles=candles, indicators=indicators, symbol=symbol,
+                instrument_info=info, current_price=current_price,
+                htf_bias=htf_bias, news_score=news_score,
+            )
 
-            # ── Per-instrument entry threshold ──
-            min_score = info.get("min_score", 0.15)
-            direction = get_signal_direction(score, min_score=min_score)
-
-            # ── Minimum indicator agreement filter (per-instrument) ──
-            component_vals = [c.value for c in components]
-            bullish_c = sum(1 for v in component_vals if v > 0.1)
-            bearish_c = sum(1 for v in component_vals if v < -0.1)
-            # Commodities need more agreement (3), equities/crypto need less (2)
-            min_agreement = 3 if info.get("asset_class") == "commodity" else 2
-            if direction != SignalDirection.NEUTRAL and max(bullish_c, bearish_c) < min_agreement:
-                log_event(f"[SKIP] {symbol} only {max(bullish_c, bearish_c)} indicators agree (need {min_agreement})", "info")
-                direction = SignalDirection.NEUTRAL
-
-            # ── Trend-alignment filter for commodities ──
-            # Commodities (gold, silver) mean-revert — only trade with the larger trend
-            sma_50 = indicators.get("sma_50")
-            if info.get("asset_class") == "commodity" and sma_50 and direction != SignalDirection.NEUTRAL:
-                price_above_sma50 = current_price > sma_50
-                is_buy = direction in (SignalDirection.BUY, SignalDirection.STRONG_BUY)
-                # Only allow buys when price is above SMA50 (uptrend), sells when below
-                if is_buy and not price_above_sma50:
-                    log_event(f"[SKIP] {symbol} BUY rejected: price below SMA50 (counter-trend)", "info")
-                    direction = SignalDirection.NEUTRAL
-                elif not is_buy and price_above_sma50:
-                    log_event(f"[SKIP] {symbol} SELL rejected: price above SMA50 (counter-trend)", "info")
-                    direction = SignalDirection.NEUTRAL
+            score = result["score"]
+            direction = result["direction"]
+            components = result["components"]
+            confidence = result["confidence"]
+            technical_score = result["technical_score"]
+            take_profit = result["take_profit"]
+            stop_loss = result["stop_loss"]
+            risk_reward_ratio = result["risk_reward_ratio"]
 
             # ── Signal history tracking ──
             if symbol not in signal_history_cache:
@@ -619,66 +598,20 @@ async def generate_signals() -> List[Signal]:
             if len(signals) % 4 == 0:
                 save_signal_cache()
 
-            # ── Confidence based on component agreement ──
-            component_values = [c.value for c in components]
-            if component_values:
-                bullish_count = sum(1 for v in component_values if v > 0.1)
-                bearish_count = sum(1 for v in component_values if v < -0.1)
-                total_opinionated = bullish_count + bearish_count
-                agreement = max(bullish_count, bearish_count) / max(total_opinionated, 1)
-                confidence = min(0.95, abs(score) * agreement + 0.1)
-            else:
-                confidence = 0.1
-
-            # ── TP/SL with ATR-based adaptive levels ──
-            # With trailing stop enabled: wider initial SL (3×ATR emergency)
-            # The trailing mechanism will tighten the SL once in profit
             entry_point = current_price
-            adx_data = indicators.get("adx")
-            is_trending = adx_data and adx_data["adx"] > 25
-            use_trailing = info.get("trailing_stop", False)
-
-            if use_trailing:
-                # Wide emergency SL — trailing stop manages the real exit
-                sl_mult = 3.0
-                tp_mult = 4.0 if is_trending else 3.5
-            else:
-                if is_trending:
-                    sl_mult, tp_mult = 1.5, 3.5
-                else:
-                    sl_mult, tp_mult = 1.5, 3.0
-
-            if direction in [SignalDirection.BUY, SignalDirection.STRONG_BUY]:
-                stop_loss = entry_point - (atr * sl_mult)
-                take_profit = entry_point + (atr * tp_mult)
-            else:
-                stop_loss = entry_point + (atr * sl_mult)
-                take_profit = entry_point - (atr * tp_mult)
-
-            risk = abs(entry_point - stop_loss)
-            reward = abs(take_profit - entry_point)
-            risk_reward_ratio = reward / risk if risk > 0 else 0
-
             signal = Signal(
-                symbol=symbol,
-                direction=direction,
-                score=score,
-                confidence=confidence,
-                technical_score=technical_score,
-                price_action_score=0,
-                news_score=news_score,
-                components=components,
-                current_price=current_price,
-                time_horizon="1h",
-                entry_point=entry_point,
-                take_profit=take_profit,
-                stop_loss=stop_loss,
+                symbol=symbol, direction=direction, score=score,
+                confidence=confidence, technical_score=technical_score,
+                price_action_score=0, news_score=news_score,
+                components=components, current_price=current_price,
+                time_horizon="1h", entry_point=entry_point,
+                take_profit=take_profit, stop_loss=stop_loss,
                 risk_reward_ratio=risk_reward_ratio,
             )
 
             signals.append(signal)
             signals_cache[symbol] = signal
-            log_event(f"[SIGNAL] {symbol}: {direction.value} | Score: {score:.2f} | Conf: {confidence:.0%} | ${current_price:.2f}", "event")
+            log_event(f"[SIGNAL] {symbol} ({strategy.display_name}): {direction.value} | Score: {score:.2f} | Conf: {confidence:.0%} | ${current_price:.2f}", "event")
 
             # Send alert
             try:
@@ -973,6 +906,35 @@ async def set_trailing_stop(symbol: str, enabled: bool):
     return {"symbol": symbol, "trailing_stop": enabled}
 
 # =====================
+# STRATEGY SELECTION
+# =====================
+
+@app.get("/api/strategies")
+async def get_strategies():
+    """List all available trading strategies."""
+    return {"strategies": list_strategies()}
+
+@app.get("/api/strategy/{symbol}")
+async def get_strategy_for_symbol(symbol: str):
+    """Get the active strategy for a symbol."""
+    return {"symbol": symbol, "strategy": get_symbol_strategy(symbol)}
+
+@app.post("/api/strategy/{symbol}")
+async def set_strategy_for_symbol(symbol: str, strategy_id: str):
+    """Set the active strategy for a symbol."""
+    from strategies import STRATEGIES
+    if strategy_id not in STRATEGIES:
+        return {"error": f"Unknown strategy: {strategy_id}. Available: {list(STRATEGIES.keys())}"}
+    set_symbol_strategy(symbol, strategy_id)
+    log_event(f"[STRATEGY] {symbol} → {STRATEGIES[strategy_id].display_name}", "event")
+    return {"symbol": symbol, "strategy": strategy_id}
+
+@app.get("/api/strategy-selection")
+async def get_all_strategy_selections():
+    """Get strategy selection for all symbols."""
+    return {sym: get_symbol_strategy(sym) for sym in INSTRUMENTS}
+
+# =====================
 # SIMULATED TRADING API
 # =====================
 
@@ -1144,11 +1106,19 @@ async def get_quote(symbol: str):
     return quote if quote else {"error": f"Failed to fetch quote for {symbol}"}
 
 @app.get("/api/chart/{symbol}")
-async def get_chart_data(symbol: str, resolution: str = "60", count: int = 50):
-    """Get historical chart data for a symbol. Returns real data only (never synthetic)."""
+async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
+    """
+    Get historical chart data for a symbol.
+    Hybrid approach: combines freshly-fetched data with MongoDB history.
+    Includes ISO timestamps for proper session/time mapping.
+    Requests extra candles for indicator warmup (SMA50 needs 50 bars).
+    """
     global alpha_client
     if alpha_client is None:
         alpha_client = get_alpha_vantage_client()
+
+    WARMUP = 60  # extra candles for SMA50 + MACD warmup
+    fetch_count = count + WARMUP
 
     def _format_candles(candles):
         chart_data = []
@@ -1163,6 +1133,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 50):
                     time_str = timestamp[:5] if len(timestamp) >= 5 else timestamp
             chart_data.append({
                 "time": time_str,
+                "timestamp": timestamp,
                 "close": round(candle["close"], 2),
                 "open": round(candle["open"], 2),
                 "high": round(candle["high"], 2),
@@ -1171,33 +1142,88 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 50):
             })
         return chart_data
 
-    # Try live Alpha Vantage data
+    fresh_candles = []
+    source = "none"
+    fetched_at = datetime.utcnow().isoformat()
+
+    # 1. Try live Alpha Vantage data
     try:
-        candles = alpha_client.get_candles(symbol, resolution, count)
+        candles = alpha_client.get_candles(symbol, resolution, fetch_count)
         if candles and len(candles) > 0:
-            chart_data = _format_candles(candles)
-            fetched_at = datetime.utcnow().isoformat()
-            # Cache to DB for future fallback + accumulate history
-            db.save_candles(symbol, resolution, chart_data, "alpha_vantage")
+            fresh_candles = candles
+            source = "alpha_vantage"
             db.store_candles(symbol, resolution, candles, "alpha_vantage")
-            return {
-                "symbol": symbol, "data": chart_data, "resolution": resolution,
-                "count": len(chart_data), "source": "alpha_vantage",
-                "fetched_at": fetched_at,
-            }
     except Exception as e:
         log_event(f"Alpha Vantage chart fetch failed for {symbol}: {e}", "warning")
 
-    # Fallback: load last cached real data from DB
-    cached = db.load_candles(symbol, resolution)
-    if cached and cached.get("candles"):
-        return {
-            "symbol": symbol, "data": cached["candles"], "resolution": resolution,
-            "count": len(cached["candles"]), "source": "cache",
-            "fetched_at": cached["fetched_at"],
-        }
+    # 2. Yahoo Finance fallback
+    if not fresh_candles:
+        try:
+            yahoo_interval = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "D": "1d"}.get(resolution, "1h")
+            period = 30 if resolution in ("1", "5", "15", "30", "60") else 365
+            from historical_data import fetch_yahoo_historical
+            candles = fetch_yahoo_historical(symbol, period_days=period, interval=yahoo_interval)
+            if candles and len(candles) > 0:
+                fresh_candles = candles
+                source = "yahoo"
+                db.store_candles(symbol, resolution, candles, "yahoo")
+        except Exception as e:
+            log_event(f"Yahoo chart fetch failed for {symbol}: {e}", "warning")
 
-    return {"error": f"No real data available for {symbol}. Check API key or try again later."}
+    # 3. Merge with MongoDB history (hybrid approach)
+    db_candles = db.load_candle_history(symbol, resolution, limit=fetch_count * 2)
+
+    # Build unified candle set keyed by timestamp (DB + fresh, fresh wins)
+    candle_map = {}
+    for c in db_candles:
+        ts = c.get("timestamp", "")
+        if ts:
+            candle_map[ts] = c
+    for c in fresh_candles:
+        ts = c.get("timestamp", "")
+        if ts:
+            candle_map[ts] = c
+
+    # 4. Aggregation fallback if still insufficient
+    if len(candle_map) < 20:
+        source_candidates = {"5": ["1"], "15": ["5", "1"], "30": ["15", "5"], "60": ["30", "15", "5"], "D": ["60", "30"]}
+        for src_res in source_candidates.get(resolution, []):
+            stored = db.load_candle_history(symbol, src_res)
+            if stored and len(stored) >= 10:
+                aggregated = db.aggregate_candles(stored, resolution)
+                for c in aggregated:
+                    ts = c.get("timestamp", "")
+                    if ts and ts not in candle_map:
+                        candle_map[ts] = c
+                if len(candle_map) >= 20:
+                    source = source or "aggregated"
+                    break
+
+    if not candle_map:
+        # Last resort: candle_cache
+        cached = db.load_candles(symbol, resolution)
+        if cached and cached.get("candles"):
+            return {
+                "symbol": symbol, "data": cached["candles"], "resolution": resolution,
+                "count": len(cached["candles"]), "source": "cache",
+                "fetched_at": cached.get("fetched_at", fetched_at),
+            }
+        return {"error": f"No real data available for {symbol}. Check API key or try again later."}
+
+    # Sort chronologically, take last fetch_count
+    all_candles = sorted(candle_map.values(), key=lambda c: c.get("timestamp", ""))
+    all_candles = all_candles[-fetch_count:]
+
+    chart_data = _format_candles(all_candles)
+
+    # Update candle_cache for backward compat
+    db.save_candles(symbol, resolution, chart_data, source or "hybrid")
+
+    return {
+        "symbol": symbol, "data": chart_data, "resolution": resolution,
+        "count": len(chart_data), "source": source or "hybrid",
+        "fetched_at": fetched_at,
+    }
 
 # Alert Endpoints
 @app.get("/api/alerts/config")
