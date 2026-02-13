@@ -612,6 +612,46 @@ def results_to_dict(result: BacktestResult) -> dict:
     }
 
 
+def aggregate_to_daily(candles: List[Dict]) -> List[Dict]:
+    """
+    Aggregate intraday candles into daily OHLCV bars.
+    Groups by date (from timestamp or time field) so that HTF candles
+    are consistent with the intraday price path.
+    """
+    from collections import OrderedDict
+    days: OrderedDict = OrderedDict()
+
+    for c in candles:
+        ts = c.get("timestamp", "")
+        if "T" in ts:
+            date_key = ts.split("T")[0]
+        else:
+            # time field is HH:MM — no date info, use index-based grouping
+            date_key = ts[:10] if len(ts) >= 10 else ""
+
+        if not date_key:
+            continue
+
+        if date_key not in days:
+            days[date_key] = {
+                "timestamp": date_key + "T00:00:00",
+                "time": date_key[5:7] + "/" + date_key[8:10] if len(date_key) >= 10 else date_key,
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "volume": c.get("volume", 0),
+            }
+        else:
+            day = days[date_key]
+            day["high"] = max(day["high"], c["high"])
+            day["low"] = min(day["low"], c["low"])
+            day["close"] = c["close"]
+            day["volume"] += c.get("volume", 0)
+
+    return list(days.values())
+
+
 # ── CLI entrypoint ──
 
 def main():
@@ -688,12 +728,10 @@ def main():
         if args.resolution != "D":
             print(f"  Loading daily candles for multi-timeframe filter...")
             if args.sample:
-                htf_candles = generate_sample_data(
-                    symbol, days=max(args.days, 300),
-                    base_price=base_prices.get(symbol, 1000),
-                    resolution="D",
-                )
-                print(f"  HTF: {len(htf_candles)} daily candles (sample)")
+                # Aggregate intraday candles into daily bars so HTF is
+                # consistent with the same price path (not independent RNG)
+                htf_candles = aggregate_to_daily(candles)
+                print(f"  HTF: {len(htf_candles)} daily candles (aggregated from {args.resolution}m)")
             else:
                 # Try real sources for daily data
                 htf_candles = fetch_yahoo_historical(symbol, period_days=365, interval="1d")

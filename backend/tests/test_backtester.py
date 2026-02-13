@@ -15,6 +15,7 @@ from backtester import (
     run_backtest,
     calculate_signal_score,
     get_direction,
+    aggregate_to_daily,
     BacktestResult,
     BacktestTrade,
     results_to_dict,
@@ -389,6 +390,50 @@ class TestBacktestEngine:
         import json
         json_str = json.dumps(d)
         assert len(json_str) > 0
+
+
+# ── Multi-timeframe tests ──
+
+class TestMultiTimeframe:
+    """Tests for aggregate_to_daily and multi-TF consistency."""
+
+    def test_aggregate_to_daily_basic(self):
+        """Aggregated daily OHLCV should match intraday extremes."""
+        candles_60m = generate_sample_data("XAU", days=30, base_price=2000.0, resolution="60")
+        daily = aggregate_to_daily(candles_60m)
+        assert len(daily) > 0
+        # Each daily bar should have valid OHLCV
+        for d in daily:
+            assert d["high"] >= d["low"]
+            assert d["high"] >= d["open"]
+            assert d["high"] >= d["close"]
+            assert d["low"] <= d["open"]
+            assert d["low"] <= d["close"]
+            assert d["volume"] > 0
+
+    def test_aggregate_preserves_price_path(self):
+        """First daily open should equal first intraday open, last daily close should equal last intraday close."""
+        candles_60m = generate_sample_data("BTC", days=10, base_price=95000.0, resolution="60")
+        daily = aggregate_to_daily(candles_60m)
+        assert daily[0]["open"] == candles_60m[0]["open"]
+        assert daily[-1]["close"] == candles_60m[-1]["close"]
+
+    def test_aggregate_daily_high_matches_intraday(self):
+        """Daily high must be >= all intraday highs for that day."""
+        candles_60m = generate_sample_data("XAU", days=5, base_price=2000.0, resolution="60")
+        daily = aggregate_to_daily(candles_60m)
+        # Check first day
+        first_date = daily[0]["timestamp"].split("T")[0]
+        intraday_highs = [c["high"] for c in candles_60m if c["timestamp"].startswith(first_date)]
+        assert daily[0]["high"] >= max(intraday_highs) - 0.01  # float tolerance
+
+    def test_mtf_backtest_runs(self):
+        """Backtest with htf_candles parameter should work without error."""
+        candles_60m = generate_sample_data("BTC", days=30, base_price=95000.0, resolution="60")
+        htf = aggregate_to_daily(candles_60m)
+        result = run_backtest(candles_60m, symbol="BTC", htf_candles=htf)
+        assert result.total_candles > 0
+        assert result.total_candles == len(candles_60m)
 
 
 # ── CSV loader tests ──
