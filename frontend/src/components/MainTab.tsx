@@ -1,6 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { SignalsGrid } from './SignalsGrid';
 import { CandlestickChart } from './CandlestickChart';
+
+// Interval-appropriate display candle counts (visible candles, not including warmup)
+const CANDLE_COUNTS: Record<string, number> = {
+  '1': 60,    // 1 hour of 1m candles
+  '5': 72,    // 6 hours of 5m candles
+  '15': 80,   // 20 hours of 15m candles
+  '30': 80,   // ~40 hours of 30m candles
+  '60': 100,  // ~4 days of 1h candles
+  'D': 150,   // ~5 months of daily candles
+};
 
 interface MainTabProps {
   onSignalClick?: (signal: any) => void;
@@ -24,6 +34,12 @@ const timeframes = [
   { value: 'D', label: '1D' },
 ];
 
+interface StrategyInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
 export const MainTab: React.FC<MainTabProps> = ({
   onSignalClick,
   selectedSymbol,
@@ -35,12 +51,38 @@ export const MainTab: React.FC<MainTabProps> = ({
   });
   const [loading, setLoading] = useState(false);
 
+  // Strategy state
+  const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
+  const [symbolStrategies, setSymbolStrategies] = useState<Record<string, string>>({});
+
   useEffect(() => { localStorage.setItem('cfd_timeframe', selectedTimeframe); }, [selectedTimeframe]);
+
+  // Fetch available strategies on mount
+  useEffect(() => {
+    fetch('/api/strategies')
+      .then(r => r.ok ? r.json() : { strategies: [] })
+      .then((data) => setStrategies(data.strategies || []))
+      .catch(() => {});
+    fetch('/api/strategy-selection')
+      .then(r => r.ok ? r.json() : {})
+      .then((data: Record<string, string>) => setSymbolStrategies(data))
+      .catch(() => {});
+  }, []);
+
+  const handleStrategyChange = useCallback(async (symbol: string, strategyId: string) => {
+    setSymbolStrategies(prev => ({ ...prev, [symbol]: strategyId }));
+    try {
+      await fetch(`/api/strategy/${symbol}?strategy_id=${encodeURIComponent(strategyId)}`, {
+        method: 'POST',
+      });
+    } catch { /* ignore */ }
+  }, []);
 
   const fetchChartData = async (symbol: string, resolution: string) => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/chart/${symbol}?resolution=${resolution}&count=150`);
+      const count = CANDLE_COUNTS[resolution] || 100;
+      const response = await fetch(`/api/chart/${symbol}?resolution=${resolution}&count=${count}`);
       if (response.ok) {
         const data = await response.json();
         if (data.data && Array.isArray(data.data) && data.data.length > 0) {
@@ -142,21 +184,42 @@ export const MainTab: React.FC<MainTabProps> = ({
             })()}
           </div>
 
-          {/* Timeframe Selector */}
-          <div className="flex gap-0.5 overflow-x-auto w-full sm:w-auto">
-            {timeframes.map((tf) => (
-              <button
-                key={tf.value}
-                onClick={() => setSelectedTimeframe(tf.value)}
-                className="px-2 py-1 text-[10px] font-medium rounded-sm transition-all flex-shrink-0"
+          <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
+            {/* Strategy Selector */}
+            {strategies.length > 0 && (
+              <select
+                value={symbolStrategies[selectedSymbol] || 'adaptive_regime'}
+                onChange={(e) => handleStrategyChange(selectedSymbol, e.target.value)}
+                className="text-[10px] font-medium rounded-sm py-1 px-1.5 outline-none cursor-pointer flex-shrink-0"
                 style={{
-                  color: selectedTimeframe === tf.value ? '#e2e8f0' : '#4a5568',
-                  backgroundColor: selectedTimeframe === tf.value ? '#1a1f35' : 'transparent',
+                  color: '#e2e8f0',
+                  backgroundColor: '#1a1f35',
+                  border: '1px solid #2d3548',
                 }}
+                title="Trading strategy for this symbol"
               >
-                {tf.label}
-              </button>
-            ))}
+                {strategies.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Timeframe Selector */}
+            <div className="flex gap-0.5 flex-shrink-0">
+              {timeframes.map((tf) => (
+                <button
+                  key={tf.value}
+                  onClick={() => setSelectedTimeframe(tf.value)}
+                  className="px-2 py-1 text-[10px] font-medium rounded-sm transition-all flex-shrink-0"
+                  style={{
+                    color: selectedTimeframe === tf.value ? '#e2e8f0' : '#4a5568',
+                    backgroundColor: selectedTimeframe === tf.value ? '#1a1f35' : 'transparent',
+                  }}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -177,6 +240,7 @@ export const MainTab: React.FC<MainTabProps> = ({
               height={380}
               showVolume={true}
               showRSI={true}
+              resolution={selectedTimeframe}
             />
           ) : (
             <div className="h-full flex items-center justify-center" style={{ color: '#4a5568' }}>

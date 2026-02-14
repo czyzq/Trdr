@@ -7,9 +7,9 @@ Sources:
   3. Alpha Vantage (already integrated, but rate-limited)
 
 Yahoo Finance symbol mapping for our instruments:
-  XAU  -> GLD   (SPDR Gold Shares ETF — tracks gold spot price)
-  XAG  -> SLV   (iShares Silver Trust — tracks silver spot price)
-  US100 -> QQQ  (Invesco QQQ Trust — tracks Nasdaq-100)
+  XAU  -> GC=F   (COMEX Gold Futures — tracks gold spot price directly)
+  XAG  -> SI=F   (COMEX Silver Futures — tracks silver spot price directly)
+  US100 -> NQ=F  (E-mini Nasdaq-100 Futures — tracks Nasdaq-100 index)
   BTC  -> BTC-USD (Bitcoin in USD)
 """
 
@@ -23,20 +23,19 @@ from typing import Dict, List, Optional, Any
 import httpx
 
 
-# Yahoo Finance symbol mapping
+# Yahoo Finance symbol mapping — uses futures/forex for accurate CFD prices
 YAHOO_SYMBOL_MAP = {
-    "XAU": "GLD",
-    "XAG": "SLV",
-    "US100": "QQQ",
-    "BTC": "BTC-USD",
+    "XAU": "GC=F",      # COMEX Gold Futures (trades near gold spot ~$2000+)
+    "XAG": "SI=F",      # COMEX Silver Futures (trades near silver spot ~$25+)
+    "US100": "NQ=F",    # E-mini Nasdaq-100 Futures (tracks index ~$20000+)
+    "BTC": "BTC-USD",   # Bitcoin in USD
 }
 
-# Price multipliers: ETFs trade at fractions of the actual commodity price.
-# GLD ≈ 1/10 of gold spot; SLV ≈ 1x silver spot; QQQ ≈ ~1/35 of US100 index
+# Price multipliers: futures trade at actual commodity/index prices, no scaling needed
 PRICE_MULTIPLIERS = {
-    "XAU": 10.0,    # GLD ≈ $190 → Gold ≈ $1900
-    "XAG": 1.0,     # SLV ≈ $22 → Silver ≈ $22
-    "US100": 35.0,   # QQQ ≈ $500 → US100 ≈ $17500
+    "XAU": 1.0,     # GC=F trades at gold spot price directly
+    "XAG": 1.0,     # SI=F trades at silver spot price directly
+    "US100": 1.0,   # NQ=F trades at Nasdaq-100 index level directly
     "BTC": 1.0,     # BTC-USD is the actual price
 }
 

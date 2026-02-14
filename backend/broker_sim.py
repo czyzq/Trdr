@@ -95,7 +95,7 @@ class SimulatedDataProvider(DataProvider):
         if not candles:
             try:
                 yahoo_interval = self._YAHOO_INTERVAL.get(resolution, "1h")
-                period = 7 if resolution in ("1", "5", "15", "30", "60") else 365
+                period = 30 if resolution in ("1", "5", "15", "30", "60") else 365
                 candles = fetch_yahoo_historical(symbol, period_days=period, interval=yahoo_interval)
                 if candles and len(candles) > 0:
                     source = "yahoo"
