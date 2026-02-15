@@ -1065,13 +1065,18 @@ async def get_open_trades():
 @app.get("/api/trades/history")
 async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
     """Get closed trade history. Queries DB for full history beyond in-memory cache."""
+    # Debug logging
+    log_event(f"[TRADE HISTORY] Requested: limit={limit}, offset={offset}, closed_positions in memory: {len(closed_positions)}")
+    
     # For first page, use fast in-memory list; beyond that, query DB
     if offset == 0 and limit <= len(closed_positions):
         trades = closed_positions[:limit]
+        log_event(f"[TRADE HISTORY] Returning {len(trades)} trades from memory")
     else:
         # Query DB directly for paginated access
         trades = db.load_closed_positions(limit=limit + offset)
         trades = trades[offset:offset + limit] if offset < len(trades) else []
+        log_event(f"[TRADE HISTORY] Returning {len(trades)} trades from DB")
 
     total_in_db = db.count_closed_positions() or len(closed_positions)
 
