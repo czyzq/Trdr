@@ -263,6 +263,57 @@ INSTRUMENTS = {
             "trailing_stop": True},
 }
 
+
+def is_market_open(symbol: str) -> bool:
+    """
+    Check if market is currently open for trading.
+    Uses UTC time for consistency.
+    
+    XAU/XAG (Forex): Mon 00:00 - Fri 22:00 UTC (closed weekends, break 22:00-23:00 Fri)
+    US100 (Nasdaq): Mon-Fri 14:30-21:00 UTC (9:30-16:00 EST)
+    BTC: Always open (24/7)
+    """
+    now = datetime.utcnow()
+    weekday = now.weekday()  # 0=Monday, 6=Sunday
+    hour = now.hour
+    
+    if symbol == "BTC":
+        # Crypto never closes
+        return True
+    
+    if symbol in ("XAU", "XAG"):
+        # Forex commodities: Mon 00:00 - Fri 22:00 UTC
+        # Weekend closed (Fri 22:00 - Sun 23:00)
+        if weekday == 5:  # Saturday
+            return False
+        if weekday == 6:  # Sunday - opens at 23:00
+            return hour >= 23
+        if weekday == 4 and hour >= 22:  # Friday after 22:00
+            return False
+        return True
+    
+    if symbol == "US100":
+        # Nasdaq: Mon-Fri 14:30-21:00 UTC
+        if weekday >= 5:  # Weekend
+            return False
+        # Trading hours 14:30-21:00 UTC (9:30-16:00 EST)
+        return 14 <= hour < 21 or (hour == 14 and now.minute >= 30)
+    
+    # Default: allow trading
+    return True
+
+
+def get_market_hours(symbol: str) -> str:
+    """Get human-readable market hours for a symbol."""
+    if symbol == "BTC":
+        return "24/7"
+    if symbol in ("XAU", "XAG"):
+        return "Mon-Fri 00:00-22:00 UTC"
+    if symbol == "US100":
+        return "Mon-Fri 14:30-21:00 UTC"
+    return "Unknown"
+
+
 _log_counter = 0
 
 def log_event(message: str, log_type: str = "info"):
@@ -893,6 +944,11 @@ async def auto_trade_loop():
                     if already_open:
                         continue
 
+                    # Skip if market is closed for this symbol
+                    if not is_market_open(sym):
+                        log_event(f"[AUTO-TRADE] Skipping {sym} - market closed ({get_market_hours(sym)})", "info")
+                        continue
+
                     # Calculate position size and open trade
                     entry_price = signal.entry_point
                     size = calculate_position_size(sym, entry_price, signal.stop_loss)
@@ -1071,6 +1127,8 @@ async def get_instruments():
             "pip_size": info.get("pip_size", 0.01),
             "asset_class": info.get("asset_class", ""),
             "trailing_stop": info.get("trailing_stop", False),
+            "market_open": is_market_open(symbol),
+            "market_hours": get_market_hours(symbol),
         }
         for symbol, info in INSTRUMENTS.items()
     }
@@ -1146,6 +1204,12 @@ async def open_trade(symbol: str, direction: str, size: float = 0):
     if not can_trade:
         log_event(f"[BLOCKED] {reason}", "warning")
         return {"error": reason}
+
+    # Check if market is open for this symbol
+    if not is_market_open(symbol):
+        hours = get_market_hours(symbol)
+        log_event(f"[BLOCKED] Cannot trade {symbol} - market closed ({hours})", "warning")
+        return {"error": f"Market closed for {symbol}. Trading hours: {hours}"}
 
     # Check for duplicate position on same symbol+direction
     for pos in open_positions:
