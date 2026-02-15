@@ -1142,6 +1142,22 @@ async def open_trade(symbol: str, direction: str, size: float = 0):
     log_event(f"[TRADE] Opened {direction.upper()} {symbol} @ {entry_price:.2f} | Size: {size}", "success")
     return result
 
+@app.get("/api/trade/size")
+async def get_position_size(symbol: str, entry_price: float, stop_loss: float):
+    """Calculate suggested position size for a trade"""
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown instrument: {symbol}"}
+    
+    size = calculate_position_size(symbol, entry_price, stop_loss)
+    return {
+        "symbol": symbol,
+        "entry_price": entry_price,
+        "stop_loss": stop_loss,
+        "suggested_size": size,
+        "lot_size": INSTRUMENTS[symbol].get("lot_size", 0.01),
+        "leverage": INSTRUMENTS[symbol].get("leverage", 20),
+    }
+
 @app.post("/api/trade/close/{position_id}")
 async def close_trade(position_id: str):
     """Close an open trade position via broker"""

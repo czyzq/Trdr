@@ -53,11 +53,33 @@ const MiniSparkline: React.FC<{ data: number[] }> = ({ data }) => {
   );
 };
 
+interface TradeModalState {
+  isOpen: boolean;
+  symbol: string;
+  direction: 'buy' | 'sell';
+  entryPrice: number;
+  stopLoss: number;
+  suggestedSize: number;
+  selectedSize: number;
+  loading: boolean;
+}
+
 export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSignals, onSignalClick }) => {
   const [signals, setSignals] = useState<Signal[]>(defaultSignals);
   const [loading, setLoading] = useState(false);
   const [tradingSymbol, setTradingSymbol] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  const [tradeModal, setTradeModal] = useState<TradeModalState>({
+    isOpen: false,
+    symbol: '',
+    direction: 'buy',
+    entryPrice: 0,
+    stopLoss: 0,
+    suggestedSize: 0.01,
+    selectedSize: 0.01,
+    loading: false,
+  });
 
   useEffect(() => {
     if (externalSignals && externalSignals.length > 0) {
@@ -107,28 +129,87 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     return () => clearInterval(interval);
   }, [externalSignals]);
 
-  const openTrade = async (symbol: string, direction: string) => {
+  const openTradeModal = async (symbol: string, direction: 'buy' | 'sell') => {
     setTradingSymbol(symbol);
     setErrorMessage(null);
+    
+    const signal = signals.find(s => s.symbol === symbol);
+    if (!signal || !signal.current_price) {
+      setErrorMessage(`${symbol}: No price data available`);
+      setTradingSymbol(null);
+      return;
+    }
+    
+    const entryPrice = signal.current_price;
+    const stopLoss = signal.stop_loss || (direction === 'buy' 
+      ? entryPrice * 0.98 
+      : entryPrice * 1.02);
+    
     try {
-      const response = await fetch(`${apiUrl('trade/open')}?symbol=${symbol}&direction=${direction}&size=0.01`, {
-        method: 'POST',
-      });
+      // Get suggested position size from backend
+      const response = await fetch(`${apiUrl('trade/size')}?symbol=${symbol}&entry_price=${entryPrice}&stop_loss=${stopLoss}`);
       const data = await response.json();
-      if (response.ok && data.status === 'opened') {
-        console.log('Trade opened:', data);
-      } else {
-        const error = data.error || 'Failed to open trade';
-        setErrorMessage(`${symbol} ${direction.toUpperCase()}: ${error}`);
-        console.error('Trade error:', data);
-      }
+      
+      const suggestedSize = data.suggested_size || 0.01;
+      
+      setTradeModal({
+        isOpen: true,
+        symbol,
+        direction,
+        entryPrice,
+        stopLoss,
+        suggestedSize,
+        selectedSize: suggestedSize,
+        loading: false,
+      });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Network error';
-      setErrorMessage(`${symbol} ${direction.toUpperCase()}: ${msg}`);
-      console.error('Failed to open trade:', error);
+      // Fallback - open modal with default size
+      setTradeModal({
+        isOpen: true,
+        symbol,
+        direction,
+        entryPrice,
+        stopLoss,
+        suggestedSize: 0.01,
+        selectedSize: 0.01,
+        loading: false,
+      });
     } finally {
       setTradingSymbol(null);
     }
+  };
+  
+  const executeTrade = async () => {
+    setTradeModal(prev => ({ ...prev, loading: true }));
+    try {
+      const response = await fetch(
+        `${apiUrl('trade/open')}?symbol=${tradeModal.symbol}&direction=${tradeModal.direction}&size=${tradeModal.selectedSize}`,
+        { method: 'POST' }
+      );
+      const data = await response.json();
+      
+      if (response.ok && data.status === 'opened') {
+        setTradeModal(prev => ({ ...prev, isOpen: false }));
+        // Refresh signals to update UI
+        const refreshResponse = await fetch(apiUrl('signals'));
+        if (refreshResponse.ok) {
+          const refreshData = await refreshResponse.json();
+          setSignals(refreshData.signals || defaultSignals);
+        }
+      } else {
+        const error = data.error || 'Failed to open trade';
+        setErrorMessage(`${tradeModal.symbol} ${tradeModal.direction.toUpperCase()}: ${error}`);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Network error';
+      setErrorMessage(`${tradeModal.symbol} ${tradeModal.direction.toUpperCase()}: ${msg}`);
+    } finally {
+      setTradeModal(prev => ({ ...prev, loading: false }));
+    }
+  };
+  
+  const closeTradeModal = () => {
+    setTradeModal(prev => ({ ...prev, isOpen: false }));
   };
 
   const getScoreColor = (score: number): string => {
@@ -232,7 +313,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                   </div>
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={(e) => { e.stopPropagation(); openTrade(signal.symbol, 'buy'); }}
+                      onClick={(e) => { e.stopPropagation(); openTradeModal(signal.symbol, 'buy'); }}
                       disabled={tradingSymbol === signal.symbol}
                       className="px-3 py-1 text-[10px] font-bold rounded-sm transition-all"
                       style={{
@@ -244,7 +325,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                       BUY
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); openTrade(signal.symbol, 'sell'); }}
+                      onClick={(e) => { e.stopPropagation(); openTradeModal(signal.symbol, 'sell'); }}
                       disabled={tradingSymbol === signal.symbol}
                       className="px-3 py-1 text-[10px] font-bold rounded-sm transition-all"
                       style={{
@@ -347,7 +428,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                   <td className="px-3 py-2.5 text-center">
                     <div className="flex items-center justify-center gap-1">
                       <button
-                        onClick={(e) => { e.stopPropagation(); openTrade(signal.symbol, 'buy'); }}
+                        onClick={(e) => { e.stopPropagation(); openTradeModal(signal.symbol, 'buy'); }}
                         disabled={tradingSymbol === signal.symbol}
                         className="px-2 py-0.5 text-[9px] font-bold rounded-sm transition-all"
                         style={{
@@ -359,7 +440,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                         BUY
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); openTrade(signal.symbol, 'sell'); }}
+                        onClick={(e) => { e.stopPropagation(); openTradeModal(signal.symbol, 'sell'); }}
                         disabled={tradingSymbol === signal.symbol}
                         className="px-2 py-0.5 text-[9px] font-bold rounded-sm transition-all"
                         style={{
@@ -378,6 +459,84 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
           </tbody>
         </table>
       </div>
+      
+      {/* Trade Modal */}
+      {tradeModal.isOpen && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+          onClick={closeTradeModal}
+        >
+          <div 
+            className="p-6 rounded-lg w-80"
+            style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold mb-4" style={{ color: '#e2e8f0' }}>
+              {tradeModal.direction === 'buy' ? 'Buy' : 'Sell'} {tradeModal.symbol}
+            </h3>
+            
+            <div className="space-y-3 mb-4">
+              <div className="flex justify-between text-sm">
+                <span style={{ color: '#64748b' }}>Entry Price:</span>
+                <span style={{ color: '#e2e8f0' }}>${tradeModal.entryPrice.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span style={{ color: '#64748b' }}>Stop Loss:</span>
+                <span style={{ color: '#e2e8f0' }}>${tradeModal.stopLoss.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span style={{ color: '#64748b' }}>Suggested Size:</span>
+                <span style={{ color: '#22c55e' }}>{tradeModal.suggestedSize.toFixed(4)}</span>
+              </div>
+            </div>
+            
+            <div className="mb-4">
+              <label className="block text-sm mb-2" style={{ color: '#64748b' }}>
+                Position Size (lots):
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={tradeModal.selectedSize}
+                onChange={(e) => setTradeModal(prev => ({ ...prev, selectedSize: parseFloat(e.target.value) || 0.01 }))}
+                className="w-full px-3 py-2 rounded text-sm"
+                style={{ 
+                  backgroundColor: '#1a1f35', 
+                  border: '1px solid #2d3748',
+                  color: '#e2e8f0'
+                }}
+              />
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={executeTrade}
+                disabled={tradeModal.loading}
+                className="flex-1 py-2 px-4 rounded font-medium text-sm"
+                style={{ 
+                  backgroundColor: tradeModal.direction === 'buy' ? '#22c55e' : '#ef4444',
+                  color: '#fff',
+                  opacity: tradeModal.loading ? 0.5 : 1
+                }}
+              >
+                {tradeModal.loading ? 'Opening...' : `${tradeModal.direction === 'buy' ? 'Buy' : 'Sell'} ${tradeModal.selectedSize.toFixed(2)}`}
+              </button>
+              <button
+                onClick={closeTradeModal}
+                className="py-2 px-4 rounded text-sm"
+                style={{ 
+                  backgroundColor: '#1a1f35',
+                  color: '#64748b'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
