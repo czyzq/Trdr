@@ -648,12 +648,19 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 _get_cached_quote(symbol),
                 timeout=5.0
             )
+        
+        # Get last known price from cache even if quote failed
+        last_known_price = 0.0
+        if symbol in _price_cache:
+            last_known_price = _price_cache[symbol][0]
+        
         if not quote:
+            # Return neutral signal with last known price if available
             return Signal(
                 symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
                 confidence=0.0, technical_score=0.0, price_action_score=0.0,
-                news_score=0.0, components=[], current_price=0.0,
-                time_horizon="1h", entry_point=0.0, take_profit=0.0,
+                news_score=0.0, components=[], current_price=last_known_price,
+                time_horizon="1h", entry_point=last_known_price, take_profit=0.0,
                 stop_loss=0.0, risk_reward_ratio=0.0,
             )
 
