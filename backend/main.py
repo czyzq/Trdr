@@ -1278,12 +1278,12 @@ async def get_quote(symbol: str):
     return quote if quote else {"error": f"Failed to fetch quote for {symbol}"}
 
 @app.get("/api/chart/{symbol}")
+@async_timed("get_chart_data")
 async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
     """
     Get historical chart data for a symbol.
-    Hybrid approach: combines freshly-fetched data with MongoDB history.
+    FAST: Uses DB/cache first, only fetches fresh data if stale.
     Includes ISO timestamps for proper session/time mapping.
-    Requests extra candles for indicator warmup (SMA50 needs 50 bars).
     """
     global alpha_client
     if alpha_client is None:
@@ -1291,6 +1291,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
 
     WARMUP = 60  # extra candles for SMA50 + MACD warmup
     fetch_count = count + WARMUP
+    fetched_at = datetime.utcnow().isoformat()
 
     def _format_candles(candles):
         chart_data = []
@@ -1314,49 +1315,69 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
             })
         return chart_data
 
-    fresh_candles = []
-    source = "none"
-    fetched_at = datetime.utcnow().isoformat()
-
-    # 1. Try live Alpha Vantage data
-    try:
-        candles = alpha_client.get_candles(symbol, resolution, fetch_count)
-        if candles and len(candles) > 0:
-            fresh_candles = candles
-            source = "alpha_vantage"
-            await async_store_candles(symbol, resolution, candles, "alpha_vantage")
-    except Exception as e:
-        log_event(f"Alpha Vantage chart fetch failed for {symbol}: {e}", "warning")
-
-    # 2. Yahoo Finance fallback
-    if not fresh_candles:
-        try:
-            yahoo_interval = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "D": "1d"}.get(resolution, "1h")
-            period = 30 if resolution in ("1", "5", "15", "30", "60") else 365
-            from historical_data import fetch_yahoo_historical
-            candles = fetch_yahoo_historical(symbol, period_days=period, interval=yahoo_interval)
-            if candles and len(candles) > 0:
-                fresh_candles = candles
-                source = "yahoo"
-                await async_store_candles(symbol, resolution, candles, "yahoo")
-        except Exception as e:
-            log_event(f"Yahoo chart fetch failed for {symbol}: {e}", "warning")
-
-    # 3. Merge with MongoDB history (hybrid approach)
-    db_candles = await async_load_candle_history(symbol, resolution, limit=fetch_count * 2)
-
-    # Build unified candle set keyed by timestamp (DB + fresh, fresh wins)
+    # 1. FAST PATH: Check DB/cache first (instant response)
     candle_map = {}
+    db_candles = await async_load_candle_history(symbol, resolution, limit=fetch_count * 2)
     for c in db_candles:
         ts = c.get("timestamp", "")
         if ts:
             candle_map[ts] = c
+    
+    # Check if cache is fresh (less than 5 minutes old)
+    cache_is_fresh = False
+    if db_candles:
+        latest_ts = db_candles[-1].get("timestamp", "")
+        if latest_ts:
+            try:
+                latest_dt = datetime.fromisoformat(latest_ts.replace('Z', '+00:00'))
+                cache_age = (datetime.utcnow() - latest_dt).total_seconds()
+                cache_is_fresh = cache_age < 300  # 5 minutes
+            except:
+                pass
+
+    fresh_candles = []
+    source = "db" if candle_map else "none"
+
+    # 2. Only fetch fresh data if cache is stale or empty
+    if not cache_is_fresh or len(candle_map) < 20:
+        # Try Alpha Vantage in background
+        try:
+            candles = await asyncio.wait_for(
+                asyncio.to_thread(alpha_client.get_candles, symbol, resolution, fetch_count),
+                timeout=3.0  # Quick timeout - don't wait too long
+            )
+            if candles and len(candles) > 0:
+                fresh_candles = candles
+                source = "alpha_vantage"
+                # Store in background - don't wait
+                asyncio.create_task(async_store_candles(symbol, resolution, candles, "alpha_vantage"))
+        except Exception as e:
+            log_event(f"Alpha Vantage chart fetch failed for {symbol}: {e}", "debug")
+
+        # 3. Yahoo Finance fallback (if Alpha Vantage failed)
+        if not fresh_candles:
+            try:
+                yahoo_interval = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "D": "1d"}.get(resolution, "1h")
+                period = 30 if resolution in ("1", "5", "15", "30", "60") else 365
+                from historical_data import fetch_yahoo_historical
+                candles = await asyncio.wait_for(
+                    asyncio.to_thread(fetch_yahoo_historical, symbol, period_days=period, interval=yahoo_interval),
+                    timeout=5.0
+                )
+                if candles and len(candles) > 0:
+                    fresh_candles = candles
+                    source = "yahoo"
+                    asyncio.create_task(async_store_candles(symbol, resolution, candles, "yahoo"))
+            except Exception as e:
+                log_event(f"Yahoo chart fetch failed for {symbol}: {e}", "debug")
+
+    # 5. Merge fresh data with DB (fresh wins)
     for c in fresh_candles:
         ts = c.get("timestamp", "")
         if ts:
             candle_map[ts] = c
 
-    # 4. Aggregation fallback if still insufficient
+    # 6. Aggregation fallback if still insufficient
     if len(candle_map) < 20:
         source_candidates = {"5": ["1"], "15": ["5", "1"], "30": ["15", "5"], "60": ["30", "15", "5"], "D": ["60", "30"]}
         for src_res in source_candidates.get(resolution, []):
