@@ -281,7 +281,7 @@ def is_market_open(symbol: str) -> bool:
         # Crypto never closes
         return True
     
-    if symbol in ("XAU", "XAG"):
+    if symbol in ("XAU", "XAG", "US100"):
         # Forex commodities: Mon 00:00 - Fri 22:00 UTC
         # Weekend closed (Fri 22:00 - Sun 23:00)
         if weekday == 5:  # Saturday
@@ -292,12 +292,18 @@ def is_market_open(symbol: str) -> bool:
             return False
         return True
     
-    if symbol == "US100":
-        # Nasdaq: Mon-Fri 14:30-21:00 UTC
-        if weekday >= 5:  # Weekend
-            return False
-        # Trading hours 14:30-21:00 UTC (9:30-16:00 EST)
-        return 14 <= hour < 21 or (hour == 14 and now.minute >= 30)
+    # this is for nasdaq but nasdaq options are not traded in this bot, so we can keep it simple for now, and use upper^
+    # if symbol == "US100":
+    #     # Nasdaq: Mon-Fri 14:30-21:00 UTC (9:30-16:00 EST)
+    #     # Weekend closed
+    #     if weekday >= 5:  # Saturday or Sunday
+    #         return False
+    #     # Trading hours 14:30-21:00 UTC
+    #     if hour < 14 or hour >= 21:
+    #         return False
+    #     if hour == 14 and now.minute < 30:
+    #         return False  # Before 14:30
+    #     return True
     
     # Default: allow trading
     return True

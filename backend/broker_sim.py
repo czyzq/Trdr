@@ -380,11 +380,15 @@ class AsyncSimulatedBroker(Broker):
                 elif sl and price >= sl:
                     to_close.append((pos["id"], sl, "SL"))
 
-        for pos_id, exit_price, reason in to_close:
-            result = await self._async_close_position(pos_id, exit_price=exit_price)
-            if "error" not in result:
-                result["exit_reason"] = reason
-                auto_closed.append(result)
+        for pos_id, trigger_price, reason in to_close:
+            # Get current market price for closing (not the trigger price)
+            position = next((p for p in self.open_positions if p["id"] == pos_id), None)
+            if position:
+                market_price = position.get("current_price", trigger_price)
+                result = await self._async_close_position(pos_id, exit_price=market_price)
+                if "error" not in result:
+                    result["exit_reason"] = reason
+                    auto_closed.append(result)
 
         # Recalculate unrealized
         for pos in self.open_positions:
