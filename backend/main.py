@@ -53,7 +53,13 @@ def async_timed(label: str | None = None):
                 _timing_stats[func_name]["total"] += elapsed
                 _timing_stats[func_name]["min"] = min(_timing_stats[func_name]["min"], elapsed)
                 _timing_stats[func_name]["max"] = max(_timing_stats[func_name]["max"], elapsed)
-                print(f"[TIMING] {func_name}: {elapsed:.3f}s")
+                # Log to console immediately (flush for visibility)
+                print(f"[TIMING] {func_name}: {elapsed:.3f}s", flush=True)
+                # Late binding for log_event (defined later in file)
+                try:
+                    log_event(f"[TIMING] {func_name}: {elapsed:.3f}s", "info")
+                except NameError:
+                    pass
         
         return wrapper
     return decorator
@@ -76,7 +82,11 @@ def sync_timed(label: str | None = None):
                 _timing_stats[func_name]["total"] += elapsed
                 _timing_stats[func_name]["min"] = min(_timing_stats[func_name]["min"], elapsed)
                 _timing_stats[func_name]["max"] = max(_timing_stats[func_name]["max"], elapsed)
-                print(f"[TIMING] {func_name}: {elapsed:.3f}s")
+                print(f"[TIMING] {func_name}: {elapsed:.3f}s", flush=True)
+                try:
+                    log_event(f"[TIMING] {func_name}: {elapsed:.3f}s", "info")
+                except NameError:
+                    pass
         
         return wrapper
     return decorator
