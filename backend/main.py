@@ -15,6 +15,9 @@ import json
 import uuid
 from dotenv import load_dotenv
 
+# Load env vars BEFORE importing modules that need them
+load_dotenv()
+
 from models import Signal, SignalDirection, Component, ComponentType, SignalResponse
 from alpha_vantage import get_client as get_alpha_vantage_client
 from alpha_vantage_news import get_client as get_news_client
@@ -32,8 +35,6 @@ from database import (
     async_count_candles, async_get_candle_date_range
 )
 from broker_factory import create_broker, create_data_provider
-
-load_dotenv()
 
 # =============================================================================
 # TIMING PROFILER - Performance monitoring
