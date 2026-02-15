@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 
 interface Signal {
   id?: string;
@@ -56,6 +57,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
   const [signals, setSignals] = useState<Signal[]>(defaultSignals);
   const [loading, setLoading] = useState(false);
   const [tradingSymbol, setTradingSymbol] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (externalSignals && externalSignals.length > 0) {
@@ -66,7 +68,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     const fetchSignals = async () => {
       try {
         setLoading(true);
-        const response = await fetch('/api/signals');
+        const response = await fetch(apiUrl('signals'));
         if (response.ok) {
           const data = await response.json();
           const fetchedSignals: Signal[] = (data.signals || []).map((sig: any, idx: number) => ({
@@ -105,17 +107,26 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     return () => clearInterval(interval);
   }, [externalSignals]);
 
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const openTrade = async (symbol: string, direction: string) => {
     setTradingSymbol(symbol);
+    setErrorMessage(null);
     try {
-      const response = await fetch(`/api/trade/open?symbol=${symbol}&direction=${direction}&size=0.01`, {
+      const response = await fetch(`${apiUrl('trade/open')}?symbol=${symbol}&direction=${direction}&size=0.01`, {
         method: 'POST',
       });
-      if (response.ok) {
-        const data = await response.json();
+      const data = await response.json();
+      if (response.ok && data.status === 'opened') {
         console.log('Trade opened:', data);
+      } else {
+        const error = data.error || 'Failed to open trade';
+        setErrorMessage(`${symbol} ${direction.toUpperCase()}: ${error}`);
+        console.error('Trade error:', data);
       }
     } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Network error';
+      setErrorMessage(`${symbol} ${direction.toUpperCase()}: ${msg}`);
       console.error('Failed to open trade:', error);
     } finally {
       setTradingSymbol(null);
@@ -152,6 +163,14 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
           {signals.length} instruments
         </span>
       </div>
+
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="mx-3 mt-2 px-3 py-2 rounded-sm text-[11px]" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444' }}>
+          {errorMessage}
+          <button onClick={() => setErrorMessage(null)} className="ml-2 text-[10px] underline">Dismiss</button>
+        </div>
+      )}
 
       {/* Mobile Card Layout */}
       <div className="flex-1 overflow-auto md:hidden">

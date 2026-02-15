@@ -6,6 +6,7 @@ import { NewsTab } from './NewsTab';
 import { ChartsTab } from './ChartsTab';
 import { MainTab } from './MainTab';
 import { TradesTab } from './TradesTab';
+import { apiUrl } from '../api';
 
 type TabType = 'main' | 'charts' | 'trades' | 'news' | 'console' | 'settings';
 
@@ -40,8 +41,8 @@ export const Dashboard: React.FC = () => {
     const fetchData = async () => {
       try {
         const [logsRes, accRes] = await Promise.all([
-          fetch('/api/logs'),
-          fetch('/api/account')
+          fetch(apiUrl('logs')),
+          fetch(apiUrl('account'))
         ]);
         if (logsRes.ok) {
           const data = await logsRes.json();

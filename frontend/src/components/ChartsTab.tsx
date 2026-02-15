@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CandlestickChart } from './CandlestickChart';
+import { apiUrl } from '../api';
 
 interface ChartData {
   time: string;
@@ -47,7 +48,7 @@ export const ChartsTab: React.FC = () => {
       setLoading(true);
       const chartData: ChartResponse[] = [];
       for (const instrument of instruments) {
-        const response = await fetch(`/api/chart/${instrument.symbol}?resolution=${selectedResolution}&count=50`);
+        const response = await fetch(`${apiUrl(`chart/${instrument.symbol}`)}?resolution=${selectedResolution}&count=50`);
         if (response.ok) {
           const data = await response.json();
           if (data.data) chartData.push(data);

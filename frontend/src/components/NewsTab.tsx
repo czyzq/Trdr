@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 
 interface NewsArticle {
   symbol: string;
@@ -32,7 +33,7 @@ export const NewsTab: React.FC = () => {
     const fetchNews = async () => {
       setLoading(true);
       try {
-        const response = await fetch('/api/news/all');
+        const response = await fetch(apiUrl('news/all'));
         if (response.ok) {
           const data: NewsResponse = await response.json();
           setNewsData(data.news);

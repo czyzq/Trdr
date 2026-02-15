@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 
 interface Position {
   id: string;
@@ -47,8 +48,8 @@ export const TradesTab: React.FC = () => {
   const fetchData = async () => {
     try {
       const [openRes, histRes] = await Promise.all([
-        fetch('/api/trades/open'),
-        fetch('/api/trades/history')
+        fetch(apiUrl('trades/open')),
+        fetch(apiUrl('trades/history'))
       ]);
       if (openRes.ok) {
         const data = await openRes.json();
@@ -79,7 +80,7 @@ export const TradesTab: React.FC = () => {
   const closeTrade = async (positionId: string) => {
     setClosingId(positionId);
     try {
-      const response = await fetch(`/api/trade/close/${positionId}`, { method: 'POST' });
+      const response = await fetch(apiUrl(`trade/close/${positionId}`), { method: 'POST' });
       if (response.ok) {
         fetchData();
       }

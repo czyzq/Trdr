@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 
 interface SidebarProps {
   accountData?: any;
@@ -37,7 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
   const toggleMode = async () => {
     const newMode = mode === 'simulate' ? 'live' : 'simulate';
     try {
-      await fetch(`/api/account/mode?mode=${newMode}`, { method: 'POST' });
+      await fetch(`${apiUrl('account/mode')}?mode=${newMode}`, { method: 'POST' });
     } catch (error) {
       console.error('Failed to toggle mode:', error);
     }
@@ -45,7 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
 
   const resetAccount = async () => {
     try {
-      await fetch('/api/account/reset', { method: 'POST' });
+      await fetch(apiUrl('account/reset'), { method: 'POST' });
     } catch (error) {
       console.error('Failed to reset account:', error);
     }

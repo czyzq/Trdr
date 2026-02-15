@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { SignalsGrid } from './SignalsGrid';
 import { CandlestickChart } from './CandlestickChart';
+import { apiUrl } from '../api';
 
 // Interval-appropriate display candle counts (visible candles, not including warmup)
 const CANDLE_COUNTS: Record<string, number> = {
@@ -59,11 +60,11 @@ export const MainTab: React.FC<MainTabProps> = ({
 
   // Fetch available strategies on mount
   useEffect(() => {
-    fetch('/api/strategies')
+    fetch(apiUrl('strategies'))
       .then(r => r.ok ? r.json() : { strategies: [] })
       .then((data) => setStrategies(data.strategies || []))
       .catch(() => {});
-    fetch('/api/strategy-selection')
+    fetch(apiUrl('strategy-selection'))
       .then(r => r.ok ? r.json() : {})
       .then((data: Record<string, string>) => setSymbolStrategies(data))
       .catch(() => {});
@@ -72,7 +73,7 @@ export const MainTab: React.FC<MainTabProps> = ({
   const handleStrategyChange = useCallback(async (symbol: string, strategyId: string) => {
     setSymbolStrategies(prev => ({ ...prev, [symbol]: strategyId }));
     try {
-      await fetch(`/api/strategy/${symbol}?strategy_id=${encodeURIComponent(strategyId)}`, {
+      await fetch(`${apiUrl(`strategy/${symbol}`)}?strategy_id=${encodeURIComponent(strategyId)}`, {
         method: 'POST',
       });
     } catch { /* ignore */ }
@@ -82,7 +83,7 @@ export const MainTab: React.FC<MainTabProps> = ({
     try {
       setLoading(true);
       const count = CANDLE_COUNTS[resolution] || 100;
-      const response = await fetch(`/api/chart/${symbol}?resolution=${resolution}&count=${count}`);
+      const response = await fetch(`${apiUrl(`chart/${symbol}`)}?resolution=${resolution}&count=${count}`);
       if (response.ok) {
         const data = await response.json();
         if (data.data && Array.isArray(data.data) && data.data.length > 0) {
