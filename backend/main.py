@@ -5,6 +5,7 @@ Simulated trading engine with PLN currency
 """
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 import uvicorn
 import asyncio
@@ -100,11 +101,69 @@ def sync_timed(label: str | None = None):
     return decorator
 
 # =============================================================================
+# LIFESPAN HANDLER - Startup/Shutdown events (replaces deprecated @app.on_event)
+# =============================================================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle startup and shutdown events."""
+    global _trading_task, alpha_client
+
+    # STARTUP
+    log_event("[CFD TRADING BOT v0.2.0 - PLN SIMULATION]", "event")
+    log_event("Instruments: XAU (Gold), XAG (Silver), US100 (Nasdaq), BTC (Bitcoin)", "info")
+
+    # Database status
+    if db.is_connected():
+        log_event("MongoDB connected – trades & account persisted", "success")
+        log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
+        db.ensure_candle_indexes()
+        log_event("Candle history indexes ensured", "info")
+    else:
+        log_event("MongoDB not configured – using in-memory storage (set MONGO_URI)", "warning")
+
+    alpha_client = get_alpha_vantage_client()
+    if alpha_client:
+        log_event("Connected to Alpha Vantage API", "success")
+    load_signal_cache()
+    try:
+        get_news_client()
+        log_event("Web scraping news client initialized", "success")
+    except Exception as e:
+        log_event(f"Failed to initialize news client: {e}", "error")
+    account["last_scan"] = datetime.utcnow().isoformat()
+    log_event(f"Account loaded: {account['balance_pln']:.2f} PLN ({account['balance_usd']:.2f} USD)", "success")
+
+    # Start autonomous trading loop
+    _trading_task = asyncio.create_task(auto_trade_loop())
+    log_event("[AUTO-TRADE] Background task launched (5 min interval)", "success")
+
+    yield  # App runs here
+
+    # SHUTDOWN
+    if _trading_task:
+        _trading_task.cancel()
+        try:
+            await _trading_task
+        except asyncio.CancelledError:
+            pass
+    await async_save_signal_cache_db(signal_history_cache)
+    await async_save_account(account)
+    await async_save_event_log(event_log)
+    try:
+        news_client = get_news_client()
+        if hasattr(news_client, 'close'):
+            await news_client.close()
+    except Exception:
+        pass
+    log_event("[CFD TRADING BOT] Shutdown complete – state saved", "event")
+
+# =============================================================================
 
 app = FastAPI(
     title="CFD Trading Bot API",
     description="Real-time trading signals for CFD instruments with simulated trading",
-    version="0.2.0"
+    version="0.2.0",
+    lifespan=lifespan
 )
 
 # CORS configuration
@@ -875,59 +934,6 @@ async def set_auto_trade_interval(seconds: int):
     return {"interval_sec": AUTO_TRADE_INTERVAL_SEC}
 
 
-@app.on_event("startup")
-async def startup():
-    """Initialize on startup"""
-    global _trading_task
-
-    log_event("[CFD TRADING BOT v0.2.0 - PLN SIMULATION]", "event")
-    log_event("Instruments: XAU (Gold), XAG (Silver), US100 (Nasdaq), BTC (Bitcoin)", "info")
-
-    # Database status
-    if db.is_connected():
-        log_event("MongoDB connected – trades & account persisted", "success")
-        log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
-        db.ensure_candle_indexes()
-        log_event("Candle history indexes ensured", "info")
-    else:
-        log_event("MongoDB not configured – using in-memory storage (set MONGO_URI)", "warning")
-
-    global alpha_client
-    alpha_client = get_alpha_vantage_client()
-    if alpha_client:
-        log_event("Connected to Alpha Vantage API", "success")
-    load_signal_cache()
-    try:
-        get_news_client()
-        log_event("Web scraping news client initialized", "success")
-    except Exception as e:
-        log_event(f"Failed to initialize news client: {e}", "error")
-    account["last_scan"] = datetime.utcnow().isoformat()
-    log_event(f"Account loaded: {account['balance_pln']:.2f} PLN ({account['balance_usd']:.2f} USD)", "success")
-
-    # Start autonomous trading loop
-    _trading_task = asyncio.create_task(auto_trade_loop())
-    log_event("[AUTO-TRADE] Background task launched (5 min interval)", "success")
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Cleanup on shutdown"""
-    global _trading_task
-    if _trading_task:
-        _trading_task.cancel()
-        try:
-            await _trading_task
-        except asyncio.CancelledError:
-            pass
-    await async_save_signal_cache_db(signal_history_cache)
-    await async_save_account(account)
-    await async_save_event_log(event_log)
-    try:
-        news_client = get_news_client()
-        if hasattr(news_client, 'close'):
-            await news_client.close()
-    except Exception:
-        pass
 
 @app.get("/")
 async def root():
