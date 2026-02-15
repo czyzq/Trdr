@@ -604,13 +604,48 @@ def update_account_equity():
 # Semaphore to limit concurrent API calls
 _api_semaphore = asyncio.Semaphore(2)
 
+# Price cache to avoid repeated API calls
+_price_cache: dict[str, tuple[float, float]] = {}  # symbol -> (price, timestamp)
+_candles_cache: dict[str, tuple[list, float]] = {}  # symbol -> (candles, timestamp)
+_CACHE_TTL = 30  # Cache for 30 seconds
+
+async def _get_cached_quote(symbol: str) -> Optional[dict]:
+    """Get quote with caching - returns cached value if fresh."""
+    now = asyncio.get_event_loop().time()
+    if symbol in _price_cache:
+        price, ts = _price_cache[symbol]
+        if now - ts < _CACHE_TTL:
+            return {"price": price, "source": "cache"}
+    
+    # Fetch fresh
+    quote = await asyncio.to_thread(data_provider.get_quote, symbol)
+    if quote and quote.get("price"):
+        _price_cache[symbol] = (quote["price"], now)
+    return quote
+
+async def _get_cached_candles(symbol: str, resolution: str, count: int) -> Optional[list]:
+    """Get candles with caching."""
+    cache_key = f"{symbol}_{resolution}"
+    now = asyncio.get_event_loop().time()
+    
+    if cache_key in _candles_cache:
+        candles, ts = _candles_cache[cache_key]
+        if now - ts < _CACHE_TTL:
+            return candles
+    
+    # Fetch fresh
+    candles = await asyncio.to_thread(data_provider.get_candles, symbol, resolution, count)
+    if candles and len(candles) > 0:
+        _candles_cache[cache_key] = (candles, now)
+    return candles
+
 async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
     try:
-        # Use asyncio.to_thread with timeout for blocking operations
+        # Use cached quote with 30s TTL
         async with _api_semaphore:
             quote = await asyncio.wait_for(
-                asyncio.to_thread(data_provider.get_quote, symbol),
+                _get_cached_quote(symbol),
                 timeout=5.0
             )
         if not quote:
@@ -624,9 +659,10 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
 
         current_price = quote["price"]
 
+        # Use cached candles with 30s TTL
         async with _api_semaphore:
             candles = await asyncio.wait_for(
-                asyncio.to_thread(data_provider.get_candles, symbol, "60", 100),
+                _get_cached_candles(symbol, "60", 100),
                 timeout=10.0
             )
         if not candles or len(candles) < 20:
@@ -655,7 +691,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         try:
             async with _api_semaphore:
                 htf_candles = await asyncio.wait_for(
-                    asyncio.to_thread(data_provider.get_candles, symbol, "D", 60),
+                    _get_cached_candles(symbol, "D", 60),
                     timeout=10.0
                 )
             if htf_candles and len(htf_candles) >= 20:
