@@ -73,7 +73,7 @@ export const TradesTab: React.FC = () => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 2000);
+    const interval = setInterval(fetchData, 60000); // Refresh every 60 seconds
     return () => clearInterval(interval);
   }, []);
 

@@ -58,7 +58,7 @@ export const Dashboard: React.FC = () => {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 3000);
+    const interval = setInterval(fetchData, 60000); // Refresh every 60 seconds
 
     return () => {
       clearInterval(timeInterval);
