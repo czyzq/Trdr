@@ -134,13 +134,13 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     setErrorMessage(null);
     
     const signal = signals.find(s => s.symbol === symbol);
-    if (!signal || !signal.current_price) {
+    if (!signal || signal.current_price === undefined || signal.current_price === null || signal.current_price <= 0) {
       setErrorMessage(`${symbol}: No price data available`);
       setTradingSymbol(null);
       return;
     }
     
-    const entryPrice = signal.current_price;
+    const entryPrice = signal.current_price || signal.entry_point || 0;
     const stopLoss = signal.stop_loss || (direction === 'buy' 
       ? entryPrice * 0.98 
       : entryPrice * 1.02);
