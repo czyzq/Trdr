@@ -26,6 +26,63 @@ from broker_factory import create_broker, create_data_provider
 
 load_dotenv()
 
+# =============================================================================
+# TIMING PROFILER - Performance monitoring
+# =============================================================================
+import time
+import functools
+from typing import Callable, Any
+
+_timing_stats: dict[str, dict] = {}
+
+def async_timed(label: str | None = None):
+    """Decorator to measure async function execution time."""
+    def decorator(func: Callable) -> Callable:
+        func_name = label or func.__name__
+        
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs) -> Any:
+            start = time.perf_counter()
+            try:
+                return await func(*args, **kwargs)
+            finally:
+                elapsed = time.perf_counter() - start
+                if func_name not in _timing_stats:
+                    _timing_stats[func_name] = {"calls": 0, "total": 0.0, "min": float('inf'), "max": 0.0}
+                _timing_stats[func_name]["calls"] += 1
+                _timing_stats[func_name]["total"] += elapsed
+                _timing_stats[func_name]["min"] = min(_timing_stats[func_name]["min"], elapsed)
+                _timing_stats[func_name]["max"] = max(_timing_stats[func_name]["max"], elapsed)
+                print(f"[TIMING] {func_name}: {elapsed:.3f}s")
+        
+        return wrapper
+    return decorator
+
+def sync_timed(label: str | None = None):
+    """Decorator to measure sync function execution time."""
+    def decorator(func: Callable) -> Callable:
+        func_name = label or func.__name__
+        
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            start = time.perf_counter()
+            try:
+                return func(*args, **kwargs)
+            finally:
+                elapsed = time.perf_counter() - start
+                if func_name not in _timing_stats:
+                    _timing_stats[func_name] = {"calls": 0, "total": 0.0, "min": float('inf'), "max": 0.0}
+                _timing_stats[func_name]["calls"] += 1
+                _timing_stats[func_name]["total"] += elapsed
+                _timing_stats[func_name]["min"] = min(_timing_stats[func_name]["min"], elapsed)
+                _timing_stats[func_name]["max"] = max(_timing_stats[func_name]["max"], elapsed)
+                print(f"[TIMING] {func_name}: {elapsed:.3f}s")
+        
+        return wrapper
+    return decorator
+
+# =============================================================================
+
 app = FastAPI(
     title="CFD Trading Bot API",
     description="Real-time trading signals for CFD instruments with simulated trading",
@@ -468,6 +525,7 @@ def update_account_equity():
 # Semaphore to limit concurrent API calls
 _api_semaphore = asyncio.Semaphore(2)
 
+@async_timed("generate_signals")
 async def generate_signals() -> List[Signal]:
     """Generate trading signals for all instruments using regime-adaptive scoring"""
     global alpha_client, account
@@ -866,6 +924,33 @@ async def health():
         "version": "0.2.0"
     }
 
+@app.get("/api/timing-report")
+async def get_timing_report():
+    """Get performance timing report for all profiled functions."""
+    report = {}
+    for name, stats in _timing_stats.items():
+        if stats["calls"] > 0:
+            report[name] = {
+                "calls": stats["calls"],
+                "total_sec": round(stats["total"], 3),
+                "avg_sec": round(stats["total"] / stats["calls"], 3),
+                "min_sec": round(stats["min"], 3),
+                "max_sec": round(stats["max"], 3),
+            }
+    # Sort by total time (descending)
+    report = dict(sorted(report.items(), key=lambda x: -x[1]["total_sec"]))
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "functions": report,
+        "count": len(report)
+    }
+
+@app.delete("/api/timing-report")
+async def clear_timing_report():
+    """Clear timing statistics."""
+    _timing_stats.clear()
+    return {"status": "cleared"}
+
 @app.get("/api/status")
 async def get_status():
     """Detailed status endpoint for debugging"""
@@ -892,6 +977,7 @@ async def get_status():
     }
 
 @app.get("/api/signals", response_model=SignalResponse)
+@async_timed("get_signals_endpoint")
 async def get_signals():
     """Fetch real trading signals"""
     log_event("Generating signals...", "info")
@@ -1346,6 +1432,7 @@ async def get_candle_stats():
 
 
 @app.get("/api/candles/{symbol}")
+@async_timed("get_candle_history")
 async def get_candle_history(
     symbol: str,
     resolution: str = "60",
