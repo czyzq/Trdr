@@ -476,6 +476,26 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         {/* Hover info */}
         {hoveredCandle !== null && candlesticks[hoveredCandle] && (
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 ml-auto text-[9px] sm:text-[10px]" style={{ color: '#64748b' }}>
+            {(() => {
+              const candle = candlesticks[hoveredCandle].data;
+              let dateStr = '';
+              if (candle.timestamp) {
+                try {
+                  const dt = new Date(candle.timestamp);
+                  if (!isNaN(dt.getTime())) {
+                    const day = dt.getUTCDate().toString().padStart(2, '0');
+                    const month = (dt.getUTCMonth() + 1).toString().padStart(2, '0');
+                    const hours = dt.getUTCHours().toString().padStart(2, '0');
+                    const minutes = dt.getUTCMinutes().toString().padStart(2, '0');
+                    dateStr = `${day}/${month} ${hours}:${minutes}`;
+                  }
+                } catch {}
+              }
+              if (!dateStr && candle.time) {
+                dateStr = candle.time;
+              }
+              return <span style={{ color: '#94a3b8', fontWeight: 'bold' }}>{dateStr}</span>;
+            })()}
             <span>O:{candlesticks[hoveredCandle].data.open.toFixed(2)}</span>
             <span>H:{candlesticks[hoveredCandle].data.high.toFixed(2)}</span>
             <span>L:{candlesticks[hoveredCandle].data.low.toFixed(2)}</span>
