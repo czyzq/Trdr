@@ -34,29 +34,21 @@ def get_db():
 
     try:
         from pymongo import MongoClient
-        import certifi
         print(f"[DB] Connecting to MongoDB...")
         
-        # Try with proper SSL certificates first
-        try:
-            client = MongoClient(
-                mongo_uri, 
-                serverSelectionTimeoutMS=10000,
-                tlsCAFile=certifi.where(),
-                tls=True
-            )
-            client.admin.command("ping")
-        except Exception as ssl_err:
-            print(f"[DB] SSL connection failed, trying without certificate verification...")
-            # Fallback: disable SSL verification (less secure but works on Render)
-            client = MongoClient(
-                mongo_uri,
-                serverSelectionTimeoutMS=10000,
-                tls=True,
-                tlsAllowInvalidCertificates=True
-            )
-            client.admin.command("ping")
-            print(f"[DB] ⚠️ Connected without SSL verification (fallback mode)")
+        # Force disable SSL certificate verification for Render compatibility
+        # This is required due to TLSV1_ALERT_INTERNAL_ERROR on Render's environment
+        import ssl
+        client = MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=10000,
+            tls=True,
+            tlsAllowInvalidCertificates=True,
+            tlsDisableOCSPEndpointCheck=True,
+            tlsDisableCertificateRevocationCheck=True
+        )
+        client.admin.command("ping")
+        print(f"[DB] ⚠️ Connected with SSL verification disabled (Render compatibility mode)")
         
         _db = client[mongo_db]
         _connected = True
