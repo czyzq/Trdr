@@ -604,9 +604,147 @@ def update_account_equity():
 # Semaphore to limit concurrent API calls
 _api_semaphore = asyncio.Semaphore(2)
 
+async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
+    """Analyze a single symbol - runs in parallel for all symbols."""
+    try:
+        # Use asyncio.to_thread with timeout for blocking operations
+        async with _api_semaphore:
+            quote = await asyncio.wait_for(
+                asyncio.to_thread(data_provider.get_quote, symbol),
+                timeout=5.0
+            )
+        if not quote:
+            return Signal(
+                symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
+                confidence=0.0, technical_score=0.0, price_action_score=0.0,
+                news_score=0.0, components=[], current_price=0.0,
+                time_horizon="1h", entry_point=0.0, take_profit=0.0,
+                stop_loss=0.0, risk_reward_ratio=0.0,
+            )
+
+        current_price = quote["price"]
+
+        async with _api_semaphore:
+            candles = await asyncio.wait_for(
+                asyncio.to_thread(data_provider.get_candles, symbol, "60", 100),
+                timeout=10.0
+            )
+        if not candles or len(candles) < 20:
+            return Signal(
+                symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
+                confidence=0.0, technical_score=0.0, price_action_score=0.0,
+                news_score=0.0, components=[], current_price=current_price,
+                time_horizon="1h", entry_point=current_price, take_profit=0.0,
+                stop_loss=0.0, risk_reward_ratio=0.0,
+            )
+
+        indicators = TechnicalIndicators.calculate_all(candles, period=14)
+        if not indicators:
+            return Signal(
+                symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
+                confidence=0.0, technical_score=0.0, price_action_score=0.0,
+                news_score=0.0, components=[], current_price=current_price,
+                time_horizon="1h", entry_point=current_price, take_profit=0.0,
+                stop_loss=0.0, risk_reward_ratio=0.0,
+            )
+
+        indicators["_closes"] = [c["close"] for c in candles]
+
+        # ── Multi-timeframe: fetch daily candles for higher-TF trend ──
+        htf_bias = 0.0
+        try:
+            async with _api_semaphore:
+                htf_candles = await asyncio.wait_for(
+                    asyncio.to_thread(data_provider.get_candles, symbol, "D", 60),
+                    timeout=10.0
+                )
+            if htf_candles and len(htf_candles) >= 20:
+                htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
+                if htf_ind:
+                    htf_sma20 = htf_ind.get("sma_20")
+                    htf_sma50 = htf_ind.get("sma_50")
+                    htf_adx = htf_ind.get("adx")
+                    htf_price = htf_candles[-1]["close"]
+                    if htf_sma20 and htf_sma50 and htf_sma50 > 0:
+                        sma_diff = ((htf_sma20 - htf_sma50) / htf_sma50) * 100
+                        htf_bias = max(-1, min(1, sma_diff / 3))
+                    if htf_adx and htf_adx["adx"] > 30 and abs(htf_bias) > 0.1:
+                        htf_bias *= 1.3
+                        htf_bias = max(-1, min(1, htf_bias))
+        except Exception:
+            pass  # MTF is optional
+
+        # ── Volatility filter ──
+        atr = indicators.get("atr_14", current_price * 0.01)
+        atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
+        if atr_pct > 3.0:
+            # Return neutral but with price
+            return Signal(
+                symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
+                confidence=0.0, technical_score=0.0, price_action_score=0.0,
+                news_score=0.0, components=[], current_price=current_price,
+                time_horizon="1h", entry_point=current_price, take_profit=0.0,
+                stop_loss=0.0, risk_reward_ratio=0.0,
+            )
+
+        # ── News sentiment ──
+        news_score = 0.0
+        try:
+            async with _api_semaphore:
+                news = await asyncio.wait_for(
+                    news_client_instance.get_news(symbol, 5),
+                    timeout=8.0
+                )
+            if news and len(news) > 0:
+                sentiments = [article.get('sentiment', 0) for article in news]
+                news_score = sum(sentiments) / len(sentiments) if sentiments else 0
+        except Exception:
+            pass  # News is optional
+
+        # ── Run selected strategy ──
+        strategy_id = get_symbol_strategy(symbol)
+        strategy = get_strategy(strategy_id)
+        indicators["_closes"] = [c["close"] for c in candles]
+
+        result = strategy.score(
+            candles=candles, indicators=indicators, symbol=symbol,
+            instrument_info=info, current_price=current_price,
+            htf_bias=htf_bias, news_score=news_score,
+        )
+
+        signal = Signal(
+            symbol=symbol,
+            direction=result["direction"],
+            score=result["score"],
+            confidence=result["confidence"],
+            technical_score=result["technical_score"],
+            price_action_score=0.0,
+            news_score=news_score,
+            components=result["components"],
+            current_price=current_price,
+            time_horizon="1h",
+            entry_point=current_price,
+            take_profit=result["take_profit"],
+            stop_loss=result["stop_loss"],
+            risk_reward_ratio=result["risk_reward_ratio"],
+        )
+        
+        return signal
+
+    except Exception as e:
+        log_event(f"Error analyzing {symbol}: {e}", "error")
+        return Signal(
+            symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
+            confidence=0.0, technical_score=0.0, price_action_score=0.0,
+            news_score=0.0, components=[], current_price=0.0,
+            time_horizon="1h", entry_point=0.0, take_profit=0.0,
+            stop_loss=0.0, risk_reward_ratio=0.0,
+        )
+
+
 @async_timed("generate_signals")
 async def generate_signals() -> List[Signal]:
-    """Generate trading signals for all instruments using regime-adaptive scoring"""
+    """Generate trading signals for all instruments using regime-adaptive scoring - PARALLEL"""
     global alpha_client, account
 
     account["last_scan"] = datetime.utcnow().isoformat()
@@ -617,180 +755,22 @@ async def generate_signals() -> List[Signal]:
 
     news_client_instance = get_news_client()
 
-    signals = []
+    # Run all symbol analysis in PARALLEL
+    tasks = [
+        _analyze_single_symbol(symbol, info, news_client_instance)
+        for symbol, info in INSTRUMENTS.items()
+    ]
+    signals = await asyncio.gather(*tasks)
 
-    for symbol, info in INSTRUMENTS.items():
-        try:
-            log_event(f"Analyzing {symbol} ({info['name']})...")
-
-            # Use asyncio.to_thread with timeout for blocking operations
-            async with _api_semaphore:
-                quote = await asyncio.wait_for(
-                    asyncio.to_thread(data_provider.get_quote, symbol),
-                    timeout=5.0
-                )
-            if not quote:
-                log_event(f"Failed to generate price for {symbol}", "error")
-                # Emit a neutral placeholder so the instrument always appears in the grid
-                signals.append(Signal(
-                    symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
-                    confidence=0.0, technical_score=0.0, price_action_score=0.0,
-                    news_score=0.0, components=[], current_price=0.0,
-                    time_horizon="1h", entry_point=0.0, take_profit=0.0,
-                    stop_loss=0.0, risk_reward_ratio=0.0,
-                ))
-                signals_cache[symbol] = signals[-1]
-                continue
-
-            current_price = quote["price"]
-
-            async with _api_semaphore:
-                candles = await asyncio.wait_for(
-                    asyncio.to_thread(data_provider.get_candles, symbol, "60", 100),
-                    timeout=10.0
-                )
-            if not candles or len(candles) < 20:
-                log_event(f"Insufficient candle data for {symbol} ({len(candles) if candles else 0} bars, need 20+)", "warning")
-                # Emit a neutral signal with the price so the row still appears
-                signals.append(Signal(
-                    symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
-                    confidence=0.0, technical_score=0.0, price_action_score=0.0,
-                    news_score=0.0, components=[], current_price=current_price,
-                    time_horizon="1h", entry_point=current_price, take_profit=0.0,
-                    stop_loss=0.0, risk_reward_ratio=0.0,
-                ))
-                signals_cache[symbol] = signals[-1]
-                continue
-
-            indicators = TechnicalIndicators.calculate_all(candles, period=14)
-            if not indicators:
-                log_event(f"Failed to calculate indicators for {symbol}", "warning")
-                signals.append(Signal(
-                    symbol=symbol, direction=SignalDirection.NEUTRAL, score=0.0,
-                    confidence=0.0, technical_score=0.0, price_action_score=0.0,
-                    news_score=0.0, components=[], current_price=current_price,
-                    time_horizon="1h", entry_point=current_price, take_profit=0.0,
-                    stop_loss=0.0, risk_reward_ratio=0.0,
-                ))
-                signals_cache[symbol] = signals[-1]
-                continue
-
-            indicators["_closes"] = [c["close"] for c in candles]
-
-            # ── Multi-timeframe: fetch daily candles for higher-TF trend ──
-            htf_bias = 0.0  # -1 to +1 bias from higher timeframe
-            try:
-                async with _api_semaphore:
-                    htf_candles = await asyncio.wait_for(
-                        asyncio.to_thread(data_provider.get_candles, symbol, "D", 60),
-                        timeout=10.0
-                    )
-                if htf_candles and len(htf_candles) >= 20:
-                    htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
-                    if htf_ind:
-                        htf_sma20 = htf_ind.get("sma_20")
-                        htf_sma50 = htf_ind.get("sma_50")
-                        htf_adx = htf_ind.get("adx")
-                        htf_price = htf_candles[-1]["close"]
-                        # Daily trend direction from SMA cross
-                        if htf_sma20 and htf_sma50 and htf_sma50 > 0:
-                            sma_diff = ((htf_sma20 - htf_sma50) / htf_sma50) * 100
-                            htf_bias = max(-1, min(1, sma_diff / 3))
-                        # Strengthen bias if daily ADX shows strong trend
-                        if htf_adx and htf_adx["adx"] > 30 and abs(htf_bias) > 0.1:
-                            htf_bias *= 1.3
-                            htf_bias = max(-1, min(1, htf_bias))
-                        log_event(f"[MTF] {symbol} daily bias: {htf_bias:+.2f}")
-            except Exception as e:
-                log_event(f"[MTF] Failed to get daily data for {symbol}: {e}", "warning")
-
-            # ── Volatility filter ──
-            atr = indicators.get("atr_14", current_price * 0.01)
-            atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
-            if atr_pct > 3.0:
-                log_event(f"[SKIP] {symbol} ATR {atr_pct:.1f}% too volatile", "warning")
-                continue
-
-            # ── News sentiment (rate limiting via semaphore instead of sleep) ──
-            news_score = 0.0
-            try:
-                async with _api_semaphore:
-                    # get_news is async - don't use to_thread, await directly
-                    news = await asyncio.wait_for(
-                        news_client_instance.get_news(symbol, 5),
-                        timeout=8.0
-                    )
-                if news and len(news) > 0:
-                    sentiments = [article.get('sentiment', 0) for article in news]
-                    news_score = sum(sentiments) / len(sentiments) if sentiments else 0
-                    log_event(f"News sentiment for {symbol}: {news_score:.2f} ({len(news)} articles)")
-                # Semaphore controls concurrency - no need for sleep
-            except Exception as e:
-                log_event(f"Failed to fetch news for {symbol}: {e}", "warning")
-
-            # ── Run selected strategy ──
-            strategy_id = get_symbol_strategy(symbol)
-            strategy = get_strategy(strategy_id)
-            indicators["_closes"] = [c["close"] for c in candles]
-
-            result = strategy.score(
-                candles=candles, indicators=indicators, symbol=symbol,
-                instrument_info=info, current_price=current_price,
-                htf_bias=htf_bias, news_score=news_score,
-            )
-
-            score = result["score"]
-            direction = result["direction"]
-            components = result["components"]
-            confidence = result["confidence"]
-            technical_score = result["technical_score"]
-            take_profit = result["take_profit"]
-            stop_loss = result["stop_loss"]
-            risk_reward_ratio = result["risk_reward_ratio"]
-
-            # ── Signal history tracking ──
-            if symbol not in signal_history_cache:
-                signal_history_cache[symbol] = []
-            signal_history_cache[symbol].append(score)
-            if len(signal_history_cache[symbol]) > 20:
-                signal_history_cache[symbol].pop(0)
-            if len(signals) % 4 == 0:
-                save_signal_cache()
-
-            entry_point = current_price
-            signal = Signal(
-                symbol=symbol, direction=direction, score=score,
-                confidence=confidence, technical_score=technical_score,
-                price_action_score=0, news_score=news_score,
-                components=components, current_price=current_price,
-                time_horizon="1h", entry_point=entry_point,
-                take_profit=take_profit, stop_loss=stop_loss,
-                risk_reward_ratio=risk_reward_ratio,
-            )
-
-            signals.append(signal)
-            signals_cache[symbol] = signal
-            log_event(f"[SIGNAL] {symbol} ({strategy.display_name}): {direction.value} | Score: {score:.2f} | Conf: {confidence:.0%} | ${current_price:.2f}", "event")
-
-            # Send alert
-            try:
-                alert_dispatcher = get_dispatcher()
-                alert_result = alert_dispatcher.send_alert(
-                    symbol=symbol, direction=direction.value, score=score,
-                    confidence=confidence, current_price=current_price,
-                    entry_point=entry_point, take_profit=take_profit, stop_loss=stop_loss
-                )
-                if alert_result["status"] == "sent":
-                    log_event(f"[ALERT] Sent for {symbol} {direction.value}", "success")
-            except Exception as alert_error:
-                pass  # Silent alert failures
-
-        except Exception as e:
-            log_event(f"Error generating signal for {symbol}: {str(e)}", "error")
-
+    # Log results
+    # Log results
+    for signal in signals:
+        if signal.direction != SignalDirection.NEUTRAL:
+            log_event(f"[SIGNAL] {signal.symbol}: {signal.direction.value} | Score: {signal.score:.2f} | Conf: {signal.confidence:.0%} | ${signal.current_price:.2f}", "event")
+    
     # Update equity after signals
     update_account_equity()
-
+    
     return signals
 
 # =====================
