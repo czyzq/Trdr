@@ -465,6 +465,9 @@ def update_account_equity():
     """Update account equity based on open positions via broker."""
     broker.update_prices(data_provider)
 
+# Semaphore to limit concurrent API calls
+_api_semaphore = asyncio.Semaphore(2)
+
 async def generate_signals() -> List[Signal]:
     """Generate trading signals for all instruments using regime-adaptive scoring"""
     global alpha_client, account
@@ -483,7 +486,12 @@ async def generate_signals() -> List[Signal]:
         try:
             log_event(f"Analyzing {symbol} ({info['name']})...")
 
-            quote = data_provider.get_quote(symbol)
+            # Use asyncio.to_thread with timeout for blocking operations
+            async with _api_semaphore:
+                quote = await asyncio.wait_for(
+                    asyncio.to_thread(data_provider.get_quote, symbol),
+                    timeout=5.0
+                )
             if not quote:
                 log_event(f"Failed to generate price for {symbol}", "error")
                 # Emit a neutral placeholder so the instrument always appears in the grid
@@ -499,7 +507,11 @@ async def generate_signals() -> List[Signal]:
 
             current_price = quote["price"]
 
-            candles = data_provider.get_candles(symbol, resolution="60", count=100)
+            async with _api_semaphore:
+                candles = await asyncio.wait_for(
+                    asyncio.to_thread(data_provider.get_candles, symbol, "60", 100),
+                    timeout=10.0
+                )
             if not candles or len(candles) < 20:
                 log_event(f"Insufficient candle data for {symbol} ({len(candles) if candles else 0} bars, need 20+)", "warning")
                 # Emit a neutral signal with the price so the row still appears
@@ -531,7 +543,11 @@ async def generate_signals() -> List[Signal]:
             # ── Multi-timeframe: fetch daily candles for higher-TF trend ──
             htf_bias = 0.0  # -1 to +1 bias from higher timeframe
             try:
-                htf_candles = data_provider.get_candles(symbol, resolution="D", count=60)
+                async with _api_semaphore:
+                    htf_candles = await asyncio.wait_for(
+                        asyncio.to_thread(data_provider.get_candles, symbol, "D", 60),
+                        timeout=10.0
+                    )
                 if htf_candles and len(htf_candles) >= 20:
                     htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
                     if htf_ind:
@@ -558,16 +574,19 @@ async def generate_signals() -> List[Signal]:
                 log_event(f"[SKIP] {symbol} ATR {atr_pct:.1f}% too volatile", "warning")
                 continue
 
-            # ── News sentiment (with rate limiting) ──
+            # ── News sentiment (rate limiting via semaphore instead of sleep) ──
             news_score = 0.0
             try:
-                news = await news_client_instance.get_news(symbol, limit=5)
+                async with _api_semaphore:
+                    news = await asyncio.wait_for(
+                        asyncio.to_thread(news_client_instance.get_news, symbol, 5),
+                        timeout=8.0
+                    )
                 if news and len(news) > 0:
                     sentiments = [article.get('sentiment', 0) for article in news]
                     news_score = sum(sentiments) / len(sentiments) if sentiments else 0
                     log_event(f"News sentiment for {symbol}: {news_score:.2f} ({len(news)} articles)")
-                # Rate limit: 12s delay to stay under 5 req/min (Alpha Vantage free tier)
-                await asyncio.sleep(12)
+                # Semaphore controls concurrency - no need for sleep
             except Exception as e:
                 log_event(f"Failed to fetch news for {symbol}: {e}", "warning")
 
@@ -641,7 +660,7 @@ async def generate_signals() -> List[Signal]:
 # =====================
 
 AUTO_TRADE_INTERVAL_SEC = 300  # Scan every 5 minutes
-AUTO_TRADE_ENABLED = True      # Master switch — can be toggled via API
+AUTO_TRADE_ENABLED = False     # Master switch — can be toggled via API (disabled until async-signals ready)
 _trading_task = None           # Reference to the background task
 
 async def auto_trade_loop():
