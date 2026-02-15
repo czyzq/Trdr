@@ -9,9 +9,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
   const [lastScan, setLastScan] = useState("--");
   const [isScanning, setIsScanning] = useState(false);
 
-  const balance = accountData?.balance_pln ?? 10000;
-  const equity = accountData?.equity_pln ?? 10000;
-  const balanceUsd = accountData?.balance_usd ?? 2469.14;
+  const balance = accountData?.balance_pln ?? 0;
+  const equity = accountData?.equity_pln ?? 0;
+  const balanceUsd = accountData?.balance_usd ?? 0;
   const openTrades = accountData?.open_trades ?? 0;
   const closedTrades = accountData?.closed_trades ?? 0;
   const winRate = accountData?.win_rate ?? 0;
@@ -53,8 +53,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
   };
 
   const pnlColor = totalPnl >= 0 ? '#22c55e' : '#ef4444';
-  const equityChange = equity - 10000;
-  const equityChangePct = ((equity - 10000) / 10000 * 100);
+  // Use initial_balance from account if available, fallback to calculating from equity - balance
+  const initialBalance = accountData?.initial_balance_pln ?? (equity - totalPnl);
+  const equityChange = totalPnl; // Total P&L is the equity change from initial
+  const equityChangePct = initialBalance > 0 ? (equityChange / initialBalance) * 100 : 0;
 
   return (
     <div
@@ -121,7 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
         </div>
       </div>
 
-      {/* Instruments */}
+      {/* Instruments
       <div className="p-4" style={{ borderBottom: '1px solid #1a1f35' }}>
         <div className="text-[10px] uppercase tracking-widest mb-2.5" style={{ color: '#4a5568' }}>
           Instruments
@@ -146,7 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
             </div>
           ))}
         </div>
-      </div>
+      </div> */}
 
       {/* Scanner Status */}
       <div className="p-4" style={{ borderBottom: '1px solid #1a1f35' }}>

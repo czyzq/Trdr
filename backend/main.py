@@ -1018,7 +1018,8 @@ async def get_logs():
 async def get_account():
     """Get account info with PLN balance"""
     update_account_equity()
-    return account
+    # Add initial_balance_pln to response for frontend calculations
+    return {**account, "initial_balance_pln": INITIAL_BALANCE_PLN}
 
 @app.post("/api/account/mode")
 async def set_account_mode(mode: str):

@@ -172,7 +172,7 @@ export const Dashboard: React.FC = () => {
         <div className={`
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
           md:translate-x-0 md:relative
-          fixed top-[44px] left-0 bottom-[52px] md:bottom-0
+          fixed top-[18px] left-0 bottom-[52px] md:bottom-0
           z-50 transition-transform duration-200 ease-in-out
         `}>
           <Sidebar accountData={accountData} />
