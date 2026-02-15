@@ -21,20 +21,29 @@ def get_db():
         return _db
 
     mongo_uri = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI")
+    mongo_db = os.getenv("MONGO_DB", "cfd_trading_bot")
+    
+    print(f"[DB] Checking MongoDB config...")
+    print(f"[DB] MONGO_URI set: {bool(mongo_uri)} (length: {len(mongo_uri) if mongo_uri else 0})")
+    print(f"[DB] MONGO_DB: {mongo_db}")
+    
     if not mongo_uri:
+        print(f"[DB] MONGO_URI not set - using in-memory storage")
         _connected = True
         return None
 
     try:
         from pymongo import MongoClient
+        print(f"[DB] Connecting to MongoDB...")
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
         client.admin.command("ping")
-        db_name = os.getenv("MONGO_DB", "cfd_trading_bot")
-        _db = client[db_name]
+        _db = client[mongo_db]
         _connected = True
+        print(f"[DB] ✅ MongoDB connected successfully to database: {mongo_db}")
         return _db
     except Exception as e:
-        print(f"[WARNING] MongoDB connection failed: {e}. Using in-memory storage.")
+        print(f"[DB] ❌ MongoDB connection failed: {type(e).__name__}: {e}")
+        print(f"[DB] Using in-memory storage - data will be lost on restart!")
         _connected = True
         return None
 

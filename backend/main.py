@@ -558,7 +558,7 @@ async def generate_signals() -> List[Signal]:
                 log_event(f"[SKIP] {symbol} ATR {atr_pct:.1f}% too volatile", "warning")
                 continue
 
-            # ── News sentiment ──
+            # ── News sentiment (with rate limiting) ──
             news_score = 0.0
             try:
                 news = await news_client_instance.get_news(symbol, limit=5)
@@ -566,6 +566,8 @@ async def generate_signals() -> List[Signal]:
                     sentiments = [article.get('sentiment', 0) for article in news]
                     news_score = sum(sentiments) / len(sentiments) if sentiments else 0
                     log_event(f"News sentiment for {symbol}: {news_score:.2f} ({len(news)} articles)")
+                # Rate limit: 12s delay to stay under 5 req/min (Alpha Vantage free tier)
+                await asyncio.sleep(12)
             except Exception as e:
                 log_event(f"Failed to fetch news for {symbol}: {e}", "warning")
 
