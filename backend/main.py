@@ -1190,27 +1190,25 @@ async def close_trade(position_id: str):
 
 @app.get("/api/trades/open")
 async def get_open_trades():
-    """Get all open positions with live P&L"""
+    """Get all open positions with live P&L - always from DB for consistency"""
     update_account_equity()
-    return {"positions": open_positions, "count": len(open_positions)}
+    # Load from DB to ensure we have data after restart
+    db_positions = await async_load_open_positions()
+    # Merge with in-memory (in-memory may have newer updates)
+    position_map = {p["id"]: p for p in db_positions}
+    for p in open_positions:
+        position_map[p["id"]] = p  # In-memory wins (newer)
+    merged = list(position_map.values())
+    return {"positions": merged, "count": len(merged)}
 
 @app.get("/api/trades/history")
 async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
-    """Get closed trade history. Queries DB for full history beyond in-memory cache."""
-    # Debug logging
-    log_event(f"[TRADE HISTORY] Requested: limit={limit}, offset={offset}, closed_positions in memory: {len(closed_positions)}")
+    """Get closed trade history - always from DB for consistency"""
+    # Always query DB - don't rely on in-memory cache that clears on restart
+    trades = await async_load_closed_positions(limit=limit + offset)
+    trades = trades[offset:offset + limit] if offset < len(trades) else []
     
-    # For first page, use fast in-memory list; beyond that, query DB
-    if offset == 0 and limit <= len(closed_positions):
-        trades = closed_positions[:limit]
-        log_event(f"[TRADE HISTORY] Returning {len(trades)} trades from memory")
-    else:
-        # Query DB directly for paginated access
-        trades = await async_load_closed_positions(limit=limit + offset)
-        trades = trades[offset:offset + limit] if offset < len(trades) else []
-        log_event(f"[TRADE HISTORY] Returning {len(trades)} trades from DB")
-
-    total_in_db = await async_count_closed_positions() or len(closed_positions)
+    total_in_db = await async_count_closed_positions()
 
     return {
         "trades": trades,
