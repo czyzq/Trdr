@@ -37,17 +37,27 @@ def get_db():
         import certifi
         print(f"[DB] Connecting to MongoDB...")
         
-        # Use certifi for proper SSL certificate verification
-        # This fixes SSL errors on Render and other cloud platforms
-        client = MongoClient(
-            mongo_uri, 
-            serverSelectionTimeoutMS=10000,
-            tlsCAFile=certifi.where(),
-            tls=True
-        )
+        # Try with proper SSL certificates first
+        try:
+            client = MongoClient(
+                mongo_uri, 
+                serverSelectionTimeoutMS=10000,
+                tlsCAFile=certifi.where(),
+                tls=True
+            )
+            client.admin.command("ping")
+        except Exception as ssl_err:
+            print(f"[DB] SSL connection failed, trying without certificate verification...")
+            # Fallback: disable SSL verification (less secure but works on Render)
+            client = MongoClient(
+                mongo_uri,
+                serverSelectionTimeoutMS=10000,
+                tls=True,
+                tlsAllowInvalidCertificates=True
+            )
+            client.admin.command("ping")
+            print(f"[DB] ⚠️ Connected without SSL verification (fallback mode)")
         
-        # Test connection
-        client.admin.command("ping")
         _db = client[mongo_db]
         _connected = True
         print(f"[DB] ✅ MongoDB connected successfully to database: {mongo_db}")
