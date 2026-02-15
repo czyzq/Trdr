@@ -34,12 +34,32 @@ def get_db():
 
     try:
         from pymongo import MongoClient
+        import certifi
         print(f"[DB] Connecting to MongoDB...")
-        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+        
+        # Use certifi for proper SSL certificate verification
+        # This fixes SSL errors on Render and other cloud platforms
+        client = MongoClient(
+            mongo_uri, 
+            serverSelectionTimeoutMS=10000,
+            tlsCAFile=certifi.where(),
+            tls=True
+        )
+        
+        # Test connection
         client.admin.command("ping")
         _db = client[mongo_db]
         _connected = True
         print(f"[DB] ✅ MongoDB connected successfully to database: {mongo_db}")
+        
+        # Test write access
+        try:
+            _db.test_connection.insert_one({"test": True, "timestamp": datetime.utcnow()})
+            _db.test_connection.delete_one({"test": True})
+            print(f"[DB] ✅ Write access confirmed")
+        except Exception as write_err:
+            print(f"[DB] ⚠️ Connected but write test failed: {write_err}")
+        
         return _db
     except Exception as e:
         print(f"[DB] ❌ MongoDB connection failed: {type(e).__name__}: {e}")
