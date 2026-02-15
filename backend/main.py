@@ -847,6 +847,31 @@ async def health():
         "version": "0.2.0"
     }
 
+@app.get("/api/status")
+async def get_status():
+    """Detailed status endpoint for debugging"""
+    mongo_uri_set = bool(os.getenv("MONGO_URI") or os.getenv("MONGODB_URI"))
+    mongo_connected = db.is_connected()
+    
+    return {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "0.2.0",
+        "environment": {
+            "mongo_uri_set": mongo_uri_set,
+            "mongo_db": os.getenv("MONGO_DB", "cfd_trading_bot"),
+            "mongo_connected": mongo_connected,
+            "broker_type": os.getenv("BROKER_TYPE", "sim"),
+        },
+        "account": {
+            "balance_pln": account.get("balance_pln", 0),
+            "equity_pln": account.get("equity_pln", 0),
+            "open_trades": len(open_positions),
+            "mode": account.get("mode", "simulate"),
+        },
+        "instruments": list(INSTRUMENTS.keys()),
+    }
+
 @app.get("/api/signals", response_model=SignalResponse)
 async def get_signals():
     """Fetch real trading signals"""
