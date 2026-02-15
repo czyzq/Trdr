@@ -107,8 +107,6 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     return () => clearInterval(interval);
   }, [externalSignals]);
 
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
   const openTrade = async (symbol: string, direction: string) => {
     setTradingSymbol(symbol);
     setErrorMessage(null);
