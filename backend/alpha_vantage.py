@@ -3,6 +3,7 @@ Alpha Vantage API client for real commodity/futures data
 """
 import os
 import httpx
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
@@ -22,13 +23,13 @@ class AlphaVantageClient:
         self.cache_time = {}
         self.cache_ttl = 60  # Cache for 60 seconds
         self.last_api_call = 0
-        self.min_interval = 0.2  # 5 calls/min = 200ms between calls
+        self.min_interval = 0.05  # 20 calls/sec = 50ms between calls (relaxed for cache-heavy usage)
     
-    def _rate_limit(self):
-        """Respect API rate limits (5 calls/min)"""
+    async def _rate_limit(self):
+        """Respect API rate limits (5 calls/min) - non-blocking"""
         elapsed = time.time() - self.last_api_call
         if elapsed < self.min_interval:
-            time.sleep(self.min_interval - elapsed)
+            await asyncio.sleep(self.min_interval - elapsed)
         self.last_api_call = time.time()
     
     def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:

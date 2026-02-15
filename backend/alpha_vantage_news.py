@@ -45,6 +45,7 @@ class AlphaVantageNewsClient:
         self.min_interval = 13.0  # Alpha Vantage free: 5 calls/min
 
     def _rate_limit(self):
+        """Rate limiter - blocking (only for sync usage)."""
         elapsed = time.time() - self.last_api_call
         if elapsed < self.min_interval:
             time.sleep(self.min_interval - elapsed)

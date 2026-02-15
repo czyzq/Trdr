@@ -730,19 +730,19 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 stop_loss=0.0, risk_reward_ratio=0.0,
             )
 
-        # ── News sentiment ──
+        # ── News sentiment (disabled to speed up - optional feature) ──
         news_score = 0.0
-        try:
-            async with _api_semaphore:
-                news = await asyncio.wait_for(
-                    news_client_instance.get_news(symbol, 5),
-                    timeout=8.0
-                )
-            if news and len(news) > 0:
-                sentiments = [article.get('sentiment', 0) for article in news]
-                news_score = sum(sentiments) / len(sentiments) if sentiments else 0
-        except Exception:
-            pass  # News is optional
+        # try:
+        #     async with _api_semaphore:
+        #         news = await asyncio.wait_for(
+        #             news_client_instance.get_news(symbol, 5),
+        #             timeout=1.0  # Quick timeout - don't wait for news
+        #         )
+        #     if news and len(news) > 0:
+        #         sentiments = [article.get('sentiment', 0) for article in news]
+        #         news_score = sum(sentiments) / len(sentiments) if sentiments else 0
+        # except Exception:
+        #     pass  # News is optional
 
         # ── Run selected strategy ──
         strategy_id = get_symbol_strategy(symbol)
