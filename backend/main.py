@@ -838,7 +838,14 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    """Health check with MongoDB status"""
+    mongo_status = "connected" if db.is_connected() else "disconnected"
+    return {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "mongodb": mongo_status,
+        "version": "0.2.0"
+    }
 
 @app.get("/api/signals", response_model=SignalResponse)
 async def get_signals():
@@ -1069,7 +1076,7 @@ async def reset_account():
 
 @app.get("/api/news/all")
 async def get_all_news():
-    """Get latest news for all symbols"""
+    """Get latest news for all symbols (with rate limiting)"""
     log_event("Fetching news for all symbols...", "info")
     news_client = get_news_client()
     all_news = []
@@ -1082,8 +1089,9 @@ async def get_all_news():
                     article["symbol"] = symbol
                     article["name"] = info["name"]
                 all_news.extend(news)
+            # Rate limit: 12s delay to stay under 5 req/min (Alpha Vantage free tier)
             if i < len(INSTRUMENTS) - 1:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(12)
         except Exception as e:
             log_event(f"Failed to scrape news for {symbol}: {e}", "error")
 
