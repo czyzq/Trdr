@@ -1,5 +1,5 @@
 """
-Alpha Vantage API client for real commodity/futures data
+Alpha Vantage API client for real commodity/futures data - ASYNC version
 """
 import os
 import httpx
@@ -14,42 +14,43 @@ load_dotenv()
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY", "demo")
 BASE_URL = "https://www.alphavantage.co/query"
 
-class AlphaVantageClient:
+
+class AsyncAlphaVantageClient:
+    """Fully async Alpha Vantage client."""
+    
     def __init__(self, api_key: str = ALPHA_VANTAGE_API_KEY):
         self.api_key = api_key
         self.base_url = BASE_URL
-        self.client = httpx.Client()
+        self.client = httpx.AsyncClient(timeout=10)
         self.price_cache = {}
         self.cache_time = {}
         self.cache_ttl = 60  # Cache for 60 seconds
         self.last_api_call = 0
-        self.min_interval = 0.05  # 20 calls/sec = 50ms between calls (relaxed for cache-heavy usage)
+        self.min_interval = 0.05  # 50ms between calls
+        self._lock = asyncio.Lock()
     
     async def _rate_limit(self):
-        """Respect API rate limits (5 calls/min) - non-blocking"""
-        elapsed = time.time() - self.last_api_call
-        if elapsed < self.min_interval:
-            await asyncio.sleep(self.min_interval - elapsed)
-        self.last_api_call = time.time()
+        """Async rate limiter."""
+        async with self._lock:
+            elapsed = time.time() - self.last_api_call
+            if elapsed < self.min_interval:
+                await asyncio.sleep(self.min_interval - elapsed)
+            self.last_api_call = time.time()
     
-    def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """
-        Fetch current quote for a symbol
-        Symbols: XAU (gold), XAG (silver), US100 (nasdaq)
-        """
+    async def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Fetch current quote for a symbol - ASYNC."""
         # Check cache first
         if symbol in self.price_cache:
             if time.time() - self.cache_time.get(symbol, 0) < self.cache_ttl:
                 return self.price_cache[symbol]
         
         try:
-            self._rate_limit()
+            await self._rate_limit()
             
-            # Map futures symbols to Alpha Vantage symbols
             symbol_map = {
-                "XAU": "GOLD",     # Gold spot price
-                "XAG": "SILVER",   # Silver spot price  
-                "US100": "QQQ",      # Nasdaq-100 ETF (tracks the actual index)
+                "XAU": "GOLD",
+                "XAG": "SILVER",
+                "US100": "QQQ",
             }
             
             av_symbol = symbol_map.get(symbol, symbol)
@@ -60,24 +61,19 @@ class AlphaVantageClient:
                 "apikey": self.api_key
             }
             
-            response = self.client.get(self.base_url, params=params, timeout=10)
+            response = await self.client.get(self.base_url, params=params)
             response.raise_for_status()
             data = response.json()
             
-            # Alpha Vantage returns quote data
             if "Global Quote" in data and data["Global Quote"].get("05. price"):
                 quote = data["Global Quote"]
                 price = float(quote["05. price"])
                 
-                # Apply realistic adjustments for commodity symbols
                 if symbol == "XAU":
-                    # Gold: multiply by ~100 to get realistic price (2050 range)
                     price = price * 100 if price < 100 else price
                 elif symbol == "XAG":
-                    # Silver: multiply by ~30 for realistic price
                     price = price * 30 if price < 50 else price
                 elif symbol == "US100":
-                    # Nasdaq: multiply by ~5 for realistic index level
                     price = price * 5 if price < 10000 else price
                 
                 result = {
@@ -90,7 +86,6 @@ class AlphaVantageClient:
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 
-                # Cache it
                 self.price_cache[symbol] = result
                 self.cache_time[symbol] = time.time()
                 
@@ -100,20 +95,17 @@ class AlphaVantageClient:
             
         except Exception as e:
             print(f"Error fetching quote for {symbol}: {e}")
-            # Return cached value if available
             return self.price_cache.get(symbol)
     
-    def get_candles(
+    async def get_candles(
         self,
         symbol: str,
-        resolution: str = "60",  # 1, 5, 15, 30, 60
+        resolution: str = "60",
         count: int = 100
     ) -> Optional[List[Dict[str, Any]]]:
-        """
-        Fetch candlestick/intraday data
-        """
+        """Fetch candlestick data - ASYNC."""
         try:
-            self._rate_limit()
+            await self._rate_limit()
             
             symbol_map = {
                 "XAU": "GOLD",
@@ -123,7 +115,6 @@ class AlphaVantageClient:
             
             av_symbol = symbol_map.get(symbol, symbol)
             
-            # Map resolution to Alpha Vantage intervals
             interval_map = {
                 "1": "1min",
                 "5": "5min",
@@ -134,7 +125,6 @@ class AlphaVantageClient:
             }
             
             interval = interval_map.get(resolution, "60min")
-            
             function = "TIME_SERIES_INTRADAY" if resolution != "D" else "TIME_SERIES_DAILY"
             
             params = {
@@ -146,14 +136,11 @@ class AlphaVantageClient:
             if function == "TIME_SERIES_INTRADAY":
                 params["interval"] = interval
             
-            response = self.client.get(self.base_url, params=params, timeout=10)
+            response = await self.client.get(self.base_url, params=params)
             response.raise_for_status()
             data = response.json()
             
-            # Parse candlestick data
             candles = []
-            
-            # Find the time series key
             ts_key = None
             for key in data.keys():
                 if key.startswith("Time Series"):
@@ -179,15 +166,71 @@ class AlphaVantageClient:
             print(f"Error fetching candles for {symbol}: {e}")
             return None
     
-    def close(self):
-        """Close HTTP client"""
-        self.client.close()
+    async def close(self):
+        """Close HTTP client."""
+        await self.client.aclose()
 
-# Singleton
+
+# Keep old sync client for backward compatibility
+class AlphaVantageClient:
+    """Legacy sync client - delegates to async client via run_sync."""
+    
+    def __init__(self, api_key: str = ALPHA_VANTAGE_API_KEY):
+        self._async_client = AsyncAlphaVantageClient(api_key)
+    
+    def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Sync wrapper for async get_quote."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're in async context - use run_coroutine_threadsafe
+                future = asyncio.run_coroutine_threadsafe(
+                    self._async_client.get_quote(symbol), loop
+                )
+                return future.result(timeout=10)
+            else:
+                return loop.run_until_complete(self._async_client.get_quote(symbol))
+        except Exception as e:
+            print(f"Error in get_quote: {e}")
+            return None
+    
+    def get_candles(self, symbol: str, resolution: str = "60", count: int = 100):
+        """Sync wrapper for async get_candles."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(
+                    self._async_client.get_candles(symbol, resolution, count), loop
+                )
+                return future.result(timeout=10)
+            else:
+                return loop.run_until_complete(
+                    self._async_client.get_candles(symbol, resolution, count)
+                )
+        except Exception as e:
+            print(f"Error in get_candles: {e}")
+            return None
+    
+    def close(self):
+        pass  # Async client handles its own lifecycle
+
+
+# Singletons
 _client = None
+_async_client = None
+
 
 def get_client() -> AlphaVantageClient:
+    """Get sync client (legacy)."""
     global _client
     if _client is None:
         _client = AlphaVantageClient()
     return _client
+
+
+def get_async_client() -> AsyncAlphaVantageClient:
+    """Get async client (preferred)."""
+    global _async_client
+    if _async_client is None:
+        _async_client = AsyncAlphaVantageClient()
+    return _async_client

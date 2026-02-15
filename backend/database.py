@@ -583,3 +583,13 @@ async def async_count_candles(symbol: str, resolution: str) -> int:
 async def async_get_candle_date_range(symbol: str, resolution: str) -> Optional[dict]:
     """Async: Get candle date range."""
     return await asyncio.to_thread(get_candle_date_range, symbol, resolution)
+
+
+async def async_save_quote(symbol: str, quote: dict):
+    """Async: Save quote to cache."""
+    return await asyncio.to_thread(save_quote, symbol, quote)
+
+
+async def async_load_quote(symbol: str) -> Optional[dict]:
+    """Async: Load cached quote."""
+    return await asyncio.to_thread(load_quote, symbol)
