@@ -22,6 +22,14 @@ from strategies import get_strategy, list_strategies, mms_on_trade_result
 from imessage_alerts import AlertConfig, iMessageAlertDispatcher, get_dispatcher
 from openclaw_integration import set_openclaw_message_function, format_imessage_for_cfd_alert
 import database as db
+from database import (
+    async_load_account, async_save_account,
+    async_load_open_positions, async_load_closed_positions, async_save_trade,
+    async_load_candle_history, async_store_candles, async_load_candles, async_save_candles,
+    async_load_signal_cache_db, async_save_signal_cache_db,
+    async_save_event_log, async_load_event_log, async_count_closed_positions,
+    async_count_candles, async_get_candle_date_range
+)
 from broker_factory import create_broker, create_data_provider
 
 load_dotenv()
@@ -212,7 +220,8 @@ def log_event(message: str, log_type: str = "info"):
     # Persist periodically (every 10 log entries) to avoid excessive DB writes
     _log_counter += 1
     if _log_counter % 10 == 0:
-        db.save_event_log(event_log)
+        # Run DB save in background - don't block
+        asyncio.create_task(async_save_event_log(event_log))
 
 def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, List[Component]]:
     """
@@ -646,8 +655,9 @@ async def generate_signals() -> List[Signal]:
             news_score = 0.0
             try:
                 async with _api_semaphore:
+                    # get_news is async - don't use to_thread, await directly
                     news = await asyncio.wait_for(
-                        asyncio.to_thread(news_client_instance.get_news, symbol, 5),
+                        news_client_instance.get_news(symbol, 5),
                         timeout=8.0
                     )
                 if news and len(news) > 0:
@@ -764,7 +774,7 @@ async def auto_trade_loop():
                         f"| P&L: {'+'if pnl>=0 else ''}{pnl:.2f} USD",
                         "success" if pnl >= 0 else "warning"
                     )
-                db.save_account(account)
+                await async_save_account(account)
 
             # ── Step 2: Generate fresh signals ──
             signals = await generate_signals()
@@ -821,8 +831,8 @@ async def auto_trade_loop():
                 log_event(f"[AUTO-TRADE] Skipping: {reason}", "info")
 
             # ── Step 4: Persist state ──
-            db.save_account(account)
-            save_signal_cache()
+            await async_save_account(account)
+            await async_save_signal_cache_db(signal_history_cache)
 
             log_event(
                 f"[AUTO-TRADE] Scan complete | Balance: {account['balance_pln']:.2f} PLN "
@@ -909,9 +919,9 @@ async def shutdown():
             await _trading_task
         except asyncio.CancelledError:
             pass
-    save_signal_cache()
-    db.save_account(account)
-    db.save_event_log(event_log)
+    await async_save_signal_cache_db(signal_history_cache)
+    await async_save_account(account)
+    await async_save_event_log(event_log)
     try:
         news_client = get_news_client()
         if hasattr(news_client, 'close'):
@@ -1011,7 +1021,7 @@ async def set_account_mode(mode: str):
         return {"error": "Invalid mode. Use 'simulate' or 'live'"}
     account["mode"] = mode
     account["dry_run"] = (mode == "simulate")
-    db.save_account(account)
+    await async_save_account(account)
     log_event(f"Trading mode changed to: {mode.upper()}", "event")
     return {"mode": account["mode"], "dry_run": account["dry_run"]}
 
@@ -1189,11 +1199,11 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = 
         log_event(f"[TRADE HISTORY] Returning {len(trades)} trades from memory")
     else:
         # Query DB directly for paginated access
-        trades = db.load_closed_positions(limit=limit + offset)
+        trades = await async_load_closed_positions(limit=limit + offset)
         trades = trades[offset:offset + limit] if offset < len(trades) else []
         log_event(f"[TRADE HISTORY] Returning {len(trades)} trades from DB")
 
-    total_in_db = db.count_closed_positions() or len(closed_positions)
+    total_in_db = await async_count_closed_positions() or len(closed_positions)
 
     return {
         "trades": trades,
@@ -1307,7 +1317,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
         if candles and len(candles) > 0:
             fresh_candles = candles
             source = "alpha_vantage"
-            db.store_candles(symbol, resolution, candles, "alpha_vantage")
+            await async_store_candles(symbol, resolution, candles, "alpha_vantage")
     except Exception as e:
         log_event(f"Alpha Vantage chart fetch failed for {symbol}: {e}", "warning")
 
@@ -1321,12 +1331,12 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
             if candles and len(candles) > 0:
                 fresh_candles = candles
                 source = "yahoo"
-                db.store_candles(symbol, resolution, candles, "yahoo")
+                await async_store_candles(symbol, resolution, candles, "yahoo")
         except Exception as e:
             log_event(f"Yahoo chart fetch failed for {symbol}: {e}", "warning")
 
     # 3. Merge with MongoDB history (hybrid approach)
-    db_candles = db.load_candle_history(symbol, resolution, limit=fetch_count * 2)
+    db_candles = await async_load_candle_history(symbol, resolution, limit=fetch_count * 2)
 
     # Build unified candle set keyed by timestamp (DB + fresh, fresh wins)
     candle_map = {}
@@ -1343,7 +1353,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
     if len(candle_map) < 20:
         source_candidates = {"5": ["1"], "15": ["5", "1"], "30": ["15", "5"], "60": ["30", "15", "5"], "D": ["60", "30"]}
         for src_res in source_candidates.get(resolution, []):
-            stored = db.load_candle_history(symbol, src_res)
+            stored = await async_load_candle_history(symbol, src_res)
             if stored and len(stored) >= 10:
                 aggregated = db.aggregate_candles(stored, resolution)
                 for c in aggregated:
@@ -1356,7 +1366,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
 
     if not candle_map:
         # Last resort: candle_cache
-        cached = db.load_candles(symbol, resolution)
+        cached = await async_load_candles(symbol, resolution)
         if cached and cached.get("candles"):
             return {
                 "symbol": symbol, "data": cached["candles"], "resolution": resolution,
@@ -1372,7 +1382,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
     chart_data = _format_candles(all_candles)
 
     # Update candle_cache for backward compat
-    db.save_candles(symbol, resolution, chart_data, source or "hybrid")
+    await async_save_candles(symbol, resolution, chart_data, source or "hybrid")
 
     return {
         "symbol": symbol, "data": chart_data, "resolution": resolution,
@@ -1432,9 +1442,9 @@ async def get_candle_stats():
     for symbol in INSTRUMENTS:
         symbol_stats = {}
         for res in resolutions:
-            cnt = db.count_candles(symbol, res)
+            cnt = await async_count_candles(symbol, res)
             if cnt > 0:
-                date_range = db.get_candle_date_range(symbol, res)
+                date_range = await async_get_candle_date_range(symbol, res)
                 symbol_stats[res] = {"count": cnt, "range": date_range}
         if symbol_stats:
             stats[symbol] = symbol_stats
@@ -1456,7 +1466,7 @@ async def get_candle_history(
     the smallest available stored interval.
     """
     # Direct fetch from accumulated history
-    candles = db.load_candle_history(symbol, resolution, start=start, end=end, limit=count)
+    candles = await async_load_candle_history(symbol, resolution, start=start, end=end, limit=count)
 
     # Try aggregation from smaller intervals if not enough data
     if len(candles) < min(10, count):
@@ -1469,7 +1479,7 @@ async def get_candle_history(
             "D": ["60", "30", "15", "5", "1"],
         }
         for src_res in source_candidates.get(resolution, []):
-            stored = db.load_candle_history(symbol, src_res, start=start, end=end)
+            stored = await async_load_candle_history(symbol, src_res, start=start, end=end)
             if stored and len(stored) >= 2:
                 aggregated = db.aggregate_candles(stored, resolution)
                 if len(aggregated) > len(candles):
@@ -1510,6 +1520,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8001")))
     args = parser.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)

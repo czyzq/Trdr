@@ -255,7 +255,7 @@ export const MainTab: React.FC<MainTabProps> = ({
       </div>
 
       {/* Signals Section */}
-      <div className="flex-shrink-0 min-h-[200px] md:min-h-0" style={{ height: 'auto', maxHeight: '320px' }}>
+      <div className="flex-shrink-0">
         <SignalsGrid onSignalClick={handleSignalClick} />
       </div>
     </div>

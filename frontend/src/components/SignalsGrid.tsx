@@ -151,7 +151,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
   };
 
   return (
-    <div className="h-full rounded-sm overflow-hidden flex flex-col" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
+    <div className="rounded-sm overflow-hidden" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 md:px-4 py-2" style={{ borderBottom: '1px solid #1a1f35' }}>
         <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
@@ -171,7 +171,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
       )}
 
       {/* Mobile Card Layout */}
-      <div className="flex-1 overflow-auto md:hidden">
+      <div className="overflow-auto md:hidden" style={{ maxHeight: '240px' }}>
         <div className="p-2 space-y-2">
           {signals.map((signal) => {
             const scoreColor = getScoreColor(signal.score);
@@ -264,7 +264,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
       </div>
 
       {/* Desktop Table Layout */}
-      <div className="flex-1 overflow-auto hidden md:block">
+      <div className="hidden md:block">
         <table className="w-full text-[11px]">
           <thead>
             <tr style={{ borderBottom: '1px solid #1a1f35' }}>

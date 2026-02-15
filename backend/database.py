@@ -499,3 +499,87 @@ def load_event_log() -> list:
     if doc and "entries" in doc:
         return doc["entries"]
     return []
+
+
+# =============================================================================
+# ASYNC WRAPPERS - Non-blocking database operations
+# =============================================================================
+import asyncio
+
+async def async_load_account() -> dict:
+    """Async: Load account state from DB."""
+    return await asyncio.to_thread(load_account)
+
+async def async_save_account(account: dict):
+    """Async: Persist account state."""
+    return await asyncio.to_thread(save_account, account)
+
+async def async_load_open_positions() -> list:
+    """Async: Load open positions."""
+    return await asyncio.to_thread(load_open_positions)
+
+async def async_load_closed_positions(limit: int = 200) -> list:
+    """Async: Load closed positions."""
+    return await asyncio.to_thread(load_closed_positions, limit)
+
+async def async_save_trade(trade: dict):
+    """Async: Save trade to DB."""
+    return await asyncio.to_thread(save_trade, trade)
+
+async def async_load_candle_history(
+    symbol: str,
+    resolution: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    limit: int = 0,
+) -> list:
+    """Async: Load candle history."""
+    return await asyncio.to_thread(load_candle_history, symbol, resolution, start, end, limit)
+
+async def async_store_candles(symbol: str, resolution: str, candles: list, source: str = ""):
+    """Async: Store candles to history."""
+    return await asyncio.to_thread(store_candles, symbol, resolution, candles, source)
+
+async def async_load_candles(symbol: str, resolution: str) -> Optional[dict]:
+    """Async: Load cached candles."""
+    return await asyncio.to_thread(load_candles, symbol, resolution)
+
+async def async_save_candles(symbol: str, resolution: str, candles: list, source: str):
+    """Async: Save candles to cache."""
+    return await asyncio.to_thread(save_candles, symbol, resolution, candles, source)
+
+async def async_load_signal_cache_db() -> dict:
+    """Async: Load signal cache."""
+    return await asyncio.to_thread(load_signal_cache_db)
+
+async def async_save_signal_cache_db(cache: dict):
+    """Async: Save signal cache."""
+    return await asyncio.to_thread(save_signal_cache_db, cache)
+
+async def async_save_event_log(events: list, max_entries: int = 200):
+    """Async: Persist event log."""
+    return await asyncio.to_thread(save_event_log, events, max_entries)
+
+async def async_load_event_log() -> list:
+    """Async: Load event log."""
+    return await asyncio.to_thread(load_event_log)
+
+
+async def async_count_closed_positions() -> int:
+    """Async: Count closed positions."""
+    return await asyncio.to_thread(count_closed_positions)
+
+
+async def async_delete_all_trades():
+    """Async: Delete all trades."""
+    return await asyncio.to_thread(delete_all_trades)
+
+
+async def async_count_candles(symbol: str, resolution: str) -> int:
+    """Async: Count candles."""
+    return await asyncio.to_thread(count_candles, symbol, resolution)
+
+
+async def async_get_candle_date_range(symbol: str, resolution: str) -> Optional[dict]:
+    """Async: Get candle date range."""
+    return await asyncio.to_thread(get_candle_date_range, symbol, resolution)

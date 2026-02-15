@@ -286,17 +286,18 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const maxVolume = Math.max(...volumes);
   const priceRange = maxPrice - minPrice || 1;
 
-  // Layout
+  // Layout - improved for better visibility
   const isMobile = containerWidth > 0 && containerWidth < 600;
   const showMACD = overlays.macd;
-  const chartWidth = containerWidth > 0 ? Math.max(600, containerWidth) : 1100;
-  const macdH = showMACD ? 45 : 0;
-  const volumeH = showVolume ? 35 : 0;
-  const rsiH = showRSI ? 45 : 0;
-  const gapH = 6;
-  const priceChartH = Math.max(120, (showMACD ? 180 : 220) - (showVolume ? 0 : -30) - (showRSI ? 0 : -30));
-  const totalH = priceChartH + (showVolume ? volumeH + gapH : 0) + (showMACD ? macdH + gapH : 0) + (showRSI ? rsiH + gapH : 0) + 20;
-  const rightPad = isMobile ? 45 : 55;
+  const chartWidth = containerWidth > 0 ? Math.max(800, containerWidth) : 1100;
+  const macdH = showMACD ? 50 : 0;
+  const volumeH = showVolume ? 45 : 0;
+  const rsiH = showRSI ? 50 : 0;
+  const gapH = 8;
+  const xAxisH = 25; // Height reserved for X-axis labels
+  const priceChartH = Math.max(150, height - (showVolume ? volumeH + gapH : 0) - (showMACD ? macdH + gapH : 0) - (showRSI ? rsiH + gapH : 0) - xAxisH - 10);
+  const totalH = priceChartH + (showVolume ? volumeH + gapH : 0) + (showMACD ? macdH + gapH : 0) + (showRSI ? rsiH + gapH : 0) + xAxisH;
+  const rightPad = isMobile ? 50 : 60;
   const usableWidth = chartWidth - rightPad;
 
   const currentPrice = validData[n - 1].close;
@@ -317,30 +318,40 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     priceLevels.push({ price, y: priceToY(price) });
   }
 
-  // Time labels — resolution-aware formatting
-  const timeLabels: { time: string; x: number }[] = [];
-  const maxLabels = isMobile ? 6 : 10;
+  // Time labels — improved for readability and no overlap
+  const timeLabels: { time: string; x: number; isMajor?: boolean }[] = [];
+  const maxLabels = isMobile ? 4 : 8;
   const step = Math.max(1, Math.floor(n / maxLabels));
+  let prevLabelDate = '';
   for (let i = 0; i < n; i += step) {
     let label = validData[i].time;
-    // For daily charts prefer MM/DD, for intraday prefer HH:MM
+    let isMajor = false;
+    // For daily charts prefer MM/DD, for intraday prefer HH:MM with date at day boundaries
     if (validData[i].timestamp) {
       try {
         const dt = new Date(validData[i].timestamp!);
+        const currentDate = validData[i].timestamp!.split('T')[0];
         if (!isNaN(dt.getTime())) {
           if (isDaily) {
             label = `${(dt.getUTCMonth() + 1).toString().padStart(2, '0')}/${dt.getUTCDate().toString().padStart(2, '0')}`;
+            isMajor = true;
           } else {
-            label = `${dt.getUTCHours().toString().padStart(2, '0')}:${dt.getUTCMinutes().toString().padStart(2, '0')}`;
-            // Show date prefix at day boundaries
-            if (i === 0 || (i > 0 && validData[i].timestamp!.split('T')[0] !== validData[i - step]?.timestamp?.split('T')[0])) {
-              label = `${dt.getUTCDate()}/${(dt.getUTCMonth() + 1)} ${label}`;
+            const timeStr = `${dt.getUTCHours().toString().padStart(2, '0')}:${dt.getUTCMinutes().toString().padStart(2, '0')}`;
+            // Show full date+time at day boundaries or every 6 hours
+            const isDayBoundary = currentDate !== prevLabelDate;
+            const isMajorHour = dt.getUTCHours() % 6 === 0;
+            if (isDayBoundary || isMajorHour) {
+              label = `${dt.getUTCDate()}/${dt.getUTCMonth() + 1} ${timeStr}`;
+              isMajor = true;
+            } else {
+              label = timeStr;
             }
           }
+          prevLabelDate = currentDate;
         }
       } catch { /* use fallback */ }
     }
-    timeLabels.push({ time: label, x: idxToX(i) });
+    timeLabels.push({ time: label, x: idxToX(i), isMajor });
   }
 
   // Candlesticks
@@ -483,7 +494,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       {/* Scrollable chart */}
       <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
         <svg
-          width={isMobile ? chartWidth : '100%'}
+          width={isMobile ? chartWidth : (containerWidth > 0 ? containerWidth : chartWidth)}
           height={height}
           viewBox={`0 0 ${chartWidth} ${totalH}`}
           preserveAspectRatio="xMidYMid meet"
@@ -491,7 +502,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           onMouseLeave={() => setHoveredCandle(null)}
           onTouchMove={handleTouchMove}
           onTouchEnd={() => setHoveredCandle(null)}
-          style={{ cursor: 'crosshair', minWidth: isMobile ? `${chartWidth}px` : undefined }}
+          style={{ cursor: 'crosshair', minWidth: `${chartWidth}px` }}
         >
         {/* ── Session Background Bands ── */}
         {overlays.sessions && sessionBands.length > 0 && (
@@ -681,11 +692,21 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         )}
 
         {/* ── Time labels ── */}
-        <g fill="#374151" fontSize="9" fontFamily="monospace">
+        <g fontFamily="monospace">
           {timeLabels.map((l, i) => (
-            <text key={`t-${i}`} x={l.x} y={totalH - 2} textAnchor="middle">{l.time}</text>
+            <text 
+              key={`t-${i}`} 
+              x={l.x} 
+              y={totalH - 5} 
+              textAnchor="middle"
+              fill={l.isMajor ? '#94a3b8' : '#475569'}
+              fontSize={l.isMajor ? '10' : '8'}
+              fontWeight={l.isMajor ? 'bold' : 'normal'}
+            >{l.time}</text>
           ))}
         </g>
+        {/* X-axis line */}
+        <line x1={0} y1={totalH - xAxisH + 5} x2={usableWidth} y2={totalH - xAxisH + 5} stroke="#1e293b" strokeWidth="1" />
         </svg>
       </div>
     </div>

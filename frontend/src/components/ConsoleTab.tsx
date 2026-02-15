@@ -16,113 +16,12 @@ export const ConsoleTab: React.FC<ConsoleTabProps> = ({
   logs,
   maxLogs = 100 
 }) => {
-  const [displayedLogs, setDisplayedLogs] = useState<LogEntry[]>(logs || getDefaultLogs());
+  const [displayedLogs, setDisplayedLogs] = useState<LogEntry[]>(logs || []);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayedLogs]);
-
-  function getDefaultLogs(): LogEntry[] {
-    return [
-      {
-        id: '1',
-        timestamp: '13:10:45',
-        message: '[POLYMARKET ALPHA SCANNER v2.1.0]',
-        type: 'event',
-      },
-      {
-        id: '2',
-        timestamp: '13:10:45',
-        message: 'Claude Code + Perplexity MCP Research Engine',
-        type: 'info',
-      },
-      {
-        id: '3',
-        timestamp: '13:10:45',
-        message: 'Initializing MCP connections...',
-        type: 'info',
-      },
-      {
-        id: '4',
-        timestamp: '13:10:45',
-        message: '✓ Connected: Polymarket REST API (ws://api.polymarket.com)',
-        type: 'success',
-      },
-      {
-        id: '5',
-        timestamp: '13:10:45',
-        message: '✓ Connected: Perplexity Research MCP (deep-research model)',
-        type: 'success',
-      },
-      {
-        id: '6',
-        timestamp: '13:10:45',
-        message: '✓ Connected: Claude Code Engine (Claude-opus-4-5)',
-        type: 'success',
-      },
-      {
-        id: '7',
-        timestamp: '13:10:45',
-        message: 'Fetching active markets from Polymarket...',
-        type: 'info',
-      },
-      {
-        id: '8',
-        timestamp: '13:10:45',
-        message: 'Found 847 active markets across 12 categories.',
-        type: 'event',
-      },
-      {
-        id: '9',
-        timestamp: '13:10:45',
-        message: 'Applying filters...',
-        type: 'info',
-      },
-      {
-        id: '10',
-        timestamp: '13:10:45',
-        message: '  — min_volume: $100,000  → 312 markets passed',
-        type: 'info',
-      },
-      {
-        id: '11',
-        timestamp: '13:10:45',
-        message: '  — min_liquidity: $50,000  → 189 markets passed',
-        type: 'info',
-      },
-      {
-        id: '12',
-        timestamp: '13:10:45',
-        message: 'Running alpha scoring algorithm on filtered markets...',
-        type: 'event',
-      },
-      {
-        id: '13',
-        timestamp: '13:10:45',
-        message: 'Completed probability edge | volume momentum | structural edge | time decay',
-        type: 'success',
-      },
-      {
-        id: '14',
-        timestamp: '13:10:46',
-        message: '[SIGNAL] TSLA unusual calls FSD by Mar 31? → Score: 0.78 (BUY)',
-        type: 'event',
-      },
-      {
-        id: '15',
-        timestamp: '13:10:46',
-        message: '[SIGNAL] Trump FSD 2024 prediction market → Score: 0.65 (BUY)',
-        type: 'event',
-      },
-      {
-        id: '16',
-        timestamp: '13:10:46',
-        message: '[SIGNAL] EUR/USD breakout setup → Score: 0.82 (SELL)',
-        type: 'event',
-      },
-    ];
-  }
 
   const getLogColor = (type: LogEntry['type']): string => {
     switch (type) {
@@ -142,15 +41,16 @@ export const ConsoleTab: React.FC<ConsoleTabProps> = ({
 
   return (
     <div
-      className="flex-1 border rounded-sm font-mono text-xs overflow-hidden flex flex-col"
+      className="h-full border rounded-sm font-mono text-xs flex flex-col"
       style={{
         backgroundColor: '#0a0e27',
         borderColor: '#00ff41',
+        minHeight: '0',
       }}
     >
       {/* Header */}
       <div
-        className="px-4 py-2 border-b flex items-center justify-between"
+        className="px-4 py-2 border-b flex items-center justify-between flex-shrink-0"
         style={{ borderColor: '#00ff41' }}
       >
         <span
@@ -164,8 +64,14 @@ export const ConsoleTab: React.FC<ConsoleTabProps> = ({
         </span>
       </div>
 
-      {/* Logs Container */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-1">
+      {/* Logs Container - scrollable */}
+      <div 
+        className="flex-1 overflow-y-auto p-4 space-y-1"
+        style={{ 
+          minHeight: '0',
+          maxHeight: 'calc(100vh - 200px)',
+        }}
+      >
         {displayedLogs.map((log) => (
           <div key={log.id} className="font-mono text-xs">
             <span style={{ color: '#666' }}>[{log.timestamp}]</span>{' '}

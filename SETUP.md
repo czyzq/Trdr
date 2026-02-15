@@ -29,7 +29,7 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 python main.py
-# Starts on http://localhost:8000
+# Starts on http://localhost:8001
 ```
 
 ### 4. Environment Variables
@@ -45,7 +45,7 @@ LOG_LEVEL=INFO
 
 **Frontend `.env`:**
 ```
-VITE_API_URL=http://localhost:8000/api
+VITE_API_URL=http://localhost:8001/api
 ```
 
 ### 5. Database
@@ -63,7 +63,7 @@ docker-compose up -d mongodb
 ## Verification
 
 - [ ] Frontend loads: http://localhost:5176
-- [ ] Backend ready: http://localhost:8000/docs
+- [ ] Backend ready: http://localhost:8001/docs
 - [ ] MongoDB connected: Check backend logs
 - [ ] MCP configured: Test Perplexity integration
 
@@ -71,7 +71,7 @@ docker-compose up -d mongodb
 
 **Port already in use:**
 ```bash
-# Find & kill process on port 5176/8000
+# Find & kill process on port 5176/8001
 lsof -i :5176
 kill -9 <PID>
 ```

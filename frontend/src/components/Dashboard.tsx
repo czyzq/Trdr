@@ -179,7 +179,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Tab Content */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden flex flex-col min-h-0">
           {activeTab === 'main' && (
             <MainTab
               onSignalClick={(signal) => console.log('Signal clicked:', signal)}
@@ -191,7 +191,9 @@ export const Dashboard: React.FC = () => {
           {activeTab === 'trades' && <TradesTab />}
           {activeTab === 'news' && <NewsTab />}
           {activeTab === 'console' && (
-            <ConsoleTab logs={logs && logs.length > 0 ? logs : undefined} maxLogs={100} />
+            <div className="flex-1 min-h-0 h-full">
+              <ConsoleTab logs={logs && logs.length > 0 ? logs : undefined} maxLogs={100} />
+            </div>
           )}
           {activeTab === 'settings' && (
             <div className="h-full flex items-center justify-center" style={{ color: '#4a5568' }}>
