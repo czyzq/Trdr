@@ -943,6 +943,10 @@ async def auto_trade_loop():
 
             # ── Step 2: Generate fresh signals ──
             signals = await generate_signals()
+            
+            # Update signals cache for TP/SL reference
+            global signals_cache
+            signals_cache = {s.symbol: s for s in signals}
 
             # ── Step 3: Auto-execute trades on strong signals ──
             can_trade, reason = check_circuit_breaker()
@@ -1134,6 +1138,11 @@ async def get_signals():
     """Fetch real trading signals"""
     log_event("Generating signals...", "info")
     signals = await generate_signals()
+    
+    # Update signals cache for TP/SL reference
+    global signals_cache
+    signals_cache = {s.symbol: s for s in signals}
+    
     return SignalResponse(signals=signals)
 
 @app.get("/api/logs")
