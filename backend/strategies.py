@@ -10,6 +10,7 @@ Each strategy takes candles + indicators and returns (score, direction, componen
 from typing import Dict, List, Optional, Tuple, Any
 from models import Signal, SignalDirection, Component, ComponentType
 from indicators import TechnicalIndicators
+import database as db
 
 # ──────────────────────────────────────────────────────────────────────
 # Strategy registry
@@ -340,17 +341,33 @@ class AdaptiveRegimeStrategy(BaseStrategy):
 # ──────────────────────────────────────────────────────────────────────
 
 # Sequentiality state: per-symbol leverage scaling after losses
+# Now persisted to database - survives restarts
 _mms_seq_state: Dict[str, Dict] = {}
 
 
 def _get_seq_state(symbol: str) -> Dict:
+    """Get sequentiality state for symbol. Loads from DB if not in memory."""
+    global _mms_seq_state
     if symbol not in _mms_seq_state:
-        _mms_seq_state[symbol] = {
-            "leverage_level": 3,  # index into LEVERAGE_LADDER
-            "consecutive_losses": 0,
-            "in_recovery": False,
-        }
+        # Try to load from database first
+        db_state = db.load_mms_state(symbol)
+        if db_state:
+            _mms_seq_state[symbol] = db_state
+        else:
+            # Default state for new symbol
+            _mms_seq_state[symbol] = {
+                "leverage_level": 3,  # index into LEVERAGE_LADDER
+                "consecutive_losses": 0,
+                "in_recovery": False,
+            }
+            # Save default to DB
+            db.save_mms_state(symbol, _mms_seq_state[symbol])
     return _mms_seq_state[symbol]
+
+
+def _save_seq_state(symbol: str, state: Dict):
+    """Save sequentiality state to database."""
+    db.save_mms_state(symbol, state)
 
 
 # Leverage ladder: index 0 = minimum, index 5 = maximum
@@ -359,7 +376,7 @@ LEVERAGE_LABELS = ["x0.01", "x0.1", "x0.25", "x0.5", "x1", "x2"]
 
 
 def mms_on_trade_result(symbol: str, is_win: bool):
-    """Call after a trade closes to update sequentiality state."""
+    """Call after a trade closes to update sequentiality state. Persists to DB."""
     state = _get_seq_state(symbol)
     if is_win:
         if state["in_recovery"]:
@@ -382,6 +399,21 @@ def mms_on_trade_result(symbol: str, is_win: bool):
             state["leverage_level"] = 2  # x0.25
         else:
             state["leverage_level"] = max(0, state["leverage_level"] - 2)
+    
+    # Persist to database
+    _save_seq_state(symbol, state)
+
+
+def init_mms_states_from_db():
+    """Load all MMS states from database on startup."""
+    global _mms_seq_state
+    db_states = db.load_all_mms_states()
+    for symbol, state in db_states.items():
+        _mms_seq_state[symbol] = state
+
+
+# Initialize on module load
+init_mms_states_from_db()
 
 
 class MMSStrategy(BaseStrategy):

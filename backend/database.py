@@ -603,3 +603,67 @@ async def async_save_quote(symbol: str, quote: dict):
 async def async_load_quote(symbol: str) -> Optional[dict]:
     """Async: Load cached quote."""
     return await asyncio.to_thread(load_quote, symbol)
+
+
+# =============================================================================
+# MMS SEQUENTIALITY STATE
+# =============================================================================
+
+def save_mms_state(symbol: str, state: dict):
+    """Save MMS sequentiality state for a symbol."""
+    try:
+        db = get_db()
+        if db is None:
+            return False
+        db.mms_state.update_one(
+            {"symbol": symbol},
+            {"$set": {"state": state, "updated_at": datetime.utcnow()}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        print(f"[DB] Error saving MMS state for {symbol}: {e}")
+        return False
+
+
+def load_mms_state(symbol: str) -> Optional[dict]:
+    """Load MMS sequentiality state for a symbol."""
+    try:
+        db = get_db()
+        if db is None:
+            return None
+        doc = db.mms_state.find_one({"symbol": symbol})
+        return doc["state"] if doc else None
+    except Exception as e:
+        print(f"[DB] Error loading MMS state for {symbol}: {e}")
+        return None
+
+
+def load_all_mms_states() -> dict:
+    """Load all MMS sequentiality states."""
+    try:
+        db = get_db()
+        if db is None:
+            return {}
+        states = {}
+        for doc in db.mms_state.find():
+            states[doc["symbol"]] = doc["state"]
+        return states
+    except Exception as e:
+        print(f"[DB] Error loading all MMS states: {e}")
+        return {}
+
+
+async def async_save_mms_state(symbol: str, state: dict):
+    """Async: Save MMS sequentiality state."""
+    return await asyncio.to_thread(save_mms_state, symbol, state)
+
+
+async def async_load_mms_state(symbol: str) -> Optional[dict]:
+    """Async: Load MMS sequentiality state."""
+    return await asyncio.to_thread(load_mms_state, symbol)
+
+
+async def async_load_all_mms_states() -> dict:
+    """Async: Load all MMS sequentiality states."""
+    return await asyncio.to_thread(load_all_mms_states)
