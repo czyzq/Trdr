@@ -1,7 +1,7 @@
 """
 CFD Trading Bot - FastAPI Backend
 Real-time signal generation using Finnhub data and technical indicators
-Simulated trading engine with PLN currency
+Simulated trading engine with USD currency
 """
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from models import Signal, SignalDirection, Component, ComponentType, SignalResponse
-from alpha_vantage import get_client as get_alpha_vantage_client
+from alpha_vantage import get_client as get_alpha_vantage_client, get_async_client
 from alpha_vantage_news import get_client as get_news_client
 from indicators import TechnicalIndicators
 from strategies import get_strategy, list_strategies, mms_on_trade_result
@@ -110,7 +110,7 @@ async def lifespan(app: FastAPI):
     global _trading_task, alpha_client
 
     # STARTUP
-    log_event("[CFD TRADING BOT v0.2.0 - PLN SIMULATION]", "event")
+    log_event("[CFD TRADING BOT v0.2.0 - USD SIMULATION]", "event")
     log_event("Instruments: XAU (Gold), XAG (Silver), US100 (Nasdaq), BTC (Bitcoin)", "info")
 
     # Database status
@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_event(f"Failed to initialize news client: {e}", "error")
     account["last_scan"] = datetime.utcnow().isoformat()
-    log_event(f"Account loaded: {account['balance_pln']:.2f} PLN ({account['balance_usd']:.2f} USD)", "success")
+    log_event(f"Account loaded: ${account['balance_usd']:.2f} USD", "success")
 
     # Start autonomous trading loop
     _trading_task = asyncio.create_task(auto_trade_loop())
@@ -201,6 +201,20 @@ if hasattr(broker, 'closed_positions'):
 if hasattr(broker, 'account'):
     account = broker.account
 
+# Ensure all USD fields exist (migration for old accounts)
+if "balance_usd" not in account:
+    account["balance_usd"] = INITIAL_BALANCE_USD
+if "equity_usd" not in account:
+    account["equity_usd"] = account["balance_usd"]
+if "available_usd" not in account:
+    account["available_usd"] = account["balance_usd"]
+if "used_margin" not in account:
+    account["used_margin"] = 0.0
+if "peak_balance_usd" not in account:
+    account["peak_balance_usd"] = account["balance_usd"]
+if "peak_equity_usd" not in account:
+    account["peak_equity_usd"] = account["balance_usd"]
+
 # Signal history cache for trend analysis
 signal_history_cache = {}
 
@@ -249,16 +263,16 @@ def save_signal_cache():
 # asset_class: "commodity" (mean-reverting) or "equity"/"crypto" (trending)
 # trailing_stop: enable trailing SL that locks in profits once in the green
 INSTRUMENTS = {
-    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 1,
+    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 0.003,
             "leverage": 20, "min_score": 0.30, "asset_class": "commodity",
             "trailing_stop": True},
-    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 100,
+    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 0.003,
             "leverage": 20, "min_score": 0.28, "asset_class": "commodity",
             "trailing_stop": True},
-    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 1,
+    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 0.003,
               "leverage": 20, "min_score": 0.20, "asset_class": "equity",
               "trailing_stop": True},
-    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.01,
+    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.001,
             "leverage": 5, "min_score": 0.20, "asset_class": "crypto",
             "trailing_stop": True},
 }
@@ -610,13 +624,20 @@ def get_signal_direction(score: float, min_score: float = 0.15) -> SignalDirecti
 MAX_DRAWDOWN_PCT = 20.0      # Stop trading if account drops 20% from peak
 MAX_OPEN_POSITIONS = 3        # Max concurrent positions
 MAX_RISK_PER_TRADE_PCT = 2.0  # Risk max 2% of balance per trade
-INITIAL_BALANCE_PLN = 10000.0
+INITIAL_BALANCE_USD = 3000.0
 
 def check_circuit_breaker() -> tuple[bool, str]:
-    """Check if trading should be halted due to drawdown or position limits."""
-    peak_balance = max(INITIAL_BALANCE_PLN, account.get("peak_balance_pln", INITIAL_BALANCE_PLN))
-    current = account["balance_pln"]
-    drawdown_pct = ((peak_balance - current) / peak_balance) * 100 if peak_balance > 0 else 0
+    """Check if trading should be halted due to drawdown or position limits.
+
+    Drawdown is calculated from EQUITY (balance + unrealized P&L), not just cash balance.
+    This properly accounts for leverage - a 5x leveraged position moving 4% against you
+    results in 20% equity drawdown, triggering the circuit breaker correctly.
+    """
+    # Use equity (balance + unrealized P&L) for drawdown calculation
+    current_equity = account.get("equity_usd", account["balance_usd"])
+    peak_equity = max(INITIAL_BALANCE_USD, account.get("peak_equity_usd", account.get("peak_balance_usd", INITIAL_BALANCE_USD)))
+    
+    drawdown_pct = ((peak_equity - current_equity) / peak_equity) * 100 if peak_equity > 0 else 0
 
     if drawdown_pct >= MAX_DRAWDOWN_PCT:
         return False, f"CIRCUIT BREAKER: {drawdown_pct:.1f}% drawdown exceeds {MAX_DRAWDOWN_PCT}% limit"
@@ -636,8 +657,8 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
     info = INSTRUMENTS.get(symbol, {})
     leverage = info.get("leverage", 1)
 
-    risk_amount_pln = account["balance_pln"] * (MAX_RISK_PER_TRADE_PCT / 100)
-    risk_amount_usd = risk_amount_pln / PLN_USD_RATE
+    # Risk amount in USD directly
+    risk_amount_usd = account["balance_usd"] * (MAX_RISK_PER_TRADE_PCT / 100)
 
     risk_per_unit = abs(entry_price - stop_loss)
     if risk_per_unit <= 0:
@@ -654,9 +675,9 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
 
     return round(max(min_size, min(size, max_size)), 4)
 
-def update_account_equity():
+async def update_account_equity():
     """Update account equity based on open positions via broker."""
-    broker.update_prices(data_provider)
+    await broker._async_update_prices()
 
 # Semaphore to limit concurrent API calls
 _api_semaphore = asyncio.Semaphore(2)
@@ -674,8 +695,8 @@ async def _get_cached_quote(symbol: str) -> Optional[dict]:
         if now - ts < _CACHE_TTL:
             return {"price": price, "source": "cache"}
     
-    # Fetch fresh
-    quote = await asyncio.to_thread(data_provider.get_quote, symbol)
+    # Fetch fresh - data_provider methods are now async
+    quote = await data_provider.get_quote(symbol)
     if quote and quote.get("price"):
         _price_cache[symbol] = (quote["price"], now)
     return quote
@@ -690,8 +711,8 @@ async def _get_cached_candles(symbol: str, resolution: str, count: int) -> Optio
         if now - ts < _CACHE_TTL:
             return candles
     
-    # Fetch fresh
-    candles = await asyncio.to_thread(data_provider.get_candles, symbol, resolution, count)
+    # Fetch fresh - data_provider methods are now async
+    candles = await data_provider.get_candles(symbol, resolution, count)
     if candles and len(candles) > 0:
         _candles_cache[cache_key] = (candles, now)
     return candles
@@ -849,9 +870,13 @@ async def generate_signals() -> List[Signal]:
 
     account["last_scan"] = datetime.utcnow().isoformat()
 
-    # Track peak balance for drawdown calculation
-    if account["balance_pln"] > account.get("peak_balance_pln", INITIAL_BALANCE_PLN):
-        account["peak_balance_pln"] = account["balance_pln"]
+    # Track peak equity (balance + unrealized P&L) for drawdown calculation
+    current_equity = account.get("equity_usd", account["balance_usd"])
+    if current_equity > account.get("peak_equity_usd", INITIAL_BALANCE_USD):
+        account["peak_equity_usd"] = current_equity
+    # Keep peak_balance_usd for backward compatibility
+    if account["balance_usd"] > account.get("peak_balance_usd", INITIAL_BALANCE_USD):
+        account["peak_balance_usd"] = account["balance_usd"]
 
     news_client_instance = get_news_client()
 
@@ -869,7 +894,7 @@ async def generate_signals() -> List[Signal]:
             log_event(f"[SIGNAL] {signal.symbol}: {signal.direction.value} | Score: {signal.score:.2f} | Conf: {signal.confidence:.0%} | ${signal.current_price:.2f}", "event")
     
     # Update equity after signals
-    update_account_equity()
+    await update_account_equity()
     
     return signals
 
@@ -902,7 +927,7 @@ async def auto_trade_loop():
                 continue
 
             # ── Step 1: Update prices & auto-close TP/SL ──
-            auto_closed = broker.update_prices(data_provider)
+            auto_closed = await broker._async_update_prices()
             if auto_closed:
                 for closed in auto_closed:
                     pos = closed.get("position", {})
@@ -955,19 +980,34 @@ async def auto_trade_loop():
                         log_event(f"[AUTO-TRADE] Skipping {sym} - market closed ({get_market_hours(sym)})", "info")
                         continue
 
-                    # Calculate position size and open trade
-                    entry_price = signal.entry_point
-                    size = calculate_position_size(sym, entry_price, signal.stop_loss)
+                    # Get CURRENT market price (not the signal's historical entry_point)
+                    quote = await data_provider.get_quote(sym)
+                    if not quote:
+                        log_event(f"[AUTO-TRADE] Skipping {sym} - cannot get current price", "warning")
+                        continue
+                    
+                    entry_price = quote["price"]
+                    
+                    # Recalculate TP/SL based on actual entry price (signal values may be stale)
+                    atr = entry_price * 0.01
+                    if direction == "buy":
+                        take_profit = signal.take_profit if signal.take_profit > entry_price else entry_price + (atr * 3)
+                        stop_loss = signal.stop_loss if signal.stop_loss < entry_price else entry_price - (atr * 2)
+                    else:
+                        take_profit = signal.take_profit if signal.take_profit < entry_price else entry_price - (atr * 3)
+                        stop_loss = signal.stop_loss if signal.stop_loss > entry_price else entry_price + (atr * 2)
+                    
+                    size = calculate_position_size(sym, entry_price, stop_loss)
 
-                    result = broker.open_position(
+                    result = await broker.open_position(
                         symbol=sym, direction=direction, size=size,
-                        take_profit=signal.take_profit, stop_loss=signal.stop_loss,
+                        take_profit=take_profit, stop_loss=stop_loss,
                         entry_price=entry_price,
                     )
                     if "error" not in result:
                         log_event(
                             f"[AUTO-TRADE] Opened {direction.upper()} {sym} @ {entry_price:.2f} "
-                            f"| Score: {signal.score:.3f} | SL: {signal.stop_loss:.2f} TP: {signal.take_profit:.2f}",
+                            f"| Score: {signal.score:.3f} | SL: {stop_loss:.2f} TP: {take_profit:.2f}",
                             "success"
                         )
                     else:
@@ -980,7 +1020,7 @@ async def auto_trade_loop():
             await async_save_signal_cache_db(signal_history_cache)
 
             log_event(
-                f"[AUTO-TRADE] Scan complete | Balance: {account['balance_pln']:.2f} PLN "
+                f"[AUTO-TRADE] Scan complete | Balance: ${account['balance_usd']:.2f} USD "
                 f"| Open: {len(open_positions)} | Closed: {len(closed_positions)}",
                 "info"
             )
@@ -1080,8 +1120,8 @@ async def get_status():
             "broker_type": os.getenv("BROKER_TYPE", "sim"),
         },
         "account": {
-            "balance_pln": account.get("balance_pln", 0),
-            "equity_pln": account.get("equity_pln", 0),
+            "balance_usd": account.get("balance_usd", 0),
+            "equity_usd": account.get("equity_usd", 0),
             "open_trades": len(open_positions),
             "mode": account.get("mode", "simulate"),
         },
@@ -1102,10 +1142,10 @@ async def get_logs():
 
 @app.get("/api/account")
 async def get_account():
-    """Get account info with PLN balance"""
-    update_account_equity()
-    # Add initial_balance_pln to response for frontend calculations
-    return {**account, "initial_balance_pln": INITIAL_BALANCE_PLN}
+    """Get account info with USD balance"""
+    await update_account_equity()
+    # Add initial_balance_usd to response for frontend calculations
+    return {**account, "initial_balance_usd": INITIAL_BALANCE_USD}
 
 @app.post("/api/account/mode")
 async def set_account_mode(mode: str):
@@ -1193,67 +1233,82 @@ async def get_all_strategy_selections():
 # =====================
 
 @app.post("/api/trade/open")
-async def open_trade(symbol: str, direction: str, size: float = 0):
+async def open_trade(
+    symbol: str,
+    direction: str,
+    size: float = 0,
+    take_profit: Optional[float] = None,
+    stop_loss: Optional[float] = None
+):
     """
     Open a simulated trade position.
     size: lot size - if 0, automatically calculated from risk management rules.
+    take_profit: optional override for TP level
+    stop_loss: optional override for SL level
     """
     global account
 
-    if symbol not in INSTRUMENTS:
-        return {"error": f"Unknown instrument: {symbol}"}
-    if direction not in ["buy", "sell"]:
-        return {"error": "Direction must be 'buy' or 'sell'"}
+    try:
+        if symbol not in INSTRUMENTS:
+            return {"error": f"Unknown instrument: {symbol}"}
+        if direction not in ["buy", "sell"]:
+            return {"error": "Direction must be 'buy' or 'sell'"}
 
-    # Circuit breaker check
-    can_trade, reason = check_circuit_breaker()
-    if not can_trade:
-        log_event(f"[BLOCKED] {reason}", "warning")
-        return {"error": reason}
+        # Circuit breaker check
+        can_trade, reason = check_circuit_breaker()
+        if not can_trade:
+            log_event(f"[BLOCKED] {reason}", "warning")
+            return {"error": reason}
 
-    # Check if market is open for this symbol
-    if not is_market_open(symbol):
-        hours = get_market_hours(symbol)
-        log_event(f"[BLOCKED] Cannot trade {symbol} - market closed ({hours})", "warning")
-        return {"error": f"Market closed for {symbol}. Trading hours: {hours}"}
+        # Check if market is open for this symbol
+        if not is_market_open(symbol):
+            hours = get_market_hours(symbol)
+            log_event(f"[BLOCKED] Cannot trade {symbol} - market closed ({hours})", "warning")
+            return {"error": f"Market closed for {symbol}. Trading hours: {hours}"}
 
-    # Check for duplicate position on same symbol+direction
-    for pos in open_positions:
-        if pos["symbol"] == symbol and pos["direction"] == direction:
-            return {"error": f"Already have an open {direction} position on {symbol}"}
+        quote = await data_provider.get_quote(symbol)
+        if not quote:
+            return {"error": f"Cannot get price for {symbol}"}
 
-    quote = data_provider.get_quote(symbol)
-    if not quote:
-        return {"error": f"Cannot get price for {symbol}"}
+        entry_price = quote["price"]
 
-    entry_price = quote["price"]
-
-    # Get signal data for TP/SL
-    signal = signals_cache.get(symbol)
-    if signal:
-        take_profit = signal.take_profit
-        stop_loss = signal.stop_loss
-    else:
-        atr = entry_price * 0.01
-        if direction == "buy":
-            take_profit = entry_price + (atr * 3)
-            stop_loss = entry_price - (atr * 2)
+        # Use provided TP/SL or calculate from signal/default
+        if take_profit is not None and stop_loss is not None:
+            # Use frontend-provided values
+            tp = take_profit
+            sl = stop_loss
         else:
-            take_profit = entry_price - (atr * 3)
-            stop_loss = entry_price + (atr * 2)
+            # Get signal data for TP/SL
+            signal = signals_cache.get(symbol)
+            if signal:
+                tp = signal.take_profit
+                sl = signal.stop_loss
+            else:
+                atr = entry_price * 0.01
+                if direction == "buy":
+                    tp = entry_price + (atr * 3)
+                    sl = entry_price - (atr * 2)
+                else:
+                    tp = entry_price - (atr * 3)
+                    sl = entry_price + (atr * 2)
 
-    if size <= 0:
-        size = calculate_position_size(symbol, entry_price, stop_loss)
+        if size <= 0:
+            size = calculate_position_size(symbol, entry_price, sl)
 
-    result = broker.open_position(
-        symbol=symbol, direction=direction, size=size,
-        take_profit=take_profit, stop_loss=stop_loss, entry_price=entry_price,
-    )
-    if "error" in result:
+        result = await broker.open_position(
+            symbol=symbol, direction=direction, size=size,
+            take_profit=tp, stop_loss=sl, entry_price=entry_price,
+        )
+        if "error" in result:
+            return result
+
+        log_event(f"[TRADE] Opened {direction.upper()} {symbol} @ {entry_price:.2f} | Size: {size}", "success")
         return result
-
-    log_event(f"[TRADE] Opened {direction.upper()} {symbol} @ {entry_price:.2f} | Size: {size}", "success")
-    return result
+    except Exception as e:
+        log_event(f"[ERROR] Failed to open trade: {str(e)}", "error")
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Internal error: {str(e)}"}
 
 @app.get("/api/trade/size")
 async def get_position_size(symbol: str, entry_price: float, stop_loss: float):
@@ -1271,6 +1326,22 @@ async def get_position_size(symbol: str, entry_price: float, stop_loss: float):
         "leverage": INSTRUMENTS[symbol].get("leverage", 20),
     }
 
+@app.post("/api/trade/update/{position_id}")
+async def update_position(position_id: str, stop_loss: Optional[float] = None, take_profit: Optional[float] = None):
+    """Update stop loss and/or take profit for an open position"""
+    position = next((p for p in open_positions if p["id"] == position_id), None)
+    if not position:
+        return {"error": f"Position {position_id} not found"}
+
+    if stop_loss is not None:
+        position["stop_loss"] = stop_loss
+    if take_profit is not None:
+        position["take_profit"] = take_profit
+
+    await async_save_trade(position)
+    log_event(f"[TRADE] Updated {position['symbol']} SL/TP | SL: {position['stop_loss']:.2f} TP: {position['take_profit']:.2f}", "info")
+    return {"status": "updated", "position": position}
+
 @app.post("/api/trade/close/{position_id}")
 async def close_trade(position_id: str):
     """Close an open trade position via broker"""
@@ -1279,29 +1350,28 @@ async def close_trade(position_id: str):
     if not position:
         return {"error": f"Position {position_id} not found"}
 
-    quote = data_provider.get_quote(position["symbol"])
+    quote = await data_provider.get_quote(position["symbol"])
     exit_price = quote["price"] if quote else None
 
-    result = broker.close_position(position_id, exit_price=exit_price)
+    result = await broker.close_position(position_id, exit_price=exit_price)
     if "error" in result:
         return result
 
     closed_pos = result["position"]
-    pnl_pln = closed_pos.get("pnl_pln", 0)
     pnl_usd = closed_pos.get("pnl_usd", 0)
     emoji = "+" if pnl_usd >= 0 else ""
     log_event(
-        f"[TRADE] Closed {position['direction'].upper()} {position['symbol']} @ {exit_price:.2f} | P&L: {emoji}{pnl_pln:.2f} PLN ({emoji}{pnl_usd:.2f} USD)",
+        f"[TRADE] Closed {position['direction'].upper()} {position['symbol']} @ {exit_price:.2f} | P&L: {emoji}${pnl_usd:.2f} USD",
         "success" if pnl_usd >= 0 else "warning"
     )
 
-    update_account_equity()
+    await update_account_equity()
     return result
 
 @app.get("/api/trades/open")
 async def get_open_trades():
     """Get all open positions with live P&L - always from DB for consistency"""
-    update_account_equity()
+    await update_account_equity()
     # Load from DB to ensure we have data after restart
     db_positions = await async_load_open_positions()
     # Merge with in-memory (in-memory may have newer updates)
@@ -1327,7 +1397,6 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = 
         "win_count": account["win_count"],
         "loss_count": account["loss_count"],
         "win_rate": account["win_rate"],
-        "total_pnl_pln": account["total_pnl_pln"],
         "total_pnl_usd": account["total_pnl_usd"]
     }
 
@@ -1337,7 +1406,7 @@ async def reset_account():
     if not hasattr(broker, 'reset'):
         return {"error": "Reset not supported for live brokers"}
     result = broker.reset()
-    log_event("[ACCOUNT] Reset to 10,000.00 PLN", "event")
+    log_event(f"[ACCOUNT] Reset to ${INITIAL_BALANCE_USD:.2f} USD", "event")
     return {"status": "reset", "account": account}
 
 # =====================
@@ -1379,10 +1448,8 @@ async def get_news(symbol: str):
 
 @app.get("/api/quote/{symbol}")
 async def get_quote(symbol: str):
-    global alpha_client
-    if alpha_client is None:
-        alpha_client = get_alpha_vantage_client()
-    quote = alpha_client.get_quote(symbol)
+    async_client = get_async_client()
+    quote = await async_client.get_quote(symbol)
     return quote if quote else {"error": f"Failed to fetch quote for {symbol}"}
 
 @app.get("/api/chart/{symbol}")

@@ -20,6 +20,21 @@ interface ChartResponse {
   fetched_at?: string;
 }
 
+interface Trade {
+  id: string;
+  symbol: string;
+  direction: 'buy' | 'sell';
+  entry_price: number;
+  exit_price?: number;
+  opened_at: string;
+  closed_at?: string;
+  pnl_usd?: number;
+  take_profit?: number;
+  stop_loss?: number;
+  result?: 'win' | 'loss';
+  size?: number;
+}
+
 const instruments = [
   { symbol: 'XAU', name: 'Gold', color: '#eab308' },
   { symbol: 'XAG', name: 'Silver', color: '#94a3b8' },
@@ -36,6 +51,7 @@ const resolutions = [
 
 export const ChartsTab: React.FC = () => {
   const [charts, setCharts] = useState<ChartResponse[]>([]);
+  const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedResolution, setSelectedResolution] = useState(() => {
     return localStorage.getItem('cfd_chartsResolution') || '60';
@@ -62,9 +78,51 @@ export const ChartsTab: React.FC = () => {
     }
   };
 
+  const fetchTrades = async () => {
+    const url = apiUrl('trades/open');
+    console.log('[ChartsTab] Fetching trades from:', url);
+    try {
+      const [openRes, closedRes] = await Promise.all([
+        fetch(url),
+        fetch(apiUrl('trades/history'))
+      ]);
+      
+      console.log('[ChartsTab] openRes status:', openRes.status, openRes.ok);
+      
+      const allTrades: Trade[] = [];
+      
+      if (openRes.ok) {
+        const openData = await openRes.json();
+        console.log('[ChartsTab] Open positions:', openData.positions?.length || 0, openData);
+        if (openData.positions) {
+          allTrades.push(...openData.positions.map((p: any) => ({ ...p, result: undefined })));
+        }
+      } else {
+        console.error('[ChartsTab] Failed to fetch open positions:', openRes.status);
+      }
+      
+      if (closedRes.ok) {
+        const closedData = await closedRes.json();
+        console.log('[ChartsTab] Closed trades:', closedData.trades?.length || 0);
+        if (closedData.trades) {
+          allTrades.push(...closedData.trades);
+        }
+      }
+      
+      console.log('[ChartsTab] Total trades:', allTrades.length);
+      setTrades(allTrades);
+    } catch (error) {
+      console.error('[ChartsTab] Error fetching trades:', error);
+    }
+  };
+
   useEffect(() => {
     fetchChartData();
-    const interval = setInterval(fetchChartData, 30000);
+    fetchTrades();
+    const interval = setInterval(() => {
+      fetchChartData();
+      fetchTrades();
+    }, 30000);
     return () => clearInterval(interval);
   }, [selectedResolution]);
 
@@ -115,6 +173,15 @@ export const ChartsTab: React.FC = () => {
                   <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: instrument.color }} />
                   <span className="text-[11px] font-bold" style={{ color: '#e2e8f0' }}>{instrument.symbol}</span>
                   <span className="text-[10px]" style={{ color: '#4a5568' }}>{instrument.name}</span>
+                  {/* Trade markers legend */}
+                  {trades.some(t => t.symbol === instrument.symbol) && (
+                    <div className="flex items-center gap-1 ml-2 text-[9px]" style={{ color: '#64748b' }}>
+                      <span title="Entry = ▲/▼ triangle, Exit = ■ square">Trades:</span>
+                      <span style={{ color: '#023f18ff' }}>▲</span>
+                      <span style={{ color: '#5f0808ff' }}>▼</span>
+                      <span style={{ color: '#7a7a7bff' }}>■</span>
+                    </div>
+                  )}
                 </div>
                 {chartData && (() => {
                   const isLive = chartData.source === 'alpha_vantage';
@@ -151,6 +218,7 @@ export const ChartsTab: React.FC = () => {
                     height={220}
                     showVolume={true}
                     showRSI={true}
+                    trades={trades}
                   />
                 ) : (
                   <div className="h-[220px] flex items-center justify-center" style={{ color: '#4a5568' }}>

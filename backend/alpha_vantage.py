@@ -229,8 +229,6 @@ def get_client() -> AlphaVantageClient:
 
 
 def get_async_client() -> AsyncAlphaVantageClient:
-    """Get async client (preferred)."""
-    global _async_client
-    if _async_client is None:
-        _async_client = AsyncAlphaVantageClient()
-    return _async_client
+    """Get async client (preferred). Creates new instance to avoid cache contamination."""
+    # Create new instance each time to prevent symbol cross-contamination in cache
+    return AsyncAlphaVantageClient()

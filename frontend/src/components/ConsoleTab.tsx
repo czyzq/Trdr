@@ -72,8 +72,8 @@ export const ConsoleTab: React.FC<ConsoleTabProps> = ({
           maxHeight: 'calc(100vh - 200px)',
         }}
       >
-        {displayedLogs.map((log) => (
-          <div key={log.id} className="font-mono text-xs">
+        {displayedLogs.map((log, index) => (
+          <div key={`${log.id}-${index}`} className="font-mono text-xs">
             <span style={{ color: '#666' }}>[{log.timestamp}]</span>{' '}
             <span style={{ color: getLogColor(log.type) }}>
               {log.message}

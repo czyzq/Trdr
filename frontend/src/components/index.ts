@@ -7,3 +7,4 @@ export { SimpleChart } from './SimpleChart';
 export { CandlestickChart } from './CandlestickChart';
 export { ChartsTab } from './ChartsTab';
 export { MainTab } from './MainTab';
+export { OpenPositionsSummary } from './OpenPositionsSummary';

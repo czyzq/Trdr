@@ -13,14 +13,13 @@ from broker import Broker, DataProvider
 from alpha_vantage import get_async_client
 from historical_data import fetch_yahoo_historical
 
-PLN_USD_RATE = 4.05
-INITIAL_BALANCE_PLN = 10000.0
+INITIAL_BALANCE_USD = 3000.0
 
 INSTRUMENTS = {
-    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 1, "leverage": 20},
-    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 100, "leverage": 20},
-    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 1, "leverage": 20},
-    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.01, "leverage": 5},
+    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 0.003, "leverage": 20},
+    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 0.003, "leverage": 20},
+    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 0.003, "leverage": 20},
+    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.001, "leverage": 5},
 }
 
 
@@ -174,27 +173,14 @@ class AsyncSimulatedBroker(Broker):
     def get_closed_positions(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self.closed_positions[:limit]
 
-    def open_position(
+    async def open_position(
         self, symbol: str, direction: str, size: float,
         take_profit: Optional[float] = None,
         stop_loss: Optional[float] = None,
         entry_price: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """Sync wrapper for async open."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(
-                    self._async_open_position(symbol, direction, size, take_profit, stop_loss, entry_price),
-                    loop
-                )
-                return future.result(timeout=10)
-            else:
-                return loop.run_until_complete(
-                    self._async_open_position(symbol, direction, size, take_profit, stop_loss, entry_price)
-                )
-        except Exception as e:
-            return {"error": str(e)}
+        """Async open position."""
+        return await self._async_open_position(symbol, direction, size, take_profit, stop_loss, entry_price)
 
     async def _async_open_position(
         self, symbol: str, direction: str, size: float,
@@ -212,13 +198,13 @@ class AsyncSimulatedBroker(Broker):
 
         leverage = INSTRUMENTS[symbol].get("leverage", 20)
         margin_usd = entry_price * size / leverage
-        margin_pln = margin_usd * PLN_USD_RATE
 
-        if margin_pln > self.account.get("available_pln", 0):
+        available = self.account.get("available_usd", 0)
+        if margin_usd > available:
             return {
                 "error": "Insufficient margin",
-                "required_pln": margin_pln,
-                "available_pln": self.account["available_pln"],
+                "required_usd": margin_usd,
+                "available_usd": available,
             }
 
         # Default TP/SL
@@ -239,16 +225,15 @@ class AsyncSimulatedBroker(Broker):
             "current_price": entry_price,
             "take_profit": round(take_profit, 2),
             "stop_loss": round(stop_loss, 2),
-            "margin_pln": round(margin_pln, 2),
+            "margin_usd": round(margin_usd, 2),
             "unrealized_pnl_usd": 0.0,
-            "unrealized_pnl_pln": 0.0,
             "opened_at": datetime.utcnow().isoformat(),
             "status": "open",
         }
 
         self.open_positions.append(position)
-        self.account["used_margin"] = self.account.get("used_margin", 0) + margin_pln
-        self.account["available_pln"] = self.account["balance_pln"] - self.account["used_margin"]
+        self.account["used_margin"] = self.account.get("used_margin", 0) + margin_usd
+        self.account["available_usd"] = self.account["balance_usd"] - self.account["used_margin"]
         self.account["open_trades"] = len(self.open_positions)
         self.account["positions"] = len(self.open_positions)
 
@@ -257,19 +242,9 @@ class AsyncSimulatedBroker(Broker):
 
         return {"status": "opened", "position": position}
 
-    def close_position(self, position_id: str, exit_price: Optional[float] = None) -> Dict[str, Any]:
-        """Sync wrapper for async close."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(
-                    self._async_close_position(position_id, exit_price), loop
-                )
-                return future.result(timeout=10)
-            else:
-                return loop.run_until_complete(self._async_close_position(position_id, exit_price))
-        except Exception as e:
-            return {"error": str(e)}
+    async def close_position(self, position_id: str, exit_price: Optional[float] = None) -> Dict[str, Any]:
+        """Async close position."""
+        return await self._async_close_position(position_id, exit_price)
 
     async def _async_close_position(self, position_id: str, exit_price: Optional[float] = None) -> Dict[str, Any]:
         """Async position closing."""
@@ -293,13 +268,9 @@ class AsyncSimulatedBroker(Broker):
         else:
             pnl_usd = (position["entry_price"] - exit_price) * position["size"] * pos_leverage
 
-        pnl_pln = pnl_usd * PLN_USD_RATE
-
-        self.account["balance_pln"] = round(self.account["balance_pln"] + pnl_pln, 2)
-        self.account["balance_usd"] = round(self.account["balance_pln"] / PLN_USD_RATE, 2)
-        self.account["used_margin"] = max(0, self.account["used_margin"] - position["margin_pln"])
-        self.account["available_pln"] = self.account["balance_pln"] - self.account["used_margin"]
-        self.account["total_pnl_pln"] = round(self.account.get("total_pnl_pln", 0) + pnl_pln, 2)
+        self.account["balance_usd"] = round(self.account["balance_usd"] + pnl_usd, 2)
+        self.account["used_margin"] = max(0, self.account["used_margin"] - position["margin_usd"])
+        self.account["available_usd"] = self.account["balance_usd"] - self.account["used_margin"]
         self.account["total_pnl_usd"] = round(self.account.get("total_pnl_usd", 0) + pnl_usd, 2)
         self.account["closed_trades"] = self.account.get("closed_trades", 0) + 1
 
@@ -315,7 +286,6 @@ class AsyncSimulatedBroker(Broker):
             **position,
             "exit_price": exit_price,
             "pnl_usd": round(pnl_usd, 2),
-            "pnl_pln": round(pnl_pln, 2),
             "closed_at": datetime.utcnow().isoformat(),
             "status": "closed",
             "result": "win" if pnl_usd >= 0 else "loss",
@@ -362,10 +332,9 @@ class AsyncSimulatedBroker(Broker):
                 pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage
             else:
                 pnl = (pos["entry_price"] - price) * pos["size"] * pos_leverage
-            
+
             pos["current_price"] = price
             pos["unrealized_pnl_usd"] = round(pnl, 2)
-            pos["unrealized_pnl_pln"] = round(pnl * PLN_USD_RATE, 2)
 
             tp = pos.get("take_profit")
             sl = pos.get("stop_loss")
@@ -381,14 +350,12 @@ class AsyncSimulatedBroker(Broker):
                     to_close.append((pos["id"], sl, "SL"))
 
         for pos_id, trigger_price, reason in to_close:
-            # Get current market price for closing (not the trigger price)
-            position = next((p for p in self.open_positions if p["id"] == pos_id), None)
-            if position:
-                market_price = position.get("current_price", trigger_price)
-                result = await self._async_close_position(pos_id, exit_price=market_price)
-                if "error" not in result:
-                    result["exit_reason"] = reason
-                    auto_closed.append(result)
+            # Use trigger price (TP/SL level) for exit, not stale current_price
+            # current_price may still be entry_price if position just opened
+            result = await self._async_close_position(pos_id, exit_price=trigger_price)
+            if "error" not in result:
+                result["exit_reason"] = reason
+                auto_closed.append(result)
 
         # Recalculate unrealized
         for pos in self.open_positions:
@@ -402,12 +369,9 @@ class AsyncSimulatedBroker(Broker):
                     pnl = (pos["entry_price"] - price) * pos["size"] * pos_leverage
                 pos["current_price"] = price
                 pos["unrealized_pnl_usd"] = round(pnl, 2)
-                pos["unrealized_pnl_pln"] = round(pnl * PLN_USD_RATE, 2)
 
         unrealized_usd = sum(p.get("unrealized_pnl_usd", 0) for p in self.open_positions)
-        unrealized_pln = unrealized_usd * PLN_USD_RATE
-        self.account["equity_pln"] = round(self.account["balance_pln"] + unrealized_pln, 2)
-        self.account["equity_usd"] = round(self.account["equity_pln"] / PLN_USD_RATE, 2)
+        self.account["equity_usd"] = round(self.account["balance_usd"] + unrealized_usd, 2)
         self.account["open_trades"] = len(self.open_positions)
         self.account["positions"] = len(self.open_positions)
 
@@ -422,20 +386,17 @@ class AsyncSimulatedBroker(Broker):
         self.open_positions.clear()
         self.closed_positions.clear()
         self.account.update({
-            "balance_pln": INITIAL_BALANCE_PLN,
-            "equity_pln": INITIAL_BALANCE_PLN,
-            "balance_usd": round(INITIAL_BALANCE_PLN / PLN_USD_RATE, 2),
-            "equity_usd": round(INITIAL_BALANCE_PLN / PLN_USD_RATE, 2),
+            "balance_usd": INITIAL_BALANCE_USD,
+            "equity_usd": INITIAL_BALANCE_USD,
             "positions": 0,
             "open_trades": 0,
             "closed_trades": 0,
-            "total_pnl_pln": 0.0,
             "total_pnl_usd": 0.0,
             "win_count": 0,
             "loss_count": 0,
             "win_rate": 0.0,
             "used_margin": 0.0,
-            "available_pln": INITIAL_BALANCE_PLN,
+            "available_usd": INITIAL_BALANCE_USD,
         })
         db.delete_all_trades()
         db.save_account(self.account)

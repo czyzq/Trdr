@@ -239,7 +239,6 @@ export const Dashboard: React.FC = () => {
       >
         <span>CFD Trading Bot | XAU, XAG, US100, BTC</span>
         <div className="flex items-center gap-3">
-          <span>PLN/USD: 4.05</span>
           <span className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#22c55e' }} />
             Connected

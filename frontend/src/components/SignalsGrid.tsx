@@ -59,6 +59,7 @@ interface TradeModalState {
   direction: 'buy' | 'sell';
   entryPrice: number;
   stopLoss: number;
+  takeProfit: number;
   suggestedSize: number;
   selectedSize: number;
   loading: boolean;
@@ -76,6 +77,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     direction: 'buy',
     entryPrice: 0,
     stopLoss: 0,
+    takeProfit: 0,
     suggestedSize: 0.01,
     selectedSize: 0.01,
     loading: false,
@@ -144,6 +146,9 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     const stopLoss = signal.stop_loss || (direction === 'buy' 
       ? entryPrice * 0.98 
       : entryPrice * 1.02);
+    const takeProfit = signal.take_profit || (direction === 'buy'
+      ? entryPrice * 1.03
+      : entryPrice * 0.97);
     
     try {
       // Get suggested position size from backend
@@ -158,18 +163,21 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
         direction,
         entryPrice,
         stopLoss,
+        takeProfit,
         suggestedSize,
         selectedSize: suggestedSize,
         loading: false,
       });
     } catch (error) {
       // Fallback - open modal with default size
+      const fallbackTP = direction === 'buy' ? entryPrice * 1.03 : entryPrice * 0.97;
       setTradeModal({
         isOpen: true,
         symbol,
         direction,
         entryPrice,
         stopLoss,
+        takeProfit: fallbackTP,
         suggestedSize: 0.01,
         selectedSize: 0.01,
         loading: false,
@@ -182,8 +190,15 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
   const executeTrade = async () => {
     setTradeModal(prev => ({ ...prev, loading: true }));
     try {
+      const params = new URLSearchParams({
+        symbol: tradeModal.symbol,
+        direction: tradeModal.direction,
+        size: tradeModal.selectedSize.toString(),
+        take_profit: tradeModal.takeProfit.toString(),
+        stop_loss: tradeModal.stopLoss.toString(),
+      });
       const response = await fetch(
-        `${apiUrl('trade/open')}?symbol=${tradeModal.symbol}&direction=${tradeModal.direction}&size=${tradeModal.selectedSize}`,
+        `${apiUrl('trade/open')}?${params.toString()}`,
         { method: 'POST' }
       );
       const data = await response.json();
@@ -232,17 +247,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
   };
 
   return (
-    <div className="rounded-sm overflow-hidden" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 md:px-4 py-2" style={{ borderBottom: '1px solid #1a1f35' }}>
-        <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
-          Trading Signals
-        </span>
-        <span className="text-[10px]" style={{ color: '#374151' }}>
-          {signals.length} instruments
-        </span>
-      </div>
-
+    <>
       {/* Error Message */}
       {errorMessage && (
         <div className="mx-3 mt-2 px-3 py-2 rounded-sm text-[11px]" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444' }}>
@@ -468,7 +473,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
           onClick={closeTradeModal}
         >
           <div 
-            className="p-6 rounded-lg w-80"
+            className="p-5 rounded-lg w-96 max-w-[90vw]"
             style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -476,45 +481,160 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
               {tradeModal.direction === 'buy' ? 'Buy' : 'Sell'} {tradeModal.symbol}
             </h3>
             
-            <div className="space-y-3 mb-4">
-              <div className="flex justify-between text-sm">
-                <span style={{ color: '#64748b' }}>Entry Price:</span>
-                <span style={{ color: '#e2e8f0' }}>${tradeModal.entryPrice.toFixed(2)}</span>
+            {/* Entry Price */}
+            <div className="flex justify-between text-sm mb-3">
+              <span style={{ color: '#64748b' }}>Entry Price:</span>
+              <span style={{ color: '#e2e8f0' }}>${tradeModal.entryPrice.toFixed(2)}</span>
+            </div>
+            
+            {/* Take Profit with +/- */}
+            <div className="mb-3">
+              <div className="flex justify-between text-sm mb-1">
+                <span style={{ color: '#22c55e' }}>Take Profit:</span>
+                <span style={{ color: '#22c55e' }}>${tradeModal.takeProfit.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span style={{ color: '#64748b' }}>Stop Loss:</span>
-                <span style={{ color: '#e2e8f0' }}>${tradeModal.stopLoss.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span style={{ color: '#64748b' }}>Suggested Size:</span>
-                <span style={{ color: '#22c55e' }}>{tradeModal.suggestedSize.toFixed(4)}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setTradeModal(prev => ({ 
+                    ...prev, 
+                    takeProfit: prev.takeProfit - (prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5)
+                  }))}
+                  className="px-3 py-1 rounded text-sm font-bold"
+                  style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  step={tradeModal.symbol === 'BTC' ? 10 : tradeModal.symbol === 'XAU' ? 1 : 5}
+                  value={tradeModal.takeProfit.toFixed(2)}
+                  onChange={(e) => setTradeModal(prev => ({ ...prev, takeProfit: parseFloat(e.target.value) || prev.takeProfit }))}
+                  className="flex-1 px-3 py-1.5 rounded text-sm text-center"
+                  style={{ 
+                    backgroundColor: '#1a1f35', 
+                    border: '1px solid #22c55e33',
+                    color: '#22c55e'
+                  }}
+                />
+                <button
+                  onClick={() => setTradeModal(prev => ({ 
+                    ...prev, 
+                    takeProfit: prev.takeProfit + (prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5)
+                  }))}
+                  className="px-3 py-1 rounded text-sm font-bold"
+                  style={{ backgroundColor: '#1a1f35', color: '#22c55e' }}
+                >
+                  +
+                </button>
               </div>
             </div>
             
+            {/* Stop Loss with +/- */}
             <div className="mb-4">
-              <label className="block text-sm mb-2" style={{ color: '#64748b' }}>
-                Position Size (lots):
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={tradeModal.selectedSize}
-                onChange={(e) => setTradeModal(prev => ({ ...prev, selectedSize: parseFloat(e.target.value) || 0.01 }))}
-                className="w-full px-3 py-2 rounded text-sm"
-                style={{ 
-                  backgroundColor: '#1a1f35', 
-                  border: '1px solid #2d3748',
-                  color: '#e2e8f0'
-                }}
-              />
+              <div className="flex justify-between text-sm mb-1">
+                <span style={{ color: '#ef4444' }}>Stop Loss:</span>
+                <span style={{ color: '#ef4444' }}>${tradeModal.stopLoss.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setTradeModal(prev => ({ 
+                    ...prev, 
+                    stopLoss: prev.stopLoss - (prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5)
+                  }))}
+                  className="px-3 py-1 rounded text-sm font-bold"
+                  style={{ backgroundColor: '#1a1f35', color: '#ef4444' }}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  step={tradeModal.symbol === 'BTC' ? 10 : tradeModal.symbol === 'XAU' ? 1 : 5}
+                  value={tradeModal.stopLoss.toFixed(2)}
+                  onChange={(e) => setTradeModal(prev => ({ ...prev, stopLoss: parseFloat(e.target.value) || prev.stopLoss }))}
+                  className="flex-1 px-3 py-1.5 rounded text-sm text-center"
+                  style={{ 
+                    backgroundColor: '#1a1f35', 
+                    border: '1px solid #ef444433',
+                    color: '#ef4444'
+                  }}
+                />
+                <button
+                  onClick={() => setTradeModal(prev => ({ 
+                    ...prev, 
+                    stopLoss: prev.stopLoss + (prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5)
+                  }))}
+                  className="px-3 py-1 rounded text-sm font-bold"
+                  style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
+                >
+                  +
+                </button>
+              </div>
             </div>
             
+            {/* Position Size */}
+            <div className="mb-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span style={{ color: '#64748b' }}>Position Size:</span>
+                <span style={{ color: '#22c55e', fontSize: '11px' }}>Suggested: {tradeModal.suggestedSize.toFixed(4)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setTradeModal(prev => {
+                    const step = prev.symbol === 'BTC' ? 0.001 : (prev.symbol === 'XAG' || prev.symbol === 'XAU' || prev.symbol === 'US100') ? 0.003 : 0.01;
+                    const min = prev.symbol === 'BTC' ? 0.001 : (prev.symbol === 'XAG' || prev.symbol === 'XAU' || prev.symbol === 'US100') ? 0.003 : 0.01;
+                    return { ...prev, selectedSize: Math.max(min, prev.selectedSize - step) };
+                  })}
+                  className="px-3 py-1 rounded text-sm font-bold"
+                  style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  step={tradeModal.symbol === 'BTC' ? 0.001 : (tradeModal.symbol === 'XAG' || tradeModal.symbol === 'XAU' || tradeModal.symbol === 'US100') ? 0.003 : 0.01}
+                  min={tradeModal.symbol === 'BTC' ? 0.001 : (tradeModal.symbol === 'XAG' || tradeModal.symbol === 'XAU' || tradeModal.symbol === 'US100') ? 0.003 : 0.01}
+                  value={tradeModal.selectedSize.toFixed(4)}
+                  onChange={(e) => setTradeModal(prev => {
+                    const min = prev.symbol === 'BTC' ? 0.001 : (prev.symbol === 'XAG' || prev.symbol === 'XAU' || prev.symbol === 'US100') ? 0.003 : 0.01;
+                    return { ...prev, selectedSize: Math.max(min, parseFloat(e.target.value) || min) };
+                  })}
+                  className="flex-1 px-3 py-1.5 rounded text-sm text-center"
+                  style={{ 
+                    backgroundColor: '#1a1f35', 
+                    border: '1px solid #2d3748',
+                    color: '#e2e8f0'
+                  }}
+                />
+                <button
+                  onClick={() => setTradeModal(prev => {
+                    const step = prev.symbol === 'BTC' ? 0.001 : (prev.symbol === 'XAG' || prev.symbol === 'XAU' || prev.symbol === 'US100') ? 0.003 : 0.01;
+                    return { ...prev, selectedSize: prev.selectedSize + step };
+                  })}
+                  className="px-3 py-1 rounded text-sm font-bold"
+                  style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            
+            {/* Risk/Reward display */}
+            <div className="flex justify-between text-xs mb-4 px-1" style={{ color: '#64748b' }}>
+              <span>Risk: ${Math.abs(tradeModal.entryPrice - tradeModal.stopLoss).toFixed(2)}</span>
+              <span>Reward: ${Math.abs(tradeModal.takeProfit - tradeModal.entryPrice).toFixed(2)}</span>
+              <span style={{ 
+                color: Math.abs(tradeModal.takeProfit - tradeModal.entryPrice) / Math.abs(tradeModal.entryPrice - tradeModal.stopLoss) >= 1.5 ? '#22c55e' : '#64748b'
+              }}>
+                R:R {(Math.abs(tradeModal.takeProfit - tradeModal.entryPrice) / Math.abs(tradeModal.entryPrice - tradeModal.stopLoss)).toFixed(1)}
+              </span>
+            </div>
+            
+            {/* Action Buttons */}
             <div className="flex gap-3">
               <button
                 onClick={executeTrade}
                 disabled={tradeModal.loading}
-                className="flex-1 py-2 px-4 rounded font-medium text-sm"
+                className="flex-1 py-2.5 px-4 rounded font-medium text-sm"
                 style={{ 
                   backgroundColor: tradeModal.direction === 'buy' ? '#22c55e' : '#ef4444',
                   color: '#fff',
@@ -525,7 +645,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
               </button>
               <button
                 onClick={closeTradeModal}
-                className="py-2 px-4 rounded text-sm"
+                className="py-2.5 px-4 rounded text-sm"
                 style={{ 
                   backgroundColor: '#1a1f35',
                   color: '#64748b'
@@ -537,6 +657,6 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };

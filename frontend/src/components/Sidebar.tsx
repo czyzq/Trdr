@@ -9,13 +9,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
   const [lastScan, setLastScan] = useState("--");
   const [isScanning, setIsScanning] = useState(false);
 
-  const balance = accountData?.balance_pln ?? 0;
-  const equity = accountData?.equity_pln ?? 0;
-  const balanceUsd = accountData?.balance_usd ?? 0;
+  const balance = accountData?.balance_usd ?? 0;
+  const equity = accountData?.equity_usd ?? 0;
   const openTrades = accountData?.open_trades ?? 0;
   const closedTrades = accountData?.closed_trades ?? 0;
   const winRate = accountData?.win_rate ?? 0;
-  const totalPnl = accountData?.total_pnl_pln ?? 0;
+  const totalPnl = accountData?.total_pnl_usd ?? 0;
   const mode = accountData?.mode ?? 'simulate';
 
   useEffect(() => {
@@ -54,7 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
 
   const pnlColor = totalPnl >= 0 ? '#22c55e' : '#ef4444';
   // Use initial_balance from account if available, fallback to calculating from equity - balance
-  const initialBalance = accountData?.initial_balance_pln ?? (equity - totalPnl);
+  const initialBalance = accountData?.initial_balance_usd ?? (equity - totalPnl);
   const equityChange = totalPnl; // Total P&L is the equity change from initial
   const equityChangePct = initialBalance > 0 ? (equityChange / initialBalance) * 100 : 0;
 
@@ -69,10 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
           Balance
         </div>
         <div className="text-lg font-bold mb-0.5" style={{ color: '#e2e8f0' }}>
-          {balance.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} <span className="text-xs font-normal" style={{ color: '#64748b' }}>PLN</span>
-        </div>
-        <div className="text-[11px]" style={{ color: '#64748b' }}>
-          ${balanceUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+          ${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })} <span className="text-xs font-normal" style={{ color: '#64748b' }}>USD</span>
         </div>
       </div>
 
@@ -82,11 +78,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
           Equity
         </div>
         <div className="text-base font-bold" style={{ color: '#e2e8f0' }}>
-          {equity.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} <span className="text-[10px] font-normal" style={{ color: '#64748b' }}>PLN</span>
+          ${equity.toLocaleString('en-US', { minimumFractionDigits: 2 })} <span className="text-[10px] font-normal" style={{ color: '#64748b' }}>USD</span>
         </div>
         <div className="flex items-center gap-1.5 mt-1">
           <span className="text-[11px] font-medium" style={{ color: pnlColor }}>
-            {equityChange >= 0 ? '+' : ''}{equityChange.toFixed(2)} PLN
+            {equityChange >= 0 ? '+' : ''}${equityChange.toFixed(2)} USD
           </span>
           <span className="text-[10px]" style={{ color: pnlColor }}>
             ({equityChangePct >= 0 ? '+' : ''}{equityChangePct.toFixed(2)}%)
@@ -119,7 +115,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
           {mode === 'simulate' ? 'SIMULATION MODE' : 'LIVE MODE'}
         </button>
         <div className="text-[9px] mt-1.5 text-center" style={{ color: '#374151' }}>
-          {mode === 'simulate' ? 'Paper trading with virtual PLN' : 'Real trading - use caution'}
+          {mode === 'simulate' ? 'Paper trading with virtual USD' : 'Real trading - use caution'}
         </div>
       </div>
 

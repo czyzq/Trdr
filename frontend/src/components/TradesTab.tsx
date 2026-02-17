@@ -12,8 +12,7 @@ interface Position {
   take_profit: number;
   stop_loss: number;
   unrealized_pnl_usd: number;
-  unrealized_pnl_pln: number;
-  margin_pln: number;
+  margin_usd: number;
   opened_at: string;
   status: string;
 }
@@ -27,7 +26,6 @@ interface ClosedTrade {
   entry_price: number;
   exit_price: number;
   pnl_usd: number;
-  pnl_pln: number;
   opened_at: string;
   closed_at: string;
   result: string;
@@ -40,7 +38,7 @@ export const TradesTab: React.FC = () => {
     const saved = localStorage.getItem('cfd_tradesSection');
     return (saved === 'history' ? 'history' : 'open');
   });
-  const [stats, setStats] = useState({ win_count: 0, loss_count: 0, win_rate: 0, total_pnl_pln: 0, total_pnl_usd: 0 });
+  const [stats, setStats] = useState({ win_count: 0, loss_count: 0, win_rate: 0, total_pnl_usd: 0 });
   const [closingId, setClosingId] = useState<string | null>(null);
 
   useEffect(() => { localStorage.setItem('cfd_tradesSection', activeSection); }, [activeSection]);
@@ -62,7 +60,6 @@ export const TradesTab: React.FC = () => {
           win_count: data.win_count || 0,
           loss_count: data.loss_count || 0,
           win_rate: data.win_rate || 0,
-          total_pnl_pln: data.total_pnl_pln || 0,
           total_pnl_usd: data.total_pnl_usd || 0,
         });
       }
@@ -113,8 +110,8 @@ export const TradesTab: React.FC = () => {
         <StatPill label="WR" value={`${stats.win_rate}%`} color={stats.win_rate >= 50 ? '#22c55e' : '#ef4444'} />
         <div className="flex items-center gap-2 ml-auto">
           <span className="text-[10px] uppercase tracking-wider hidden sm:inline" style={{ color: '#4a5568' }}>Total P&L:</span>
-          <span className="text-xs md:text-sm font-bold" style={{ color: stats.total_pnl_pln >= 0 ? '#22c55e' : '#ef4444' }}>
-            {stats.total_pnl_pln >= 0 ? '+' : ''}{stats.total_pnl_pln.toFixed(2)} PLN
+          <span className="text-xs md:text-sm font-bold" style={{ color: stats.total_pnl_usd >= 0 ? '#22c55e' : '#ef4444' }}>
+            {stats.total_pnl_usd >= 0 ? '+' : ''}${stats.total_pnl_usd.toFixed(2)} USD
           </span>
         </div>
       </div>
@@ -159,7 +156,7 @@ export const TradesTab: React.FC = () => {
                 {/* Mobile cards */}
                 <div className="md:hidden p-2 space-y-2">
                   {openPositions.map((pos) => {
-                    const pnlColor = pos.unrealized_pnl_pln >= 0 ? '#22c55e' : '#ef4444';
+                    const pnlColor = pos.unrealized_pnl_usd >= 0 ? '#22c55e' : '#ef4444';
                     const dirColor = pos.direction === 'buy' ? '#22c55e' : '#ef4444';
                     return (
                       <div key={pos.id} className="rounded-sm p-3" style={{ backgroundColor: '#0b0f1a', border: '1px solid #131825' }}>
@@ -172,7 +169,7 @@ export const TradesTab: React.FC = () => {
                             <span className="text-[10px]" style={{ color: '#4a5568' }}>{pos.size}</span>
                           </div>
                           <span className="text-xs font-bold" style={{ color: pnlColor }}>
-                            {pos.unrealized_pnl_pln >= 0 ? '+' : ''}{pos.unrealized_pnl_pln.toFixed(2)} PLN
+                            {pos.unrealized_pnl_usd >= 0 ? '+' : ''}${pos.unrealized_pnl_usd.toFixed(2)} USD
                           </span>
                         </div>
                         <div className="flex items-center justify-between text-[10px] mb-2">
@@ -213,7 +210,6 @@ export const TradesTab: React.FC = () => {
                       <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>Current</th>
                       <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>TP</th>
                       <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>SL</th>
-                      <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>P&L (PLN)</th>
                       <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>P&L (USD)</th>
                       <th className="px-3 py-2.5 text-center font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>Opened</th>
                       <th className="px-3 py-2.5 text-center font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>Action</th>
@@ -221,7 +217,7 @@ export const TradesTab: React.FC = () => {
                   </thead>
                   <tbody>
                     {openPositions.map((pos) => {
-                      const pnlColor = pos.unrealized_pnl_pln >= 0 ? '#22c55e' : '#ef4444';
+                      const pnlColor = pos.unrealized_pnl_usd >= 0 ? '#22c55e' : '#ef4444';
                       const dirColor = pos.direction === 'buy' ? '#22c55e' : '#ef4444';
                       return (
                         <tr key={pos.id} style={{ borderBottom: '1px solid #131825' }}>
@@ -242,10 +238,7 @@ export const TradesTab: React.FC = () => {
                           <td className="px-3 py-2.5 text-right" style={{ color: '#22c55e' }}>{formatPrice(pos.take_profit)}</td>
                           <td className="px-3 py-2.5 text-right" style={{ color: '#ef4444' }}>{formatPrice(pos.stop_loss)}</td>
                           <td className="px-3 py-2.5 text-right font-bold" style={{ color: pnlColor }}>
-                            {pos.unrealized_pnl_pln >= 0 ? '+' : ''}{pos.unrealized_pnl_pln.toFixed(2)}
-                          </td>
-                          <td className="px-3 py-2.5 text-right" style={{ color: pnlColor }}>
-                            {pos.unrealized_pnl_usd >= 0 ? '+' : ''}{pos.unrealized_pnl_usd.toFixed(2)}
+                            {pos.unrealized_pnl_usd >= 0 ? '+' : ''}${pos.unrealized_pnl_usd.toFixed(2)}
                           </td>
                           <td className="px-3 py-2.5 text-center" style={{ color: '#4a5568' }}>
                             {formatTime(pos.opened_at)}
@@ -287,7 +280,7 @@ export const TradesTab: React.FC = () => {
                 {/* Mobile cards */}
                 <div className="md:hidden p-2 space-y-2">
                   {closedTrades.map((trade) => {
-                    const pnlColor = trade.pnl_pln >= 0 ? '#22c55e' : '#ef4444';
+                    const pnlColor = trade.pnl_usd >= 0 ? '#22c55e' : '#ef4444';
                     const dirColor = trade.direction === 'buy' ? '#22c55e' : '#ef4444';
                     return (
                       <div key={trade.id} className="rounded-sm p-3" style={{ backgroundColor: '#0b0f1a', border: '1px solid #131825' }}>
@@ -308,7 +301,7 @@ export const TradesTab: React.FC = () => {
                             </span>
                           </div>
                           <span className="text-xs font-bold" style={{ color: pnlColor }}>
-                            {trade.pnl_pln >= 0 ? '+' : ''}{trade.pnl_pln.toFixed(2)} PLN
+                            {trade.pnl_usd >= 0 ? '+' : ''}${trade.pnl_usd.toFixed(2)} USD
                           </span>
                         </div>
                         <div className="flex items-center justify-between text-[10px]">
@@ -329,7 +322,6 @@ export const TradesTab: React.FC = () => {
                       <th className="px-3 py-2.5 text-center font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>Dir.</th>
                       <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>Entry</th>
                       <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>Exit</th>
-                      <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>P&L (PLN)</th>
                       <th className="px-3 py-2.5 text-right font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>P&L (USD)</th>
                       <th className="px-3 py-2.5 text-center font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>Result</th>
                       <th className="px-3 py-2.5 text-center font-medium uppercase tracking-wider" style={{ color: '#4a5568' }}>Closed</th>
@@ -337,7 +329,7 @@ export const TradesTab: React.FC = () => {
                   </thead>
                   <tbody>
                     {closedTrades.map((trade) => {
-                      const pnlColor = trade.pnl_pln >= 0 ? '#22c55e' : '#ef4444';
+                      const pnlColor = trade.pnl_usd >= 0 ? '#22c55e' : '#ef4444';
                       const dirColor = trade.direction === 'buy' ? '#22c55e' : '#ef4444';
                       return (
                         <tr key={trade.id} style={{ borderBottom: '1px solid #131825' }}>
@@ -352,10 +344,7 @@ export const TradesTab: React.FC = () => {
                           <td className="px-3 py-2.5 text-right" style={{ color: '#94a3b8' }}>{formatPrice(trade.entry_price)}</td>
                           <td className="px-3 py-2.5 text-right" style={{ color: '#94a3b8' }}>{formatPrice(trade.exit_price)}</td>
                           <td className="px-3 py-2.5 text-right font-bold" style={{ color: pnlColor }}>
-                            {trade.pnl_pln >= 0 ? '+' : ''}{trade.pnl_pln.toFixed(2)}
-                          </td>
-                          <td className="px-3 py-2.5 text-right" style={{ color: pnlColor }}>
-                            {trade.pnl_usd >= 0 ? '+' : ''}{trade.pnl_usd.toFixed(2)}
+                            {trade.pnl_usd >= 0 ? '+' : ''}${trade.pnl_usd.toFixed(2)}
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             <span

@@ -34,12 +34,14 @@ def get_db():
 
     try:
         from pymongo import MongoClient
+        import ssl
         print(f"[DB] Connecting to MongoDB...")
         
-        # Simplified connection for Render - let MongoDB driver handle SSL
+        # Connection with proper SSL handling for Atlas
         client = MongoClient(
             mongo_uri,
             serverSelectionTimeoutMS=10000,
+            tlsAllowInvalidCertificates=True,
         )
         client.admin.command("ping")
         print(f"[DB] ✅ MongoDB connected successfully")
@@ -67,23 +69,20 @@ def get_db():
 # ── Account ──────────────────────────────────────────────────────────
 
 DEFAULT_ACCOUNT = {
-    "balance_pln": 10000.0,
-    "equity_pln": 10000.0,
-    "balance_usd": 2469.14,
-    "equity_usd": 2469.14,
+    "balance_usd": 3000.0,
+    "equity_usd": 3000.0,
     "positions": 0,
     "open_trades": 0,
     "closed_trades": 0,
-    "total_pnl_pln": 0.0,
     "total_pnl_usd": 0.0,
     "win_count": 0,
     "loss_count": 0,
     "win_rate": 0.0,
     "used_margin": 0.0,
-    "available_pln": 10000.0,
+    "available_usd": 3000.0,
     "dry_run": True,
     "mode": "simulate",
-    "currency": "PLN",
+    "currency": "USD",
 }
 
 
@@ -95,6 +94,17 @@ def load_account() -> dict:
     doc = db.account.find_one({"_id": "main"})
     if doc:
         doc.pop("_id", None)
+        # Migration: ensure USD fields exist
+        if "balance_usd" not in doc:
+            doc["balance_usd"] = DEFAULT_ACCOUNT["balance_usd"]
+        if "equity_usd" not in doc:
+            doc["equity_usd"] = doc.get("balance_usd", DEFAULT_ACCOUNT["balance_usd"])
+        if "available_usd" not in doc:
+            doc["available_usd"] = doc.get("balance_usd", DEFAULT_ACCOUNT["balance_usd"])
+        if "used_margin" not in doc:
+            doc["used_margin"] = 0.0
+        if "total_pnl_usd" not in doc:
+            doc["total_pnl_usd"] = 0.0
         return doc
     return {**DEFAULT_ACCOUNT, "last_scan": datetime.utcnow().isoformat()}
 

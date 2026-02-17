@@ -10,6 +10,21 @@ interface CandleData {
   volume: number;
 }
 
+interface Trade {
+  id: string;
+  symbol: string;
+  direction: 'buy' | 'sell';
+  entry_price: number;
+  exit_price?: number;
+  opened_at: string;
+  closed_at?: string;
+  pnl_usd?: number;
+  take_profit?: number;
+  stop_loss?: number;
+  result?: 'win' | 'loss';
+  size?: number;
+}
+
 interface CandlestickChartProps {
   symbol: string;
   data: CandleData[];
@@ -17,6 +32,7 @@ interface CandlestickChartProps {
   showVolume?: boolean;
   showRSI?: boolean;
   resolution?: string;
+  trades?: Trade[];
 }
 
 // ── Client-side indicator calculations ──
@@ -170,8 +186,11 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   showVolume = true,
   showRSI = true,
   resolution = '60',
+  trades = [],
 }) => {
   const [hoveredCandle, setHoveredCandle] = useState<number | null>(null);
+  const [hoveredTrade, setHoveredTrade] = useState<Trade | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [overlays, setOverlays] = useState({
     bb: true,
     sma: true,
@@ -180,6 +199,26 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   });
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [panOffset, setPanOffset] = useState(0);
+
+  // Log trades for debugging
+  useEffect(() => {
+    const symbolTrades = trades.filter(t => t.symbol === symbol);
+    console.log(`[CandlestickChart ${symbol}] Trades:`, trades.length, 'For this symbol:', symbolTrades.length);
+    symbolTrades.forEach(t => console.log(`  - ${t.id}: ${t.direction} @ ${t.entry_price}`));
+  }, [trades, symbol]);
+
+  // Handle wheel zoom
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      setZoomLevel(prev => Math.max(0.5, Math.min(3, prev + delta)));
+    }
+  };
+
+  // Handle drag/pan - will be defined after zoom calculations
 
   useEffect(() => {
     const el = containerRef.current;
@@ -307,8 +346,54 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const priceToY = (p: number) => priceChartH - ((p - minPrice) / priceRange) * priceChartH;
 
-  // Index to x coordinate
-  const idxToX = (i: number) => n > 1 ? (i / (n - 1)) * usableWidth : usableWidth / 2;
+  // Apply zoom to chart width - anchor to right side (newest candles)
+  const zoomedWidth = usableWidth * zoomLevel;
+  const maxPan = Math.max(0, zoomedWidth - usableWidth);
+  
+  // Default pan shows the rightmost (newest) candles
+  const effectivePan = Math.min(Math.max(0, panOffset), maxPan);
+
+  // Index to x coordinate with zoom - anchor to right
+  const idxToX = (i: number) => {
+    if (n <= 1) return usableWidth / 2;
+    // Anchor to right: (n-1) maps to usableWidth
+    const x = usableWidth - ((n - 1 - i) / (n - 1)) * zoomedWidth + effectivePan;
+    return x;
+  };
+
+  // Reverse mapping: x coordinate to candle index
+  const xToIdx = (x: number) => {
+    if (n <= 1) return 0;
+    const relativeX = usableWidth - x + effectivePan;
+    const idx = Math.round((relativeX / zoomedWidth) * (n - 1));
+    return Math.max(0, Math.min(n - 1, idx));
+  };
+
+  // Drag/pan handlers (defined after zoom calculations)
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [dragStartPan, setDragStartPan] = useState(0);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (zoomLevel > 1) {
+      setIsDragging(true);
+      setDragStartX(e.clientX);
+      setDragStartPan(panOffset);
+    }
+  };
+
+  const handleDragMove = (e: React.MouseEvent) => {
+    if (isDragging && zoomLevel > 1) {
+      // Reverse delta because zoom is anchored to right
+      const delta = e.clientX - dragStartX;
+      const newPan = Math.min(Math.max(0, dragStartPan + delta), maxPan);
+      setPanOffset(newPan);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
 
   // Price grid levels
   const priceLevels = [];
@@ -408,8 +493,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const handleMouseMove = (event: React.MouseEvent<SVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    const chartX = (x / rect.width) * chartWidth;
-    const idx = Math.round((chartX / usableWidth) * (n - 1));
+    let idx: number;
+    if (zoomLevel === 1) {
+      // Standard mapping without zoom
+      idx = Math.round((x / usableWidth) * (n - 1));
+    } else {
+      // Use xToIdx with zoom
+      idx = xToIdx(x);
+    }
     if (idx >= 0 && idx < n) setHoveredCandle(idx);
   };
 
@@ -418,10 +509,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     const touch = event.touches[0];
     const rect = event.currentTarget.getBoundingClientRect();
     const x = touch.clientX - rect.left;
-    const chartX = (x / rect.width) * chartWidth;
-    const idx = Math.round((chartX / usableWidth) * (n - 1));
+    let idx: number;
+    if (zoomLevel === 1) {
+      idx = Math.round((x / usableWidth) * (n - 1));
+    } else {
+      idx = xToIdx(x);
+    }
     if (idx >= 0 && idx < n) setHoveredCandle(idx);
-  }, [chartWidth, usableWidth, n]);
+  }, [usableWidth, n, zoomLevel, panOffset]);
 
   const hoveredMacd = hoveredCandle !== null ? {
     macd: indicators.macd.macdLine[hoveredCandle],
@@ -473,6 +568,37 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           })}
         </div>
 
+        {/* Zoom Controls */}
+        <div className="flex items-center gap-1 ml-2">
+          <button
+            onClick={() => setZoomLevel(prev => Math.max(0.5, prev - 0.2))}
+            className="px-2 py-0.5 text-[9px] font-bold rounded-sm"
+            style={{ backgroundColor: '#1a1f35', color: '#64748b', border: '1px solid #2d3748' }}
+            title="Zoom Out"
+          >
+            −
+          </button>
+          <span className="text-[9px] px-1" style={{ color: '#64748b' }}>
+            {Math.round(zoomLevel * 100)}%
+          </span>
+          <button
+            onClick={() => setZoomLevel(prev => Math.min(3, prev + 0.2))}
+            className="px-2 py-0.5 text-[9px] font-bold rounded-sm"
+            style={{ backgroundColor: '#1a1f35', color: '#64748b', border: '1px solid #2d3748' }}
+            title="Zoom In"
+          >
+            +
+          </button>
+          <button
+            onClick={() => { setZoomLevel(1); setPanOffset(0); }}
+            className="px-2 py-0.5 text-[9px] font-bold rounded-sm ml-1"
+            style={{ backgroundColor: '#1a1f35', color: '#64748b', border: '1px solid #2d3748' }}
+            title="Reset Zoom"
+          >
+            ⟲
+          </button>
+        </div>
+
         {/* Hover info */}
         {hoveredCandle !== null && candlesticks[hoveredCandle] && (
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 ml-auto text-[9px] sm:text-[10px]" style={{ color: '#64748b' }}>
@@ -518,11 +644,13 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           height={height}
           viewBox={`0 0 ${chartWidth} ${totalH}`}
           preserveAspectRatio="xMidYMid meet"
-          onMouseMove={handleMouseMove}
-          onMouseLeave={() => setHoveredCandle(null)}
+          onMouseMove={(e) => { handleMouseMove(e); handleDragMove(e); }}
+          onMouseLeave={() => { setHoveredCandle(null); handleDragEnd(); }}
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleDragEnd}
           onTouchMove={handleTouchMove}
           onTouchEnd={() => setHoveredCandle(null)}
-          style={{ cursor: 'crosshair', minWidth: `${chartWidth}px` }}
+          style={{ cursor: zoomLevel > 1 ? (isDragging ? 'grabbing' : 'grab') : 'crosshair', minWidth: `${chartWidth}px` }}
         >
         {/* ── Session Background Bands ── */}
         {overlays.sessions && sessionBands.length > 0 && (
@@ -727,7 +855,223 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         </g>
         {/* X-axis line */}
         <line x1={0} y1={totalH - xAxisH + 5} x2={usableWidth} y2={totalH - xAxisH + 5} stroke="#1e293b" strokeWidth="1" />
+
+        {/* ── Trade Markers ── */}
+        {trades.length > 0 && (
+          <g>
+            {trades.filter(t => t.symbol === symbol).map((trade) => {
+              // Find candle index for entry
+              const entryDate = new Date(trade.opened_at);
+              console.log(`[CandlestickChart ${symbol}] Looking for entry:`, trade.opened_at, 'EntryDate:', entryDate.toISOString());
+              console.log(`[CandlestickChart ${symbol}] validData length:`, validData.length);
+              console.log(`[CandlestickChart ${symbol}] First candle:`, validData[0]?.timestamp, 'Last:', validData[validData.length-1]?.timestamp);
+              const entryIdx = validData.findIndex((c, i) => {
+                if (c.timestamp) {
+                  const candleDate = new Date(c.timestamp);
+                  const match = candleDate.getTime() >= entryDate.getTime();
+                  if (i < 3) console.log(`  Candle ${i}:`, c.timestamp, candleDate.getTime(), '>=', entryDate.getTime(), '?', match);
+                  return match;
+                }
+                return false;
+              });
+              
+              console.log(`[CandlestickChart ${symbol}] entryIdx:`, entryIdx);
+              if (entryIdx === -1) return null;
+              
+              const x = idxToX(entryIdx);
+              const entryY = priceToY(trade.entry_price);
+              const isBuy = trade.direction === 'buy';
+              const entryColor = isBuy ? '#91c8a5ff' : '#b07777ff';
+              
+              // Triangle marker for entry - smaller size
+              const triangleSize = 3.5;
+              const trianglePoints = isBuy 
+                ? `${x},${entryY - triangleSize} ${x - triangleSize},${entryY + triangleSize} ${x + triangleSize},${entryY + triangleSize}`
+                : `${x},${entryY + triangleSize} ${x - triangleSize},${entryY - triangleSize} ${x + triangleSize},${entryY - triangleSize}`;
+              
+              return (
+                <g key={`trade-${trade.id}`}>
+                  {/* Entry marker */}
+                  <polygon
+                    points={trianglePoints}
+                    fill={entryColor}
+                    stroke={entryColor}
+                    strokeWidth="2"
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={(e) => {
+                      setHoveredTrade(trade);
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const containerRect = containerRef.current?.getBoundingClientRect();
+                      if (containerRect) {
+                        setTooltipPos({ 
+                          x: rect.left - containerRect.left - 210, 
+                          y: rect.top - containerRect.top - 10 
+                        });
+                      }
+                    }}
+                    onMouseLeave={() => setHoveredTrade(null)}
+                  />
+                  {/* Entry price line */}
+                  <line
+                    x1={x - candleWidth}
+                    y1={entryY}
+                    x2={x + candleWidth}
+                    y2={entryY}
+                    stroke={entryColor}
+                    strokeWidth="0.5"
+                    strokeDasharray="2,2"
+                    opacity="0.5"
+                  />
+                  
+                  {/* Exit marker if closed */}
+                  {trade.closed_at && trade.exit_price && (
+                    (() => {
+                      const exitDate = new Date(trade.closed_at);
+                      const exitIdx = validData.findIndex((c, i) => {
+                        if (c.timestamp && i > entryIdx) {
+                          const candleDate = new Date(c.timestamp);
+                          return candleDate.getTime() >= exitDate.getTime();
+                        }
+                        return false;
+                      });
+                      
+                      if (exitIdx === -1) return null;
+                      
+                      const exitX = idxToX(exitIdx);
+                      const exitY = priceToY(trade.exit_price!);
+                      const exitColor = '#fbfbfeff';
+                      
+                      return (
+                        <g key={`exit-${trade.id}`}>
+                          {/* Square marker for exit */}
+                          <rect
+                            x={exitX - triangleSize/2}
+                            y={exitY - triangleSize/2}
+                            width={triangleSize}
+                            height={triangleSize}
+                            fill={exitColor}
+                            stroke={exitColor}
+                            strokeWidth="1"
+                            style={{ cursor: 'pointer' }}
+                            onMouseEnter={(e) => {
+                              setHoveredTrade(trade);
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const containerRect = containerRef.current?.getBoundingClientRect();
+                              if (containerRect) {
+                                setTooltipPos({ 
+                                  x: rect.left - containerRect.left - 210, 
+                                  y: rect.top - containerRect.top - 10 
+                                });
+                              }
+                            }}
+                            onMouseLeave={() => setHoveredTrade(null)}
+                          />
+                          {/* Trade line connecting entry to exit */}
+                          <line
+                            x1={x}
+                            y1={entryY}
+                            x2={exitX}
+                            y2={exitY}
+                            stroke={exitColor}
+                            strokeWidth="1"
+                            opacity="0.3"
+                          />
+                        </g>
+                      );
+                    })()
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        )}
         </svg>
+
+        {/* Trade Tooltip */}
+        {hoveredTrade && (
+          <div
+            className="absolute z-50 p-2 rounded text-[10px] font-mono pointer-events-none"
+            style={{
+              right: tooltipPos.x,
+              bottom: tooltipPos.y,
+              backgroundColor: '#0d1220',
+              border: '1px solid #1a1f35',
+              color: '#e2e8f0',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+              minWidth: '200px',
+            }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-bold">{hoveredTrade.symbol}</span>
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] font-bold"
+                style={{
+                  backgroundColor: hoveredTrade.direction === 'buy' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                  color: hoveredTrade.direction === 'buy' ? '#22c55e' : '#ef4444',
+                }}
+              >
+                {hoveredTrade.direction.toUpperCase()}
+              </span>
+              {hoveredTrade.result && (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[9px] font-bold"
+                  style={{
+                    backgroundColor: hoveredTrade.result === 'win' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                    color: hoveredTrade.result === 'win' ? '#22c55e' : '#ef4444',
+                  }}
+                >
+                  {hoveredTrade.result.toUpperCase()}
+                </span>
+              )}
+            </div>
+            <div className="space-y-0.5" style={{ color: '#94a3b8' }}>
+              <div className="flex justify-between">
+                <span>Entry:</span>
+                <span style={{ color: '#e2e8f0' }}>{hoveredTrade.entry_price.toFixed(2)}</span>
+              </div>
+              {hoveredTrade.exit_price && (
+                <div className="flex justify-between">
+                  <span>Exit:</span>
+                  <span style={{ color: '#e2e8f0' }}>{hoveredTrade.exit_price.toFixed(2)}</span>
+                </div>
+              )}
+              {hoveredTrade.pnl_usd !== undefined && (
+                <div className="flex justify-between">
+                  <span>P&L:</span>
+                  <span style={{ color: hoveredTrade.pnl_usd >= 0 ? '#22c55e' : '#ef4444' }}>
+                    {hoveredTrade.pnl_usd >= 0 ? '+' : ''}${hoveredTrade.pnl_usd.toFixed(2)} USD
+                  </span>
+                </div>
+              )}
+              {(hoveredTrade.take_profit || hoveredTrade.stop_loss) && (
+                <>
+                  {hoveredTrade.take_profit && (
+                    <div className="flex justify-between">
+                      <span>TP:</span>
+                      <span style={{ color: '#22c55e' }}>{hoveredTrade.take_profit.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {hoveredTrade.stop_loss && (
+                    <div className="flex justify-between">
+                      <span>SL:</span>
+                      <span style={{ color: '#ef4444' }}>{hoveredTrade.stop_loss.toFixed(2)}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              <div className="flex justify-between text-[9px] mt-1 pt-1" style={{ borderTop: '1px solid #1a1f35' }}>
+                <span>Opened:</span>
+                <span>{new Date(hoveredTrade.opened_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+              {hoveredTrade.closed_at && (
+                <div className="flex justify-between text-[9px]">
+                  <span>Closed:</span>
+                  <span>{new Date(hoveredTrade.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

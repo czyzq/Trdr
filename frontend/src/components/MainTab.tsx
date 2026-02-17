@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { SignalsGrid } from './SignalsGrid';
 import { CandlestickChart } from './CandlestickChart';
+import { OpenPositionsSummary } from './OpenPositionsSummary';
 import { apiUrl } from '../api';
 
 // Interval-appropriate display candle counts (visible candles, not including warmup)
@@ -35,6 +36,21 @@ const timeframes = [
   { value: 'D', label: '1D' },
 ];
 
+interface Trade {
+  id: string;
+  symbol: string;
+  direction: 'buy' | 'sell';
+  entry_price: number;
+  exit_price?: number;
+  opened_at: string;
+  closed_at?: string;
+  pnl_usd?: number;
+  take_profit?: number;
+  stop_loss?: number;
+  result?: 'win' | 'loss';
+  size?: number;
+}
+
 interface StrategyInfo {
   id: string;
   name: string;
@@ -51,6 +67,10 @@ export const MainTab: React.FC<MainTabProps> = ({
     return localStorage.getItem('cfd_timeframe') || '60';
   });
   const [loading, setLoading] = useState(false);
+  const [trades, setTrades] = useState<Trade[]>([]);
+
+  // Collapsible sections state - mutual exclusion: only one can be expanded
+  const [expandedSection, setExpandedSection] = useState<'signals' | 'trades' | null>('signals');
 
   // Strategy state
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
@@ -112,11 +132,46 @@ export const MainTab: React.FC<MainTabProps> = ({
     }
   };
 
+  const fetchTrades = async () => {
+    try {
+      const [openRes, closedRes] = await Promise.all([
+        fetch(apiUrl('trades/open')),
+        fetch(apiUrl('trades/history'))
+      ]);
+      
+      const allTrades: Trade[] = [];
+      
+      if (openRes.ok) {
+        const openData = await openRes.json();
+        if (openData.positions) {
+          allTrades.push(...openData.positions.map((p: any) => ({ ...p, result: undefined })));
+        }
+      }
+      
+      if (closedRes.ok) {
+        const closedData = await closedRes.json();
+        if (closedData.trades) {
+          allTrades.push(...closedData.trades);
+        }
+      }
+      
+      setTrades(allTrades);
+    } catch (error) {
+      console.error('Failed to fetch trades:', error);
+    }
+  };
+
   useEffect(() => {
     if (selectedSymbol) {
       fetchChartData(selectedSymbol, selectedTimeframe);
     }
   }, [selectedSymbol, selectedTimeframe]);
+
+  useEffect(() => {
+    fetchTrades();
+    const interval = setInterval(fetchTrades, 10000); // Refresh every 10 seconds
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSignalClick = (signal: any) => {
     if (signal.symbol && signal.symbol !== selectedSymbol) {
@@ -242,6 +297,7 @@ export const MainTab: React.FC<MainTabProps> = ({
               showVolume={true}
               showRSI={true}
               resolution={selectedTimeframe}
+              trades={trades}
             />
           ) : (
             <div className="h-full flex items-center justify-center" style={{ color: '#4a5568' }}>
@@ -254,9 +310,29 @@ export const MainTab: React.FC<MainTabProps> = ({
         </div>
       </div>
 
-      {/* Signals Section */}
-      <div className="flex-shrink-0">
-        <SignalsGrid onSignalClick={handleSignalClick} />
+      {/* Open Positions Section - always visible but compact */}
+      <OpenPositionsSummary />
+
+      {/* Signals Section - collapsible */}
+      <div className="rounded-sm overflow-hidden" style={{ backgroundColor: '#0d1220', border: '1px solid #1a1f35' }}>
+        {/* Section Header */}
+        <button
+          onClick={() => setExpandedSection(expandedSection === 'signals' ? null : 'signals')}
+          className="w-full flex items-center justify-between px-3 py-2 transition-colors hover:bg-opacity-50"
+          style={{ backgroundColor: expandedSection === 'signals' ? '#1a1f35' : 'transparent' }}
+        >
+          <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
+            Trading Signals
+          </span>
+          <span style={{ color: '#64748b', transform: expandedSection === 'signals' ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+            ▼
+          </span>
+        </button>
+
+        {/* Collapsible Content */}
+        {expandedSection === 'signals' && (
+          <SignalsGrid onSignalClick={handleSignalClick} />
+        )}
       </div>
     </div>
   );
