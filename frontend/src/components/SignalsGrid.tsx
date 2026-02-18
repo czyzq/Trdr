@@ -93,14 +93,14 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const indicatorTooltips: Record<string, string> = {
-    'RSI': 'RSI mierzy overbought/oversold (14-period); &lt;30 buy, &gt;70 sell.',
-    'MACD': 'Histogram momentum (EMA12-26); &gt;0 bullish, cross up buy.',
-    'SMA Cross': 'SMA20&gt;SMA50 uptrend buy bias.',
+    'RSI': 'RSI mierzy overbought/oversold (14-period); &lt;#60;30 buy, &gt;#62;70 sell.',
+    'MACD': 'Histogram momentum (EMA12-26); &gt;#62;0 bullish, cross up buy.',
+    'SMA Cross': 'SMA20&gt;#62;SMA50 uptrend buy bias.',
     'BB': 'Price near lower band buy (mean-reversion).',
-    'ADX': '&gt;25 trending (trade momentum), &lt;20 ranging (mean-rev).',
-    'StochRSI': 'StochRSI &lt;0.2 oversold→buy, &gt;0.8 overbought→sell.',
+    'ADX': '&gt;#62;25 trending (trade momentum), &lt;#60;20 ranging (mean-rev).',
+    'StochRSI': 'StochRSI &lt;#60;0.2 oversold→buy, &gt;#62;0.8 overbought→sell.',
     'Volume': 'Volume confirms price moves; high volume on breakout = strong signal.',
-    'Momentum': 'Momentum &gt;0 uptrend buy; divergence warns reversal.',
+    'Momentum': 'Momentum &gt;#62;0 uptrend buy; divergence warns reversal.',
     'Candlestick': 'Patterns: hammer/engulfing bullish reversal buy; shooting star sell caution.',
   };
 
