@@ -29,7 +29,7 @@ export const SettingsTab: React.FC = () => {
       setSettings(
         data.settings.map((s: Setting) => ({
           key: s.key || "",
-          value: parseFloat(s.value as string) || 0,
+          value: parseFloat(String(s.value)) || 0,
           note: s.note || "",
         })),
       );

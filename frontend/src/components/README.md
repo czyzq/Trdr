@@ -12,25 +12,29 @@ A dark-themed, green-accent dashboard UI component library for the CFD trading b
 ## 📦 Components
 
 ### Dashboard.tsx (Main Container)
+
 The primary component that orchestrates the entire interface.
 
 **Features:**
+
 - Header with title, version badge, and live status
 - Tab navigation (Signals, History, Console, Settings)
 - Left sidebar integration
 - Responsive layout with footer
 
 **Props:**
+
 ```typescript
 interface DashboardProps {
-  title?: string;           // Default: 'CFD Trading Bot'
-  version?: string;         // Default: 'v2.1.0'
+  title?: string; // Default: 'CFD Trading Bot'
+  version?: string; // Default: 'v2.1.0'
 }
 ```
 
 **Usage:**
+
 ```tsx
-import { Dashboard } from './components';
+import { Dashboard } from "./components";
 
 export default function App() {
   return <Dashboard title="My Trading Dashboard" version="v1.0.0" />;
@@ -40,9 +44,11 @@ export default function App() {
 ---
 
 ### Sidebar.tsx (Account Stats)
+
 Left sidebar displaying account information and scanner configuration.
 
 **Features:**
+
 - Account balance and equity display
 - Active positions and signals count
 - Margin usage and win rate
@@ -50,20 +56,22 @@ Left sidebar displaying account information and scanner configuration.
 - Live scanning status indicator
 
 **Props:**
+
 ```typescript
 interface SidebarProps {
-  balance?: number;          // Default: 25000
-  activePositions?: number;  // Default: 3
-  activeSignals?: number;    // Default: 12
-  equity?: number;           // Default: 25300
-  marginUsed?: number;       // Default: 45 (%)
-  winRate?: number;          // Default: 62.5 (%)
+  balance?: number; // Default: 25000
+  activePositions?: number; // Default: 3
+  activeSignals?: number; // Default: 12
+  equity?: number; // Default: 25300
+  marginUsed?: number; // Default: 45 (%)
+  winRate?: number; // Default: 62.5 (%)
 }
 ```
 
 **Usage:**
+
 ```tsx
-import { Sidebar } from './components';
+import { Sidebar } from "./components";
 
 <Sidebar
   balance={50000}
@@ -72,15 +80,17 @@ import { Sidebar } from './components';
   equity={51200}
   marginUsed={60}
   winRate={68.5}
-/>
+/>;
 ```
 
 ---
 
 ### SignalsGrid.tsx (Signals Table)
+
 Main trading signals display with color-coded scores and mini sparkline charts.
 
 **Features:**
+
 - Real-time signal table with symbol, score, direction
 - Color-coded score indicator (red -1 to green +1)
 - Mini sparkline charts showing trend
@@ -89,16 +99,17 @@ Main trading signals display with color-coded scores and mini sparkline charts.
 - Interactive rows (clickable for more details)
 
 **Props:**
+
 ```typescript
 interface Signal {
   id: string;
   symbol: string;
-  score: number;            // -1 to +1
-  direction: 'BUY' | 'SELL';
+  score: number; // -1 to +1
+  direction: "BUY" | "SELL";
   entryPrice: number;
   takeProfit: number;
   stopLoss: number;
-  trend: number[];          // sparkline data points
+  trend: number[]; // sparkline data points
   confidence: number;
   riskReward: number;
 }
@@ -110,18 +121,19 @@ interface SignalsGridProps {
 ```
 
 **Usage:**
+
 ```tsx
-import { SignalsGrid } from './components';
+import { SignalsGrid } from "./components";
 
 const signals = [
   {
-    id: '1',
-    symbol: 'EURUSD',
+    id: "1",
+    symbol: "EURUSD",
     score: 0.75,
-    direction: 'BUY',
+    direction: "BUY",
     entryPrice: 1.0945,
-    takeProfit: 1.1050,
-    stopLoss: 1.0850,
+    takeProfit: 1.105,
+    stopLoss: 1.085,
     trend: [0.45, 0.52, 0.61, 0.68, 0.72, 0.75],
     confidence: 0.92,
     riskReward: 2.0,
@@ -130,16 +142,18 @@ const signals = [
 
 <SignalsGrid
   signals={signals}
-  onSignalClick={(signal) => console.log('Clicked:', signal)}
-/>
+  onSignalClick={(signal) => console.log("Clicked:", signal)}
+/>;
 ```
 
 ---
 
 ### ConsoleTab.tsx (Event Logs)
+
 Console/logging display showing real-time events, connections, and system messages.
 
 **Features:**
+
 - Color-coded log entries (info, success, warning, error, event)
 - Auto-scroll to latest message
 - Timestamp display for each entry
@@ -147,48 +161,52 @@ Console/logging display showing real-time events, connections, and system messag
 - Clean monospace formatting
 
 **Props:**
+
 ```typescript
 interface LogEntry {
   id: string;
   timestamp: string;
   message: string;
-  type: 'info' | 'success' | 'warning' | 'error' | 'event';
+  type: "info" | "success" | "warning" | "error" | "event";
 }
 
 interface ConsoleTabProps {
   logs?: LogEntry[];
-  maxLogs?: number;  // Default: 100
+  maxLogs?: number; // Default: 100
 }
 ```
 
 **Usage:**
+
 ```tsx
-import { ConsoleTab } from './components';
+import { ConsoleTab } from "./components";
 
 const logs = [
   {
-    id: '1',
-    timestamp: '13:10:45',
-    message: 'Initializing MCP connections...',
-    type: 'info',
+    id: "1",
+    timestamp: "13:10:45",
+    message: "Initializing MCP connections...",
+    type: "info",
   },
   {
-    id: '2',
-    timestamp: '13:10:45',
-    message: '✓ Connected: Polymarket REST API',
-    type: 'success',
+    id: "2",
+    timestamp: "13:10:45",
+    message: "✓ Connected: Polymarket REST API",
+    type: "success",
   },
 ];
 
-<ConsoleTab logs={logs} maxLogs={100} />
+<ConsoleTab logs={logs} maxLogs={100} />;
 ```
 
 ---
 
 ### ScoreGauge.tsx (Visual Score Indicator)
+
 A circular gauge component for displaying signal scores from -1 to +1.
 
 **Features:**
+
 - Circular progress indicator
 - Color-coded based on score (red → yellow → green)
 - Smooth animations
@@ -196,14 +214,16 @@ A circular gauge component for displaying signal scores from -1 to +1.
 - Displays score value and label
 
 **Props:**
+
 ```typescript
 interface ScoreGaugeProps {
-  score: number;                    // -1 to +1
-  size?: 'sm' | 'md' | 'lg';        // Default: 'md'
+  score: number; // -1 to +1
+  size?: "sm" | "md" | "lg"; // Default: 'md'
 }
 ```
 
 **Usage:**
+
 ```tsx
 import { ScoreGauge } from './components';
 
@@ -216,15 +236,15 @@ import { ScoreGauge } from './components';
 
 ## 🎯 Color Reference
 
-| Use Case | Color | Hex |
-|----------|-------|-----|
-| Background | Dark Navy | #0a0e27 |
-| Primary Accent | Neon Green | #00ff41 |
-| Success/Buy | Bright Green | #00ff41 |
-| Error/Sell | Bright Red | #ff1f1f |
-| Warning | Yellow | #ffff00 |
-| Secondary Text | Gray | #666-#aaa |
-| Borders | Dark Green | #1a1f2e |
+| Use Case       | Color        | Hex       |
+| -------------- | ------------ | --------- |
+| Background     | Dark Navy    | #0a0e27   |
+| Primary Accent | Neon Green   | #00ff41   |
+| Success/Buy    | Bright Green | #00ff41   |
+| Error/Sell     | Bright Red   | #ff1f1f   |
+| Warning        | Yellow       | #ffff00   |
+| Secondary Text | Gray         | #666-#aaa |
+| Borders        | Dark Green   | #1a1f2e   |
 
 ---
 
@@ -246,18 +266,15 @@ npx tailwindcss init -p
 
 ```js
 module.exports = {
-  content: [
-    './src/**/*.{js,jsx,ts,tsx}',
-    './src/components/**/*.{ts,tsx}',
-  ],
+  content: ["./src/**/*.{js,jsx,ts,tsx}", "./src/components/**/*.{ts,tsx}"],
   // ... rest of config
-}
+};
 ```
 
 3. Import and use in your app:
 
 ```tsx
-import { Dashboard } from './components';
+import { Dashboard } from "./components";
 
 export default function App() {
   return <Dashboard />;
@@ -269,6 +286,7 @@ export default function App() {
 ## 📊 Placeholder Data
 
 All components include sensible default placeholder data:
+
 - **Dashboard**: Live trading session with sample signals
 - **Sidebar**: Account with $25k balance, 3 active positions
 - **SignalsGrid**: 6 sample signals across various markets
@@ -280,6 +298,7 @@ All components include sensible default placeholder data:
 ## 🔧 Customization
 
 ### Styling
+
 All color values are inline, making them easy to customize:
 
 ```tsx
@@ -290,6 +309,7 @@ style={{ backgroundColor: '#0a0e27', color: '#ff00ff' }}
 ```
 
 ### Typography
+
 Components use `font-mono` class for monospace styling. Customize in Tailwind config:
 
 ```js
@@ -301,12 +321,13 @@ theme: {
 ```
 
 ### Responsive Behavior
+
 Components are built to work at any screen size. Adjust gap, padding, and font sizes as needed:
 
 ```tsx
-className="px-4 py-3"  // padding
-className="text-xs"    // font size
-className="gap-4"      // spacing
+className = "px-4 py-3"; // padding
+className = "text-xs"; // font size
+className = "gap-4"; // spacing
 ```
 
 ---
@@ -335,7 +356,7 @@ Dashboard (Main)
 ✅ Monospace typography  
 ✅ Minimal, data-focused design  
 ✅ Placeholder data system  
-✅ Type-safe TypeScript interfaces  
+✅ Type-safe TypeScript interfaces
 
 ---
 

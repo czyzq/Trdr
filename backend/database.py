@@ -131,7 +131,7 @@ def load_open_positions() -> list:
     return docs
 
 
-def load_closed_positions(limit: int = 200) -> list:
+def load_closed_positions(limit: int = 1000) -> list:
     """Load closed positions from DB, most recent first."""
     db = get_db()
     if db is None:
@@ -529,7 +529,7 @@ async def async_load_open_positions() -> list:
     """Async: Load open positions."""
     return await asyncio.to_thread(load_open_positions)
 
-async def async_load_closed_positions(limit: int = 200) -> list:
+async def async_load_closed_positions(limit: int = 1000) -> list:
     """Async: Load closed positions."""
     return await asyncio.to_thread(load_closed_positions, limit)
 

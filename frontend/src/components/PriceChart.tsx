@@ -1,5 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import React, { useState, useEffect } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Area,
+  AreaChart,
+} from "recharts";
 
 interface ChartData {
   time: string;
@@ -17,14 +27,14 @@ interface PriceChartProps {
 }
 
 const mockChartData: ChartData[] = [
-  { time: '09:00', price: 2050.50, rsi: 55, macd: 0.5 },
-  { time: '10:00', price: 2052.75, rsi: 58, macd: 0.8 },
-  { time: '11:00', price: 2048.25, rsi: 52, macd: 0.3 },
-  { time: '12:00', price: 2055.00, rsi: 62, macd: 1.2 },
-  { time: '13:00', price: 2061.50, rsi: 68, macd: 1.8 },
-  { time: '14:00', price: 2058.75, rsi: 65, macd: 1.5 },
-  { time: '15:00', price: 2065.25, rsi: 72, macd: 2.1 },
-  { time: '16:00', price: 2062.00, rsi: 69, macd: 1.9 },
+  { time: "09:00", price: 2050.5, rsi: 55, macd: 0.5 },
+  { time: "10:00", price: 2052.75, rsi: 58, macd: 0.8 },
+  { time: "11:00", price: 2048.25, rsi: 52, macd: 0.3 },
+  { time: "12:00", price: 2055.0, rsi: 62, macd: 1.2 },
+  { time: "13:00", price: 2061.5, rsi: 68, macd: 1.8 },
+  { time: "14:00", price: 2058.75, rsi: 65, macd: 1.5 },
+  { time: "15:00", price: 2065.25, rsi: 72, macd: 2.1 },
+  { time: "16:00", price: 2062.0, rsi: 69, macd: 1.9 },
 ];
 
 export const PriceChart: React.FC<PriceChartProps> = ({
@@ -54,7 +64,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       // }
       setChartData(mockChartData);
     } catch (error) {
-      console.error('Failed to fetch chart data:', error);
+      console.error("Failed to fetch chart data:", error);
       setChartData(mockChartData);
     } finally {
       setLoading(false);
@@ -71,9 +81,9 @@ export const PriceChart: React.FC<PriceChartProps> = ({
         <div
           className="p-2 text-xs font-mono border"
           style={{
-            backgroundColor: '#0a0e27',
-            borderColor: '#00ff41',
-            color: '#00ff41',
+            backgroundColor: "#0a0e27",
+            borderColor: "#00ff41",
+            color: "#00ff41",
           }}
         >
           <p className="font-bold">{`Time: ${label}`}</p>
@@ -95,19 +105,19 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       <div
         className="border rounded-sm flex items-center justify-center"
         style={{
-          backgroundColor: '#0a0e27',
-          borderColor: '#00ff41',
+          backgroundColor: "#0a0e27",
+          borderColor: "#00ff41",
           height: `${height}px`,
         }}
       >
         <div className="text-center">
           <div
             className="font-mono text-xs uppercase tracking-widest mb-2"
-            style={{ color: '#00ff41' }}
+            style={{ color: "#00ff41" }}
           >
             Loading Chart...
           </div>
-          <div style={{ color: '#666' }} className="text-xs">
+          <div style={{ color: "#666" }} className="text-xs">
             {symbol}
           </div>
         </div>
@@ -119,43 +129,51 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     <div
       className="border rounded-sm p-3"
       style={{
-        backgroundColor: '#0a0e27',
-        borderColor: '#00ff41',
+        backgroundColor: "#0a0e27",
+        borderColor: "#00ff41",
       }}
     >
       <div className="flex items-center justify-between mb-3">
         <div
           className="font-mono text-xs uppercase tracking-widest font-bold"
-          style={{ color: '#00ff41' }}
+          style={{ color: "#00ff41" }}
         >
           {symbol} Price Chart
         </div>
-        <div className="flex gap-2 text-xs" style={{ color: '#666' }}>
+        <div className="flex gap-2 text-xs" style={{ color: "#666" }}>
           <span>1H</span>
           <span>•</span>
-          <span>Last: {formatPrice(chartData[chartData.length - 1]?.price || 0)}</span>
+          <span>
+            Last: {formatPrice(chartData[chartData.length - 1]?.price || 0)}
+          </span>
         </div>
       </div>
 
       <ResponsiveContainer width="100%" height={height}>
         <AreaChart data={chartData}>
           <defs>
-            <linearGradient id={`gradient-${symbol}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#00ff41" stopOpacity={0.3}/>
-              <stop offset="95%" stopColor="#00ff41" stopOpacity={0}/>
+            <linearGradient
+              id={`gradient-${symbol}`}
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop offset="5%" stopColor="#00ff41" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="#00ff41" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#1a1f2e" />
-          <XAxis 
-            dataKey="time" 
-            stroke="#666" 
-            fontSize={10} 
+          <XAxis
+            dataKey="time"
+            stroke="#666"
+            fontSize={10}
             fontFamily="monospace"
             tickLine={false}
           />
-          <YAxis 
-            stroke="#666" 
-            fontSize={10} 
+          <YAxis
+            stroke="#666"
+            fontSize={10}
             fontFamily="monospace"
             tickLine={false}
             tickFormatter={formatPrice}
@@ -173,10 +191,17 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       </ResponsiveContainer>
 
       {showIndicators && (
-        <div className="mt-3 pt-3 border-t" style={{ borderColor: '#1a1f2e' }}>
-          <div className="flex justify-between text-xs" style={{ color: '#666' }}>
-            <span>RSI: {chartData[chartData.length - 1]?.rsi?.toFixed(1) || 'N/A'}</span>
-            <span>MACD: {chartData[chartData.length - 1]?.macd?.toFixed(2) || 'N/A'}</span>
+        <div className="mt-3 pt-3 border-t" style={{ borderColor: "#1a1f2e" }}>
+          <div
+            className="flex justify-between text-xs"
+            style={{ color: "#666" }}
+          >
+            <span>
+              RSI: {chartData[chartData.length - 1]?.rsi?.toFixed(1) || "N/A"}
+            </span>
+            <span>
+              MACD: {chartData[chartData.length - 1]?.macd?.toFixed(2) || "N/A"}
+            </span>
           </div>
         </div>
       )}

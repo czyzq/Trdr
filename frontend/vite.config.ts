@@ -1,26 +1,26 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  base: '/cfd/',
+  base: "/cfd/",
   server: {
     port: 5173,
     allowedHosts: [
-      'unramped-melania-benzylidene.ngrok-free.dev',
-      'localhost',
-      '127.0.0.1'
+      "unramped-melania-benzylidene.ngrok-free.dev",
+      "localhost",
+      "127.0.0.1",
     ],
     proxy: {
-      '/cfd/api': {
-        target: 'http://localhost:8001',
+      "/cfd/api": {
+        target: "http://localhost:8001",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/cfd\/api/, '/api')
+        rewrite: (path) => path.replace(/^\/cfd\/api/, "/api"),
       },
-      '/api': {
-        target: 'http://localhost:8001',
-        changeOrigin: true
-      }
-    }
-  }
-})
+      "/api": {
+        target: "http://localhost:8001",
+        changeOrigin: true,
+      },
+    },
+  },
+});

@@ -47,6 +47,9 @@ from typing import Callable, Any
 
 _timing_stats: dict[str, dict] = {}
 
+INITIAL_BALANCE_USD = db.get_setting("INITIAL_BALANCE_USD", 3000.0)  # DB-driven!
+
+
 def async_timed(label: str | None = None):
     """Decorator to measure async function execution time."""
     def decorator(func: Callable) -> Callable:
@@ -121,6 +124,24 @@ async def lifespan(app: FastAPI):
         log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
         db.ensure_candle_indexes()
         log_event("Candle history indexes ensured", "info")
+        db.ensure_settings_indexes()
+        log_event("Settings indexes ensured & defaults migrated", "info")
+        db.list_settings()  # triggers migration of defaults
+        # Recalc totals from ALL closed trades
+        closed_all = db.load_closed_positions(limit=0)
+        total_pnl = sum(p.get('pnl_usd', 0) for p in closed_all)
+        wins = sum(1 for p in closed_all if p.get('pnl_usd', 0) >= 0)
+        account.update({
+            'total_pnl_usd': round(total_pnl, 2),
+            'win_count': wins,
+            'loss_count': len(closed_all) - wins,
+            'win_rate': round(wins / len(closed_all) * 100, 1) if closed_all else 0,
+            'closed_trades': len(closed_all),
+        })
+        initial = db.get_setting('INITIAL_BALANCE_USD', 3000.0)
+        account['balance_usd'] = initial + total_pnl
+        await async_save_account(account)
+        log_event(f"Account balance updated from closed trades: ${account['balance_usd']:.2f} USD (initial: ${initial:.2f}, total PnL: ${total_pnl:.2f})", "success")
     else:
         log_event("MongoDB not configured - using in-memory storage (set MONGO_URI)", "warning")
 
@@ -621,11 +642,8 @@ def get_signal_direction(score: float, min_score: float = 0.15) -> SignalDirecti
 
 
 # ── Risk Management ──────────────────────────────────────────────────
-
-MAX_DRAWDOWN_PCT = 20.0      # Stop trading if account drops 20% from peak
-MAX_OPEN_POSITIONS = 3        # Max concurrent positions
-MAX_RISK_PER_TRADE_PCT = 2.0  # Risk max 2% of balance per trade
-INITIAL_BALANCE_USD = 3000.0
+# Dynamic settings from DB (fallback to defaults)
+# MAX_DRAWDOWN_PCT, MAX_OPEN_POSITIONS, MAX_RISK_PER_TRADE_PCT, INITIAL_BALANCE_USD
 
 def check_circuit_breaker() -> tuple[bool, str]:
     """Check if trading should be halted due to drawdown or position limits.
@@ -636,15 +654,18 @@ def check_circuit_breaker() -> tuple[bool, str]:
     """
     # Use equity (balance + unrealized P&L) for drawdown calculation
     current_equity = account.get("equity_usd", account["balance_usd"])
-    peak_equity = max(INITIAL_BALANCE_USD, account.get("peak_equity_usd", account.get("peak_balance_usd", INITIAL_BALANCE_USD)))
+    initial_balance = db.get_setting("INITIAL_BALANCE_USD", 3000.0)
+    peak_equity = max(initial_balance, account.get("peak_equity_usd", account.get("peak_balance_usd", initial_balance)))
 
     drawdown_pct = ((peak_equity - current_equity) / peak_equity) * 100 if peak_equity > 0 else 0
 
-    if drawdown_pct >= MAX_DRAWDOWN_PCT:
-        return False, f"CIRCUIT BREAKER: {drawdown_pct:.1f}% drawdown exceeds {MAX_DRAWDOWN_PCT}% limit"
+    max_dd_pct = db.get_setting("MAX_DRAWDOWN_PCT", 20.0)
+    if drawdown_pct >= max_dd_pct:
+        return False, f"CIRCUIT BREAKER: {drawdown_pct:.1f}% drawdown exceeds {max_dd_pct}% limit"
 
-    if len(open_positions) >= MAX_OPEN_POSITIONS:
-        return False, f"Max {MAX_OPEN_POSITIONS} positions reached"
+    max_positions = db.get_setting("MAX_OPEN_POSITIONS", 3)
+    if len(open_positions) >= max_positions:
+        return False, f"Max {max_positions} positions reached"
 
     return True, "OK"
 
@@ -659,7 +680,8 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
     leverage = info.get("leverage", 1)
 
     # Risk amount in USD directly
-    risk_amount_usd = account["balance_usd"] * (MAX_RISK_PER_TRADE_PCT / 100)
+    max_risk_pct = db.get_setting("MAX_RISK_PER_TRADE_PCT", 2.0)
+    risk_amount_usd = account["balance_usd"] * (max_risk_pct / 100)
 
     risk_per_unit = abs(entry_price - stop_loss)
     if risk_per_unit <= 0:
@@ -1189,7 +1211,8 @@ async def get_account():
     """Get account info with USD balance"""
     await update_account_equity()
     # Add initial_balance_usd to response for frontend calculations
-    return {**account, "initial_balance_usd": INITIAL_BALANCE_USD}
+    initial_balance = db.get_setting("INITIAL_BALANCE_USD", 3000.0)
+    return {**account, "initial_balance_usd": initial_balance}
 
 @app.post("/api/account/mode")
 async def set_account_mode(mode: str):
@@ -1599,9 +1622,9 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = 
 
 @app.post("/api/trades/close/{position_id}")
 async def trades_close_position(position_id: str):
-    \"\"\"
+    """
     Close position - simple broker call
-    \"\"\"
+    """
     result = await broker.close_position(position_id)
     log_event(f"[CLOSE] Position {{position_id}} closed", "info")
     await update_account_equity()
@@ -1609,13 +1632,13 @@ async def trades_close_position(position_id: str):
 
 @app.post("/api/trades/update/{{position_id}}")
 async def trades_update_position(position_id: str, stop_loss: Optional[float] = Query(None), take_profit: Optional[float] = Query(None)):
-    \"\"\"
+    """
     Update SL/TP for position
-    \"\"\"
+    """
     positions = broker.get_open_positions()
     position = next((p for p in positions if p["id"] == position_id), None)
     if not position:
-        return {{"error"": "Position not found"}}
+        return {"error": "Position not found"}
     updated = False
     if stop_loss is not None:
         position["stop_loss"] = stop_loss
@@ -1626,7 +1649,7 @@ async def trades_update_position(position_id: str, stop_loss: Optional[float] = 
     if updated:
         log_event(f"[UPDATE] Position {{position_id}}: SL/TP updated", "info")
         await async_save_trade(position)
-    return {{"status"": "updated", "position"": position}}
+    return {"status": "updated", "position": position}
 
 @app.post("/api/account/reset")
 async def reset_account():
