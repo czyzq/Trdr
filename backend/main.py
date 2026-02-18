@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Query
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from .timezone import now_warsaw, WARSAW_TZ
+from timezone import now_warsaw, WARSAW_TZ
 import uvicorn
 import asyncio
 from typing import Dict, List, Optional

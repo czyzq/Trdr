@@ -5,7 +5,7 @@ Implements Broker + DataProvider interfaces using async Alpha Vantage + Yahoo Fi
 import uuid
 import asyncio
 from datetime import datetime
-from .timezone import now_warsaw
+from timezone import now_warsaw
 from typing import Dict, List, Optional, Any
 
 import database as db
