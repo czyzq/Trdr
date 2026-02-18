@@ -89,10 +89,10 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     displaySelectedSize: '',
   });
 
-  const [hoveredIndicator, setHoveredIndicator] = useState&lt;string | null&gt;(null);
-  const [tooltipPosition, setTooltipPosition] = useState&lt;{ x: number; y: number }&gt;({ x: 0, y: 0 });
+  const [hoveredIndicator, setHoveredIndicator] = useState<string | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const indicatorTooltips: Record&lt;string, string&gt; = {
+  const indicatorTooltips: Record<string, string> = {
     'RSI': 'RSI mierzy overbought/oversold (14-period); &lt;30 buy, &gt;70 sell.',
     'MACD': 'Histogram momentum (EMA12-26); &gt;0 bullish, cross up buy.',
     'SMA Cross': 'SMA20&gt;SMA50 uptrend buy bias.',
