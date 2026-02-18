@@ -127,21 +127,7 @@ async def lifespan(app: FastAPI):
         db.ensure_settings_indexes()
         log_event("Settings indexes ensured & defaults migrated", "info")
         db.list_settings()  # triggers migration of defaults
-        # Recalc totals from ALL closed trades
-        closed_all = db.load_closed_positions(limit=0)
-        total_pnl = sum(p.get('pnl_usd', 0) for p in closed_all)
-        wins = sum(1 for p in closed_all if p.get('pnl_usd', 0) >= 0)
-        account.update({
-            'total_pnl_usd': round(total_pnl, 2),
-            'win_count': wins,
-            'loss_count': len(closed_all) - wins,
-            'win_rate': round(wins / len(closed_all) * 100, 1) if closed_all else 0,
-            'closed_trades': len(closed_all),
-        })
-        initial = db.get_setting('INITIAL_BALANCE_USD', 3000.0)
-        account['balance_usd'] = initial + total_pnl
-        await async_save_account(account)
-        log_event(f"Account balance updated from closed trades: ${account['balance_usd']:.2f} USD (initial: ${initial:.2f}, total PnL: ${total_pnl:.2f})", "success")
+        await sync_account_from_closed_trades()
     else:
         log_event("MongoDB not configured - using in-memory storage (set MONGO_URI)", "warning")
 
@@ -625,6 +611,22 @@ def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, L
 
     return max(-1, min(1, composite_score)), components
 
+async def sync_account_from_closed_trades():
+    closed_all = await async_load_closed_positions(limit=0)
+    total_pnl = sum(p.get('pnl_usd', 0) for p in closed_all)
+    wins = sum(1 for p in closed_all if p.get('pnl_usd', 0) >= 0)
+    account.update({
+        'total_pnl_usd': round(total_pnl, 2),
+        'win_count': wins,
+        'loss_count': len(closed_all) - wins,
+        'win_rate': round(wins / len(closed_all) * 100, 1) if closed_all else 0,
+        'closed_trades': len(closed_all),
+    })
+    initial = db.get_setting('INITIAL_BALANCE_USD', 3000.0)
+    account['balance_usd'] = initial + total_pnl
+    await async_save_account(account)
+    log_event(f"Account synced from closed trades: ${account['balance_usd']:.2f} (PnL ${total_pnl:+.2f})", "info")
+
 
 def get_signal_direction(score: float, min_score: float = 0.15) -> SignalDirection:
     """Determine signal direction from score with per-instrument thresholds."""
@@ -701,6 +703,7 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
 async def update_account_equity():
     """Update account equity based on open positions via broker."""
     await broker._async_update_prices()
+    await sync_account_from_closed_trades()
 
 # Semaphore to limit concurrent API calls
 _api_semaphore = asyncio.Semaphore(4)
