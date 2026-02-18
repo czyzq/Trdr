@@ -16,6 +16,7 @@ import os
 import json
 import uuid
 from dotenv import load_dotenv
+from database import async_sync_account_from_closed_trades	
 
 # Load env vars BEFORE importing modules that need them
 load_dotenv()
@@ -126,6 +127,8 @@ async def lifespan(app: FastAPI):
         log_event("Candle history indexes ensured", "info")
         db.ensure_settings_indexes()
         log_event("Settings indexes ensured & defaults migrated", "info")
+        db.ensure_trades_indexes()
+        log_event("Trades indexes ensured", "info")
         db.list_settings()  # triggers migration of defaults
         await sync_account_from_closed_trades()
     else:
@@ -612,20 +615,19 @@ def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, L
     return max(-1, min(1, composite_score)), components
 
 async def sync_account_from_closed_trades():
-    closed_all = await async_load_closed_positions(limit=0)
-    total_pnl = sum(p.get('pnl_usd', 0) for p in closed_all)
-    wins = sum(1 for p in closed_all if p.get('pnl_usd', 0) >= 0)
+    """Fast sync using MongoDB aggregation - no full trade load."""
+    stats = await async_sync_account_from_closed_trades()
     account.update({
-        'total_pnl_usd': round(total_pnl, 2),
-        'win_count': wins,
-        'loss_count': len(closed_all) - wins,
-        'win_rate': round(wins / len(closed_all) * 100, 1) if closed_all else 0,
-        'closed_trades': len(closed_all),
+        'total_pnl_usd': stats['total_pnl_usd'],
+        'win_count': stats['win_count'],
+        'loss_count': stats['loss_count'],
+        'win_rate': round(stats['win_count'] / stats['closed_trades'] * 100, 1) if stats['closed_trades'] else 0,
+        'closed_trades': stats['closed_trades'],
     })
     initial = db.get_setting('INITIAL_BALANCE_USD', 3000.0)
-    account['balance_usd'] = initial + total_pnl
+    account['balance_usd'] = initial + stats['total_pnl_usd']
     await async_save_account(account)
-    log_event(f"Account synced from closed trades: ${account['balance_usd']:.2f} (PnL ${total_pnl:+.2f})", "info")
+    log_event(f"Account synced from closed trades: ${account['balance_usd']:.2f} (PnL ${stats['total_pnl_usd']:+.2f})", "info")
 
 
 def get_signal_direction(score: float, min_score: float = 0.15) -> SignalDirection:
