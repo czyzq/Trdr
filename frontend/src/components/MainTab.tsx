@@ -55,6 +55,7 @@ interface StrategyInfo {
   id: string;
   name: string;
   description: string;
+  tooltip?: string;
 }
 
 export const MainTab: React.FC<MainTabProps> = ({

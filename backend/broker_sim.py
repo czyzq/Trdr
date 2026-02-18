@@ -231,6 +231,7 @@ class AsyncSimulatedBroker(Broker):
             "current_price": entry_price,
             "take_profit": round(take_profit, 2),
             "stop_loss": round(stop_loss, 2),
+            "trailing_enabled": False,
             "margin_usd": round(margin_usd, 2),
             "unrealized_pnl_usd": 0.0,
             "opened_at": datetime.utcnow().isoformat(),
@@ -351,6 +352,15 @@ class AsyncSimulatedBroker(Broker):
 
             pos["current_price"] = price
             pos["unrealized_pnl_usd"] = round(pnl, 2)
+
+            # Trailing stop logic
+            if pos.get("trailing_enabled", False) and pos["unrealized_pnl_usd"] > 0:
+                entry = pos["entry_price"]
+                dir_ = pos["direction"]
+                curr_sl = pos["stop_loss"]
+                be_sl = entry
+                if (dir_ == "buy" and be_sl > curr_sl) or (dir_ == "sell" and be_sl < curr_sl):
+                    pos["stop_loss"] = be_sl
 
             tp = pos.get("take_profit")
             sl = pos.get("stop_loss")

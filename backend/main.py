@@ -5,6 +5,7 @@ Simulated trading engine with USD currency
 """
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Query
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 import uvicorn
@@ -1473,19 +1474,44 @@ async def get_trade_proposal(symbol: str, direction: str):
     }
 
 @app.post("/api/trade/update/{position_id}")
-async def update_position(position_id: str, stop_loss: Optional[float] = None, take_profit: Optional[float] = None):
+async def update_position(position_id: str, stop_loss: Optional[float] = Query(None), take_profit: Optional[float] = Query(None), trailing_enabled: Optional[bool] = Query(None)):
     """Update stop loss and/or take profit for an open position"""
     position = next((p for p in open_positions if p["id"] == position_id), None)
     if not position:
         return {"error": f"Position {position_id} not found"}
 
+    changes = []
+    old_sl = position["stop_loss"]
     if stop_loss is not None:
+        dir_ = position["direction"]
+        if (dir_ == "buy" and stop_loss < old_sl) or (dir_ == "sell" and stop_loss > old_sl):
+            return {"error": "Cannot widen stop loss (move further from price)"}
+        strategy = get_symbol_strategy(position["symbol"])
+        entry = position["entry_price"]
+        if strategy == "MMS" and abs(stop_loss - entry) > entry * 0.001:
+            return {"error": "MMS strategy: breakeven SL only"}
         position["stop_loss"] = stop_loss
+        changes.append(f"SL {old_sl:.2f}→{stop_loss:.2f}")
+
+    old_tp = position["take_profit"]
     if take_profit is not None:
         position["take_profit"] = take_profit
+        changes.append(f"TP {old_tp:.2f}→{take_profit:.2f}")
+
+    old_trail = position.get("trailing_enabled", False)
+    if trailing_enabled is not None:
+        strategy = get_symbol_strategy(position["symbol"])
+        if strategy != "adaptive_regime":
+            return {"error": "Trailing enabled only for AdaptiveRegime strategy"}
+        position["trailing_enabled"] = trailing_enabled
+        if trailing_enabled != old_trail:
+            changes.append(f"trailing {old_trail}→{trailing_enabled}")
+
+    change_str = "; ".join(changes)
+    if change_str:
+        log_event(f"[ADJUST] {position['symbol']} ({position_id}) {change_str}", "info")
 
     await async_save_trade(position)
-    log_event(f"[TRADE] Updated {position['symbol']} SL/TP | SL: {position['stop_loss']:.2f} TP: {position['take_profit']:.2f}", "info")
     return {"status": "updated", "position": position}
 
 @app.post("/api/trade/close/{position_id}")

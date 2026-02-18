@@ -63,6 +63,9 @@ interface TradeModalState {
   suggestedSize: number;
   selectedSize: number;
   loading: boolean;
+  displayTakeProfit: string;
+  displayStopLoss: string;
+  displaySelectedSize: string;
 }
 
 export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSignals, onSignalClick }) => {

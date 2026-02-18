@@ -24,7 +24,7 @@ def get_strategy(name: str) -> "BaseStrategy":
 
 
 def list_strategies() -> List[Dict[str, str]]:
-    return [{"id": k, "name": v.display_name, "description": v.description} for k, v in STRATEGIES.items()]
+    return [{"id": k, "name": v.display_name, "description": v.description, "tooltip": getattr(v, "tooltip", "")} for k, v in STRATEGIES.items()]
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -62,6 +62,20 @@ class AdaptiveRegimeStrategy(BaseStrategy):
     id = "adaptive_regime"
     display_name = "Adaptive Regime"
     description = "Multi-factor regime-adaptive scoring with ADX-based trending/ranging detection"
+    tooltip = """**Best for:** Trending markets (forex, indices, crypto with clear direction)
+        
+**How it works:**
+• Detects market regime using ADX (ADX > 25 = trending)
+• Adjusts indicator weights dynamically:
+- Trending: higher weight on MACD, SMA cross, momentum
+- Ranging: higher weight on RSI, Bollinger Bands mean-reversion
+• Filters trades with multi-timeframe alignment
+• Uses ATR-based dynamic SL/TP (R:R ~1:2 to 1:3)
+
+**When to use:**
+✓ Markets showing clear directional movement
+✓ You're comfortable with trend-following
+✓ Higher volatility periods"""
 
     def score(self, candles, indicators, symbol, instrument_info, current_price,
               htf_bias=0.0, news_score=0.0):
@@ -435,6 +449,20 @@ class MMSStrategy(BaseStrategy):
     id = "mms"
     display_name = "MMS Mean-Reversion"
     description = "Band-based mean reversion with sequentiality risk management (mastermindzx.pl)"
+    tooltip = """**Best for:** Range-bound markets (Gold, Silver, sideways crypto)
+
+**How it works:**
+• Trades price extremes at Bollinger Bands (top/bottom 5%)
+• Waits for reactionary candle confirmation
+• Uses StochRSI for timing entries
+• **Sequentiality:** Scales position size after losses
+  - x2 max after wins, x0.01 "scout mode" after 4+ losses
+• TP at opposite band | SL fixed at 2%
+
+**When to use:**
+✓ Markets stuck in a range/channel
+✓ You're patient (fewer signals, higher quality)
+✓ Lower volatility, mean-reverting assets (GC=XAG=XAU)"""
 
     def score(self, candles, indicators, symbol, instrument_info, current_price,
               htf_bias=0.0, news_score=0.0):
