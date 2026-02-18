@@ -1575,7 +1575,8 @@ async def get_open_trades():
     for p in open_positions:
         position_map[p["id"]] = p  # In-memory wins (newer)
     merged = list(position_map.values())
-    return {"positions": merged, "count": len(merged)}
+    positions = merged[:20]
+    return {"positions": positions, "count": len(merged)}
 
 @app.get("/api/trades/history")
 async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
@@ -1595,6 +1596,37 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = 
         "win_rate": account["win_rate"],
         "total_pnl_usd": account["total_pnl_usd"]
     }
+
+@app.post("/api/trades/close/{position_id}")
+async def trades_close_position(position_id: str):
+    \"\"\"
+    Close position - simple broker call
+    \"\"\"
+    result = await broker.close_position(position_id)
+    log_event(f"[CLOSE] Position {{position_id}} closed", "info")
+    await update_account_equity()
+    return result
+
+@app.post("/api/trades/update/{{position_id}}")
+async def trades_update_position(position_id: str, stop_loss: Optional[float] = Query(None), take_profit: Optional[float] = Query(None)):
+    \"\"\"
+    Update SL/TP for position
+    \"\"\"
+    positions = broker.get_open_positions()
+    position = next((p for p in positions if p["id"] == position_id), None)
+    if not position:
+        return {{"error"": "Position not found"}}
+    updated = False
+    if stop_loss is not None:
+        position["stop_loss"] = stop_loss
+        updated = True
+    if take_profit is not None:
+        position["take_profit"] = take_profit
+        updated = True
+    if updated:
+        log_event(f"[UPDATE] Position {{position_id}}: SL/TP updated", "info")
+        await async_save_trade(position)
+    return {{"status"": "updated", "position"": position}}
 
 @app.post("/api/account/reset")
 async def reset_account():
