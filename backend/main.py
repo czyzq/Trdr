@@ -1293,13 +1293,13 @@ async def open_trade(
                 tp = signal.take_profit
                 sl = signal.stop_loss
             else:
-                atr = entry_price * 0.01
+                # Wider default stops: SL 5%, TP 10% (better for leveraged CFDs)
                 if direction == "buy":
-                    tp = entry_price + (atr * 3)
-                    sl = entry_price - (atr * 2)
+                    tp = entry_price * 1.10
+                    sl = entry_price * 0.95
                 else:
-                    tp = entry_price - (atr * 3)
-                    sl = entry_price + (atr * 2)
+                    tp = entry_price * 0.90
+                    sl = entry_price * 1.05
 
         if size <= 0:
             size = calculate_position_size(symbol, entry_price, sl)

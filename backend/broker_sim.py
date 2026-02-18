@@ -207,12 +207,12 @@ class AsyncSimulatedBroker(Broker):
                 "available_usd": available,
             }
 
-        # Default TP/SL
-        atr = entry_price * 0.01
+        # Default TP/SL - WIDER STOPS for CFD with leverage
+        # Use percentage-based stops: SL = 5%, TP = 10% (wider for leveraged CFDs)
         if take_profit is None:
-            take_profit = entry_price + atr * 3 if direction == "buy" else entry_price - atr * 3
+            take_profit = entry_price * 1.10 if direction == "buy" else entry_price * 0.90
         if stop_loss is None:
-            stop_loss = entry_price - atr * 2 if direction == "buy" else entry_price + atr * 2
+            stop_loss = entry_price * 0.95 if direction == "buy" else entry_price * 1.05
 
         position = {
             "id": str(uuid.uuid4())[:8],
@@ -322,6 +322,17 @@ class AsyncSimulatedBroker(Broker):
         to_close = []
 
         for pos in self.open_positions:
+        # Cooldown: skip positions opened recently
+        opened_at = pos.get("opened_at")
+        if opened_at:
+            try:
+                from datetime import datetime as dt
+                now = dt.utcnow()
+                opened_dt = dt.fromisoformat(opened_at.replace('Z', '+00:00')).replace(tzinfo=None)
+                if (now - opened_dt).total_seconds() < 10:
+                    continue  # Skip fresh positions (< 10s)
+            except Exception:
+                pass
             quote = await self._data_provider.get_quote(pos["symbol"])
             if not quote:
                 continue

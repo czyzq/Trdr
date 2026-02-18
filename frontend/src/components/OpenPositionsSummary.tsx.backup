@@ -70,10 +70,6 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
   const [editTpString, setEditTpString] = useState<string>('');
   const editSlTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const editTpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [editSlString, setEditSlString] = useState<string>('');
-  const [editTpString, setEditTpString] = useState<string>('');
-  const editSlTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const editTpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [slDragStart, setSlDragStart] = useState<{ x: number; value: number } | null>(null);
   const [tpDragStart, setTpDragStart] = useState<{ x: number; value: number } | null>(null);
 
@@ -110,11 +106,10 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
 
   const startEdit = (pos: Position) => {
     setEditingPosition(pos.id);
-    const cfg = getSymbolConfig(pos.symbol);
     setEditSl(pos.stop_loss);
     setEditTp(pos.take_profit);
-    setEditSlString(pos.stop_loss.toFixed(cfg.decimals));
-    setEditTpString(pos.take_profit.toFixed(cfg.decimals));
+    setEditSlString(pos.stop_loss.toFixed(2));
+    setEditTpString(pos.take_profit.toFixed(2));
     // Clear any pending timeouts
     if (editSlTimeoutRef.current) {
       clearTimeout(editSlTimeoutRef.current);

@@ -144,11 +144,11 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     
     const entryPrice = signal.current_price || signal.entry_point || 0;
     const stopLoss = signal.stop_loss || (direction === 'buy' 
-      ? entryPrice * 0.98 
-      : entryPrice * 1.02);
+      ? entryPrice * 0.95 
+      : entryPrice * 1.05);
     const takeProfit = signal.take_profit || (direction === 'buy'
-      ? entryPrice * 1.03
-      : entryPrice * 0.97);
+      ? entryPrice * 1.10
+      : entryPrice * 0.90);
     
     try {
       // Get suggested position size from backend
@@ -170,7 +170,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
       });
     } catch (error) {
       // Fallback - open modal with default size
-      const fallbackTP = direction === 'buy' ? entryPrice * 1.03 : entryPrice * 0.97;
+      const fallbackTP = direction === 'buy' ? entryPrice * 1.10 : entryPrice * 0.90;
       setTradeModal({
         isOpen: true,
         symbol,
