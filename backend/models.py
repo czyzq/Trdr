@@ -3,6 +3,7 @@ Pydantic models for CFD trading signals
 """
 from pydantic import BaseModel, Field
 from datetime import datetime
+from .timezone import now_warsaw
 from typing import Optional, List, Dict, Any
 from enum import Enum
 

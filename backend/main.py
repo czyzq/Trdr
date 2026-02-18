@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Query
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from .timezone import now_warsaw, WARSAW_TZ
 import uvicorn
 import asyncio
 from typing import Dict, List, Optional
@@ -282,13 +283,12 @@ INSTRUMENTS = {
 def is_market_open(symbol: str) -> bool:
     """
     Check if market is currently open for trading.
-    Uses UTC time for consistency.
+    Uses Europe/Warsaw time.
 
-    XAU/XAG (Forex): Mon 00:00 - Fri 22:00 UTC (closed weekends, break 22:00-23:00 Fri)
-    US100 (Nasdaq): Mon-Fri 14:30-21:00 UTC (9:30-16:00 EST)
+    XAU/XAG/US100: Mon-Fri 01:00-22:59 Warsaw (CET/CEST)
     BTC: Always open (24/7)
     """
-    now = datetime.utcnow()
+    now = now_warsaw()
     weekday = now.weekday()  # 0=Monday, 6=Sunday
     hour = now.hour
 
@@ -681,12 +681,12 @@ async def update_account_equity():
     await broker._async_update_prices()
 
 # Semaphore to limit concurrent API calls
-_api_semaphore = asyncio.Semaphore(2)
+_api_semaphore = asyncio.Semaphore(4)
 
 # Price cache to avoid repeated API calls
 _price_cache: dict[str, tuple[float, float]] = {}  # symbol -> (price, timestamp)
 _candles_cache: dict[str, tuple[list, float]] = {}  # symbol -> (candles, timestamp)
-_CACHE_TTL = 30  # Cache for 30 seconds
+_CACHE_TTL = 60  # Cache for 60 seconds
 
 async def _get_cached_quote(symbol: str) -> Optional[dict]:
     """Get quote with caching - returns cached value if fresh."""
@@ -1709,7 +1709,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
         if latest_ts:
             try:
                 latest_dt = datetime.fromisoformat(latest_ts.replace('Z', '+00:00'))
-                cache_age = (datetime.utcnow() - latest_dt).total_seconds()
+                cache_age = (now_warsaw() - latest_dt).total_seconds()
                 cache_is_fresh = cache_age < 300  # 5 minutes
             except:
                 pass
@@ -1900,6 +1900,37 @@ async def get_candle_history(
         "candles": candles,
     }
 
+
+@app.get("/api/dashboard")
+@async_timed("dashboard")
+async def get_dashboard(resolution: str = Query("60"), count: int = Query(50)):
+    symbols = list(INSTRUMENTS.keys())
+    account_task = async_load_account()
+    signals_task = generate_signals()
+    open_task = async_load_open_positions()
+    closed_task = async_load_closed_positions(20)
+    chart_tasks = [get_chart_data(s, resolution=resolution, count=count) for s in symbols]
+    news_tasks = [get_news(s) for s in symbols]
+    account, signals, open_pos, closed_pos = await asyncio.gather(account_task, signals_task, open_task, closed_task)
+    charts_results = await asyncio.gather(*chart_tasks, return_exceptions=True)
+    news_results = await asyncio.gather(*news_tasks, return_exceptions=True)
+    charts = {}
+    news_dict = {}
+    for i, sym in enumerate(symbols):
+        res_chart = charts_results[i]
+        if isinstance(res_chart, dict) and "data" in res_chart:
+            charts[sym] = res_chart
+        res_news = news_results[i]
+        if isinstance(res_news, dict) and "news" in res_news:
+            news_dict[sym] = res_news["news"]
+    return {
+        "account": account,
+        "signals": signals,
+        "open_positions": open_pos[:20],
+        "closed_positions": closed_pos[:20],
+        "charts": charts,
+        "news": news_dict
+    }
 
 # =====================
 # SERVE FRONTEND (production)
