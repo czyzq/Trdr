@@ -35,16 +35,18 @@ class AsyncSimulatedDataProvider:
         self._alpha = get_async_client()
 
     async def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get quote - tries Alpha Vantage async, then Yahoo, then DB."""
-        # 1. Alpha Vantage (async)
-        try:
-            q = await asyncio.wait_for(self._alpha.get_quote(symbol), timeout=5.0)
-            if q and q.get("price"):
-                await async_save_quote(symbol, q)
-                return q
-        except Exception:
-            pass
-        
+        """Get quote - tries Alpha Vantage async (except BTC), then Yahoo, then DB."""
+        # Skip Alpha Vantage for BTC - it returns ETF ticker "BTC" not Bitcoin
+        if symbol != "BTC":
+                    # 1. Alpha Vantage (async)
+                    try:
+                        q = await asyncio.wait_for(self._alpha.get_quote(symbol), timeout=5.0)
+                        if q and q.get("price"):
+                            await async_save_quote(symbol, q)
+                            return q
+                    except Exception:
+                        pass
+                    
         # 2. Yahoo Finance (sync - runs in thread)
         try:
             yahoo_interval = self._YAHOO_INTERVAL.get("60", "1h")
@@ -81,17 +83,19 @@ class AsyncSimulatedDataProvider:
         candles = None
         source = ""
 
-        # 1. Alpha Vantage (async)
-        try:
-            candles = await asyncio.wait_for(
-                self._alpha.get_candles(symbol, resolution, count), 
-                timeout=10.0
-            )
-            if candles and len(candles) > 0:
-                source = "alpha_vantage"
-        except Exception:
-            candles = None
-
+        # Skip Alpha Vantage for BTC - it returns ETF ticker "BTC" not Bitcoin
+        if symbol != "BTC":
+                    # 1. Alpha Vantage (async)
+                    try:
+                        candles = await asyncio.wait_for(
+                            self._alpha.get_candles(symbol, resolution, count), 
+                            timeout=10.0
+                        )
+                        if candles and len(candles) > 0:
+                            source = "alpha_vantage"
+                    except Exception:
+                        candles = None
+            
         # 2. Yahoo Finance (in thread)
         if not candles:
             try:
@@ -207,12 +211,14 @@ class AsyncSimulatedBroker(Broker):
                 "available_usd": available,
             }
 
-        # Default TP/SL - WIDER STOPS for CFD with leverage
-        # Use percentage-based stops: SL = 5%, TP = 10% (wider for leveraged CFDs)
+        # Default TP/SL - fallback (should never happen when called from main.py)
+        # TODO: Remove this fallback - main.py should always calculate ATR-based SL/TP
+        # This is a safety net that should be removed once ATR calculation is proven stable
+        atr = entry_price * 0.01
         if take_profit is None:
-            take_profit = entry_price * 1.10 if direction == "buy" else entry_price * 0.90
+            take_profit = entry_price + atr * 3 if direction == "buy" else entry_price - atr * 3
         if stop_loss is None:
-            stop_loss = entry_price * 0.95 if direction == "buy" else entry_price * 1.05
+            stop_loss = entry_price - atr * 2 if direction == "buy" else entry_price + atr * 2
 
         position = {
             "id": str(uuid.uuid4())[:8],
@@ -322,17 +328,6 @@ class AsyncSimulatedBroker(Broker):
         to_close = []
 
         for pos in self.open_positions:
-        # Cooldown: skip positions opened recently
-        opened_at = pos.get("opened_at")
-        if opened_at:
-            try:
-                from datetime import datetime as dt
-                now = dt.utcnow()
-                opened_dt = dt.fromisoformat(opened_at.replace('Z', '+00:00')).replace(tzinfo=None)
-                if (now - opened_dt).total_seconds() < 10:
-                    continue  # Skip fresh positions (< 10s)
-            except Exception:
-                pass
             quote = await self._data_provider.get_quote(pos["symbol"])
             if not quote:
                 continue

@@ -1293,13 +1293,41 @@ async def open_trade(
                 tp = signal.take_profit
                 sl = signal.stop_loss
             else:
-                # Wider default stops: SL 5%, TP 10% (better for leveraged CFDs)
-                if direction == "buy":
-                    tp = entry_price * 1.10
-                    sl = entry_price * 0.95
-                else:
-                    tp = entry_price * 0.90
-                    sl = entry_price * 1.05
+                # Calculate SL/TP from ATR based on chart data
+                try:
+                    candles = await _get_cached_candles(symbol, "60", 50)
+                    if candles and len(candles) >= 20:
+                        ind = TechnicalIndicators.calculate_all(candles, period=14)
+                        atr = ind.get("atr_14", entry_price * 0.01)
+                        atr_pct = (atr / entry_price) * 100 if entry_price > 0 else 1
+                        if atr_pct > 2.0:
+                            sl_mult, tp_mult = 1.0, 2.0
+                        elif atr_pct > 1.0:
+                            sl_mult, tp_mult = 1.5, 3.0
+                        else:
+                            sl_mult, tp_mult = 2.0, 4.0
+                        if direction == "buy":
+                            sl = entry_price - (atr * sl_mult)
+                            tp = entry_price + (atr * tp_mult)
+                        else:
+                            sl = entry_price + (atr * sl_mult)
+                            tp = entry_price - (atr * tp_mult)
+                    else:
+                        atr = entry_price * 0.01
+                        if direction == "buy":
+                            sl = entry_price - (atr * 1.5)
+                            tp = entry_price + (atr * 3.0)
+                        else:
+                            sl = entry_price + (atr * 1.5)
+                            tp = entry_price - (atr * 3.0)
+                except Exception:
+                    atr = entry_price * 0.01
+                    if direction == "buy":
+                        sl = entry_price - (atr * 1.5)
+                        tp = entry_price + (atr * 3.0)
+                    else:
+                        sl = entry_price + (atr * 1.5)
+                        tp = entry_price - (atr * 3.0)
 
         if size <= 0:
             size = calculate_position_size(symbol, entry_price, sl)
