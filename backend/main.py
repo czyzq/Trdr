@@ -49,7 +49,7 @@ def async_timed(label: str | None = None):
     """Decorator to measure async function execution time."""
     def decorator(func: Callable) -> Callable:
         func_name = label or func.__name__
-        
+
         @functools.wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
             start = time.perf_counter()
@@ -70,7 +70,7 @@ def async_timed(label: str | None = None):
                     log_event(f"[TIMING] {func_name}: {elapsed:.3f}s", "info")
                 except NameError:
                     pass
-        
+
         return wrapper
     return decorator
 
@@ -78,7 +78,7 @@ def sync_timed(label: str | None = None):
     """Decorator to measure sync function execution time."""
     def decorator(func: Callable) -> Callable:
         func_name = label or func.__name__
-        
+
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             start = time.perf_counter()
@@ -97,7 +97,7 @@ def sync_timed(label: str | None = None):
                     log_event(f"[TIMING] {func_name}: {elapsed:.3f}s", "info")
                 except NameError:
                     pass
-        
+
         return wrapper
     return decorator
 
@@ -115,12 +115,12 @@ async def lifespan(app: FastAPI):
 
     # Database status
     if db.is_connected():
-        log_event("MongoDB connected – trades & account persisted", "success")
+        log_event("MongoDB connected - trades & account persisted", "success")
         log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
         db.ensure_candle_indexes()
         log_event("Candle history indexes ensured", "info")
     else:
-        log_event("MongoDB not configured – using in-memory storage (set MONGO_URI)", "warning")
+        log_event("MongoDB not configured - using in-memory storage (set MONGO_URI)", "warning")
 
     alpha_client = get_alpha_vantage_client()
     if alpha_client:
@@ -156,7 +156,7 @@ async def lifespan(app: FastAPI):
             await news_client.close()
     except Exception:
         pass
-    log_event("[CFD TRADING BOT] Shutdown complete – state saved", "event")
+    log_event("[CFD TRADING BOT] Shutdown complete - state saved", "event")
 
 # =============================================================================
 
@@ -184,7 +184,7 @@ signals_cache = {}
 alpha_client = None
 event_log = db.load_event_log()  # Restore log from DB on startup
 
-# Broker abstraction – switch via BROKER_TYPE env var ("sim" or "ibkr")
+# Broker abstraction - switch via BROKER_TYPE env var ("sim" or "ibkr")
 data_provider = create_data_provider()
 broker = create_broker(data_provider)
 
@@ -257,7 +257,7 @@ def save_signal_cache():
     except Exception:
         pass  # File write is best-effort fallback
 
-# Instruments to monitor — with per-instrument signal tuning
+# Instruments to monitor - with per-instrument signal tuning
 # leverage: position multiplier (x20 = 5% margin requirement)
 # min_score: minimum |score| to enter (higher = fewer but better trades)
 # asset_class: "commodity" (mean-reverting) or "equity"/"crypto" (trending)
@@ -282,7 +282,7 @@ def is_market_open(symbol: str) -> bool:
     """
     Check if market is currently open for trading.
     Uses UTC time for consistency.
-    
+
     XAU/XAG (Forex): Mon 00:00 - Fri 22:00 UTC (closed weekends, break 22:00-23:00 Fri)
     US100 (Nasdaq): Mon-Fri 14:30-21:00 UTC (9:30-16:00 EST)
     BTC: Always open (24/7)
@@ -290,11 +290,11 @@ def is_market_open(symbol: str) -> bool:
     now = datetime.utcnow()
     weekday = now.weekday()  # 0=Monday, 6=Sunday
     hour = now.hour
-    
+
     if symbol == "BTC":
         # Crypto never closes
         return True
-    
+
     if symbol in ("XAU", "XAG", "US100"):
         # Forex commodities: Mon 00:00 - Fri 22:00 UTC
         # Weekend closed (Fri 22:00 - Sun 23:00)
@@ -305,7 +305,7 @@ def is_market_open(symbol: str) -> bool:
         if weekday == 4 and hour >= 22:  # Friday after 22:00
             return False
         return True
-    
+
     # this is for nasdaq but nasdaq options are not traded in this bot, so we can keep it simple for now, and use upper^
     # if symbol == "US100":
     #     # Nasdaq: Mon-Fri 14:30-21:00 UTC (9:30-16:00 EST)
@@ -318,7 +318,7 @@ def is_market_open(symbol: str) -> bool:
     #     if hour == 14 and now.minute < 30:
     #         return False  # Before 14:30
     #     return True
-    
+
     # Default: allow trading
     return True
 
@@ -636,7 +636,7 @@ def check_circuit_breaker() -> tuple[bool, str]:
     # Use equity (balance + unrealized P&L) for drawdown calculation
     current_equity = account.get("equity_usd", account["balance_usd"])
     peak_equity = max(INITIAL_BALANCE_USD, account.get("peak_equity_usd", account.get("peak_balance_usd", INITIAL_BALANCE_USD)))
-    
+
     drawdown_pct = ((peak_equity - current_equity) / peak_equity) * 100 if peak_equity > 0 else 0
 
     if drawdown_pct >= MAX_DRAWDOWN_PCT:
@@ -651,7 +651,7 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
     """
     Calculate position size based on risk per trade and leverage.
     Risks MAX_RISK_PER_TRADE_PCT of account balance per trade.
-    Leverage amplifies both gains and losses — size is adjusted so that
+    Leverage amplifies both gains and losses - size is adjusted so that
     the max loss on a SL hit still equals the risk amount.
     """
     info = INSTRUMENTS.get(symbol, {})
@@ -694,7 +694,7 @@ async def _get_cached_quote(symbol: str) -> Optional[dict]:
         price, ts = _price_cache[symbol]
         if now - ts < _CACHE_TTL:
             return {"price": price, "source": "cache"}
-    
+
     # Fetch fresh - data_provider methods are now async
     quote = await data_provider.get_quote(symbol)
     if quote and quote.get("price"):
@@ -705,12 +705,12 @@ async def _get_cached_candles(symbol: str, resolution: str, count: int) -> Optio
     """Get candles with caching."""
     cache_key = f"{symbol}_{resolution}"
     now = asyncio.get_event_loop().time()
-    
+
     if cache_key in _candles_cache:
         candles, ts = _candles_cache[cache_key]
         if now - ts < _CACHE_TTL:
             return candles
-    
+
     # Fetch fresh - data_provider methods are now async
     candles = await data_provider.get_candles(symbol, resolution, count)
     if candles and len(candles) > 0:
@@ -726,12 +726,12 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 _get_cached_quote(symbol),
                 timeout=5.0
             )
-        
+
         # Get last known price from cache even if quote failed
         last_known_price = 0.0
         if symbol in _price_cache:
             last_known_price = _price_cache[symbol][0]
-        
+
         if not quote:
             # Return neutral signal with last known price if available
             return Signal(
@@ -849,7 +849,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             stop_loss=result["stop_loss"],
             risk_reward_ratio=result["risk_reward_ratio"],
         )
-        
+
         return signal
 
     except Exception as e:
@@ -892,10 +892,10 @@ async def generate_signals() -> List[Signal]:
     for signal in signals:
         if signal.direction != SignalDirection.NEUTRAL:
             log_event(f"[SIGNAL] {signal.symbol}: {signal.direction.value} | Score: {signal.score:.2f} | Conf: {signal.confidence:.0%} | ${signal.current_price:.2f}", "event")
-    
+
     # Update equity after signals
     await update_account_equity()
-    
+
     return signals
 
 # =====================
@@ -903,7 +903,7 @@ async def generate_signals() -> List[Signal]:
 # =====================
 
 AUTO_TRADE_INTERVAL_SEC = 300  # Scan every 5 minutes
-AUTO_TRADE_ENABLED = True     # Master switch — can be toggled via API (disabled until async-signals ready)
+AUTO_TRADE_ENABLED = True     # Master switch - can be toggled via API (disabled until async-signals ready)
 _trading_task = None           # Reference to the background task
 
 async def auto_trade_loop():
@@ -943,7 +943,7 @@ async def auto_trade_loop():
 
             # ── Step 2: Generate fresh signals ──
             signals = await generate_signals()
-            
+
             # Update signals cache for TP/SL reference
             global signals_cache
             signals_cache = {s.symbol: s for s in signals}
@@ -989,18 +989,30 @@ async def auto_trade_loop():
                     if not quote:
                         log_event(f"[AUTO-TRADE] Skipping {sym} - cannot get current price", "warning")
                         continue
-                    
+
                     entry_price = quote["price"]
-                    
-                    # Recalculate TP/SL based on actual entry price (signal values may be stale)
-                    atr = entry_price * 0.01
+
+                    # ALWAYS recalculate TP/SL from fresh ATR - signal values may be stale/invalid
+                    # Get fresh candles for accurate ATR calculation
+                    try:
+                        fresh_candles = await _get_cached_candles(sym, "60", 50)
+                        if fresh_candles and len(fresh_candles) >= 20:
+                            ind = TechnicalIndicators.calculate_all(fresh_candles, period=14)
+                            atr = ind.get("atr_14", entry_price * 0.01)
+                        else:
+                            atr = entry_price * 0.01
+                    except Exception:
+                        atr = entry_price * 0.01
+
                     if direction == "buy":
-                        take_profit = signal.take_profit if signal.take_profit > entry_price else entry_price + (atr * 3)
-                        stop_loss = signal.stop_loss if signal.stop_loss < entry_price else entry_price - (atr * 2)
+                        # TP above entry, SL below entry
+                        take_profit = entry_price + (atr * 3)
+                        stop_loss = entry_price - (atr * 2)
                     else:
-                        take_profit = signal.take_profit if signal.take_profit < entry_price else entry_price - (atr * 3)
-                        stop_loss = signal.stop_loss if signal.stop_loss > entry_price else entry_price + (atr * 2)
-                    
+                        # TP below entry, SL above entry
+                        take_profit = entry_price - (atr * 3)
+                        stop_loss = entry_price + (atr * 2)
+
                     size = calculate_position_size(sym, entry_price, stop_loss)
 
                     result = await broker.open_position(
@@ -1080,6 +1092,28 @@ async def health():
         "version": "0.2.0"
     }
 
+@app.get("/api/debug/positions")
+async def debug_positions():
+    """Debug endpoint to check all positions in memory vs DB."""
+    from database import load_open_positions, load_closed_positions
+    db_open = load_open_positions()
+    db_closed = load_closed_positions(20)
+    return {
+        "memory": {
+            "open_count": len(open_positions),
+            "open_ids": [p["id"] for p in open_positions],
+            "broker_open": [p["id"] for p in broker.get_open_positions()],
+        },
+        "database": {
+            "open_count": len(db_open),
+            "open_ids": [p["id"] for p in db_open],
+            "closed_count": len(db_closed),
+            "recent_closed": [(p["id"], p["symbol"], p["entry_price"], p.get("closed_at", "unknown")[:16]) for p in db_closed[:5]]
+        }
+    }
+
+
+
 @app.get("/api/timing-report")
 async def get_timing_report():
     """Get performance timing report for all profiled functions."""
@@ -1112,7 +1146,7 @@ async def get_status():
     """Detailed status endpoint for debugging"""
     mongo_uri_set = bool(os.getenv("MONGO_URI") or os.getenv("MONGODB_URI"))
     mongo_connected = db.is_connected()
-    
+
     return {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
@@ -1138,11 +1172,11 @@ async def get_signals():
     """Fetch real trading signals"""
     log_event("Generating signals...", "info")
     signals = await generate_signals()
-    
+
     # Update signals cache for TP/SL reference
     global signals_cache
     signals_cache = {s.symbol: s for s in signals}
-    
+
     return SignalResponse(signals=signals)
 
 @app.get("/api/logs")
@@ -1290,8 +1324,21 @@ async def open_trade(
             # Get signal data for TP/SL
             signal = signals_cache.get(symbol)
             if signal:
-                tp = signal.take_profit
-                sl = signal.stop_loss
+                # Validate signal SL/TP match the requested trade direction
+                sig_tp = signal.take_profit
+                sig_sl = signal.stop_loss
+                if direction == "buy":
+                    # For BUY: TP should be > entry, SL should be < entry
+                    if sig_tp and sig_tp > entry_price:
+                        tp = sig_tp
+                    if sig_sl and sig_sl < entry_price:
+                        sl = sig_sl
+                else:  # sell
+                    # For SELL: TP should be < entry, SL should be > entry
+                    if sig_tp and sig_tp < entry_price:
+                        tp = sig_tp
+                    if sig_sl and sig_sl > entry_price:
+                        sl = sig_sl
             else:
                 # Calculate SL/TP from ATR based on chart data
                 try:
@@ -1352,7 +1399,7 @@ async def get_position_size(symbol: str, entry_price: float, stop_loss: float):
     """Calculate suggested position size for a trade"""
     if symbol not in INSTRUMENTS:
         return {"error": f"Unknown instrument: {symbol}"}
-    
+
     size = calculate_position_size(symbol, entry_price, stop_loss)
     return {
         "symbol": symbol,
@@ -1361,6 +1408,68 @@ async def get_position_size(symbol: str, entry_price: float, stop_loss: float):
         "suggested_size": size,
         "lot_size": INSTRUMENTS[symbol].get("lot_size", 0.01),
         "leverage": INSTRUMENTS[symbol].get("leverage", 20),
+    }
+
+@app.get("/api/trade/proposal")
+async def get_trade_proposal(symbol: str, direction: str):
+    """Get proposed SL/TP for a trade based on live market data.
+
+    Direction: 'buy' or 'sell'.
+    Returns calculated SL/TP based on current ATR from recent candles.
+    """
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown instrument: {symbol}"}
+    if direction not in ["buy", "sell"]:
+        return {"error": "Direction must be 'buy' or 'sell'"}
+
+    # Get current price
+    quote = await data_provider.get_quote(symbol)
+    if not quote:
+        return {"error": f"Cannot get price for {symbol}"}
+    entry_price = quote["price"]
+
+    # Calculate SL/TP based on current ATR
+    try:
+        candles = await _get_cached_candles(symbol, "60", 50)
+        if candles and len(candles) >= 20:
+            ind = TechnicalIndicators.calculate_all(candles, period=14)
+            atr = ind.get("atr_14", entry_price * 0.01)
+            atr_pct = (atr / entry_price) * 100 if entry_price > 0 else 1
+            if atr_pct > 2.0:
+                sl_mult, tp_mult = 1.0, 2.0
+            elif atr_pct > 1.0:
+                sl_mult, tp_mult = 1.5, 3.0
+            else:
+                sl_mult, tp_mult = 2.0, 4.0
+        else:
+            atr = entry_price * 0.01
+            sl_mult, tp_mult = 1.5, 3.0
+    except Exception:
+        atr = entry_price * 0.01
+        sl_mult, tp_mult = 1.5, 3.0
+
+    if direction == "buy":
+        stop_loss = entry_price - (atr * sl_mult)
+        take_profit = entry_price + (atr * tp_mult)
+    else:
+        stop_loss = entry_price + (atr * sl_mult)
+        take_profit = entry_price - (atr * tp_mult)
+
+    risk = abs(entry_price - stop_loss)
+    reward = abs(take_profit - entry_price)
+    rr_ratio = reward / risk if risk > 0 else 0
+
+    return {
+        "symbol": symbol,
+        "direction": direction,
+        "entry_price": round(entry_price, 2),
+        "stop_loss": round(stop_loss, 2),
+        "take_profit": round(take_profit, 2),
+        "atr": round(atr, 2),
+        "sl_mult": sl_mult,
+        "tp_mult": tp_mult,
+        "risk_reward_ratio": round(rr_ratio, 2),
+        "suggested_size": calculate_position_size(symbol, entry_price, stop_loss),
     }
 
 @app.post("/api/trade/update/{position_id}")
@@ -1381,15 +1490,39 @@ async def update_position(position_id: str, stop_loss: Optional[float] = None, t
 
 @app.post("/api/trade/close/{position_id}")
 async def close_trade(position_id: str):
-    """Close an open trade position via broker"""
+    """Close an open trade position via broker - uses same price source as chart"""
     # Get current price for the position
     position = next((p for p in open_positions if p["id"] == position_id), None)
     if not position:
         return {"error": f"Position {position_id} not found"}
-
-    quote = await data_provider.get_quote(position["symbol"])
-    exit_price = quote["price"] if quote else None
-
+    
+    symbol = position["symbol"]
+    
+    # Fetch fresh price from SAME source as chart endpoint (candles, not quote cache)
+    # This ensures closing price matches what user sees on chart
+    exit_price = None
+    try:
+        # Try to get latest candle close (same as chart draws)
+        candles = await _get_cached_candles(symbol, "60", 5)  # 5 candles = ~5 hours
+        if candles and len(candles) > 0:
+            # Use the most recent candle's close price
+            exit_price = candles[-1]["close"]
+            log_event(f"[CLOSE] Using fresh candle close for {symbol}: {exit_price}", "debug")
+        else:
+            # Fallback: fetch fresh candles directly
+            fresh_candles = await data_provider.get_candles(symbol, "60", 5)
+            if fresh_candles and len(fresh_candles) > 0:
+                exit_price = fresh_candles[-1]["close"]
+                log_event(f"[CLOSE] Fetched fresh candle for {symbol}: {exit_price}", "debug")
+    except Exception as e:
+        log_event(f"[CLOSE] Failed to get candle price for {symbol}: {e}", "warning")
+    
+    # Final fallback to quote if candles failed
+    if exit_price is None:
+        quote = await data_provider.get_quote(symbol)
+        exit_price = quote["price"] if quote else None
+        log_event(f"[CLOSE] Using quote fallback for {symbol}: {exit_price}", "debug")
+    
     result = await broker.close_position(position_id, exit_price=exit_price)
     if "error" in result:
         return result
@@ -1424,7 +1557,7 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = 
     # Always query DB - don't rely on in-memory cache that clears on restart
     trades = await async_load_closed_positions(limit=limit + offset)
     trades = trades[offset:offset + limit] if offset < len(trades) else []
-    
+
     total_in_db = await async_count_closed_positions()
 
     return {
@@ -1440,9 +1573,17 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = 
 @app.post("/api/account/reset")
 async def reset_account():
     """Reset simulated account to starting balance"""
+    global open_positions, closed_positions, account
     if not hasattr(broker, 'reset'):
         return {"error": "Reset not supported for live brokers"}
     result = broker.reset()
+    # Sync global state with broker after reset
+    if hasattr(broker, 'reload_from_db'):
+        broker.reload_from_db()
+    # Update global references
+    open_positions = broker.get_open_positions() if hasattr(broker, 'get_open_positions') else []
+    closed_positions = broker.get_closed_positions() if hasattr(broker, 'get_closed_positions') else []
+    account = broker.get_account() if hasattr(broker, 'get_account') else account
     log_event(f"[ACCOUNT] Reset to ${INITIAL_BALANCE_USD:.2f} USD", "event")
     return {"status": "reset", "account": account}
 
@@ -1534,7 +1675,7 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
         ts = c.get("timestamp", "")
         if ts:
             candle_map[ts] = c
-    
+
     # Check if cache is fresh (less than 5 minutes old)
     cache_is_fresh = False
     if db_candles:
@@ -1750,7 +1891,7 @@ _frontend_dist = pathlib.Path(__file__).parent.parent / "frontend" / "dist"
 if _frontend_dist.is_dir():
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        """Serve frontend SPA – all non-API routes get index.html"""
+        """Serve frontend SPA - all non-API routes get index.html"""
         file_path = _frontend_dist / full_path
         if file_path.is_file():
             return FileResponse(file_path)

@@ -68,12 +68,8 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
   const [editTp, setEditTp] = useState<number>(0);
   const [editSlString, setEditSlString] = useState<string>('');
   const [editTpString, setEditTpString] = useState<string>('');
-  const editSlTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const editTpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [editSlString, setEditSlString] = useState<string>('');
-  const [editTpString, setEditTpString] = useState<string>('');
-  const editSlTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const editTpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const editSlTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editTpTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [slDragStart, setSlDragStart] = useState<{ x: number; value: number } | null>(null);
   const [tpDragStart, setTpDragStart] = useState<{ x: number; value: number } | null>(null);
 

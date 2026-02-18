@@ -134,28 +134,34 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
   const openTradeModal = async (symbol: string, direction: 'buy' | 'sell') => {
     setTradingSymbol(symbol);
     setErrorMessage(null);
-    
     const signal = signals.find(s => s.symbol === symbol);
     if (!signal || signal.current_price === undefined || signal.current_price === null || signal.current_price <= 0) {
       setErrorMessage(`${symbol}: No price data available`);
       setTradingSymbol(null);
       return;
     }
-    
     const entryPrice = signal.current_price || signal.entry_point || 0;
-    const stopLoss = signal.stop_loss || (direction === 'buy' 
-      ? entryPrice * 0.95 
-      : entryPrice * 1.05);
-    const takeProfit = signal.take_profit || (direction === 'buy'
-      ? entryPrice * 1.10
-      : entryPrice * 0.90);
     
     try {
-      // Get suggested position size from backend
-      const response = await fetch(`${apiUrl('trade/size')}?symbol=${symbol}&entry_price=${entryPrice}&stop_loss=${stopLoss}`);
-      const data = await response.json();
+      // Get proposed SL/TP from backend (calculated from live ATR data)
+      const proposalResponse = await fetch(`${apiUrl('trade/proposal')}?symbol=${symbol}&direction=${direction}`);
+      let stopLoss: number;
+      let takeProfit: number;
+      let suggestedSize: number;
       
-      const suggestedSize = data.suggested_size || 0.01;
+      if (proposalResponse.ok) {
+        const proposal = await proposalResponse.json();
+        if (!proposal.error) {
+          stopLoss = proposal.stop_loss;
+          takeProfit = proposal.take_profit;
+          suggestedSize = proposal.suggested_size || 0.01;
+          console.log(`[PROPOSAL] ${symbol} ${direction}: SL=${stopLoss}, TP=${takeProfit}, RR=${proposal.risk_reward_ratio}`);
+        } else {
+          throw new Error(proposal.error);
+        }
+      } else {
+        throw new Error('Failed to get proposal');
+      }
       
       setTradeModal({
         isOpen: true,
@@ -169,24 +175,33 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
         loading: false,
       });
     } catch (error) {
-      // Fallback - open modal with default size
-      const fallbackTP = direction === 'buy' ? entryPrice * 1.10 : entryPrice * 0.90;
+      console.warn('Failed to get proposal, using fallback:', error);
+      // Fallback: calculate locally
+      const atrEstimate = entryPrice * 0.01;
+      const stopLoss = direction === 'buy' 
+        ? entryPrice - (atrEstimate * 1.5) 
+        : entryPrice + (atrEstimate * 1.5);
+      const takeProfit = direction === 'buy' 
+        ? entryPrice + (atrEstimate * 3.0) 
+        : entryPrice - (atrEstimate * 3.0);
+      const suggestedSize = 0.01;
+      
       setTradeModal({
         isOpen: true,
         symbol,
         direction,
         entryPrice,
         stopLoss,
-        takeProfit: fallbackTP,
-        suggestedSize: 0.01,
-        selectedSize: 0.01,
+        takeProfit,
+        suggestedSize,
+        selectedSize: suggestedSize,
         loading: false,
       });
     } finally {
       setTradingSymbol(null);
     }
   };
-  
+
   const executeTrade = async () => {
     setTradeModal(prev => ({ ...prev, loading: true }));
     try {

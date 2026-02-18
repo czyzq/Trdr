@@ -2,6 +2,92 @@
 
 ## ✅ **COMPLETED FIXES**
 
+### 10. Trade Closing Price Source Fix (2026-02-18)
+**Status:** ✅ **FIXED**
+**Reported by:** User (trades closing with wrong price - not matching chart)
+**What Was Fixed:**
+- ✅ **Close trade endpoint** (`/api/trade/close/{position_id}`) — Now fetches price from candle data (same source as chart)
+- ✅ **Auto-close for TP/SL** (`broker_sim.py:_async_update_prices`) — Uses candles first, falls back to quotes
+- ✅ **Unrealized P&L recalculation** — Same candle-based price source
+
+**The Problem:**
+- Chart endpoint uses `get_candles()` (Alpha Vantage/Yahoo with DB caching)
+- Close endpoint was using `get_quote()` (different data path, potentially stale/cached)
+- Result: User sees one price on chart, trade closes at a different price
+
+**Implementation:**
+```python
+# main.py - close_trade now uses candles first
+# 1. Try cached candles (same as chart displays)
+candles = await _get_cached_candles(symbol, "60", 5)
+if candles and len(candles) > 0:
+    exit_price = candles[-1]["close"]
+
+# 2. Fallback to fresh candles
+fresh_candles = await data_provider.get_candles(symbol, "60", 5)
+
+# 3. Last resort: quote
+quote = await data_provider.get_quote(symbol)
+```
+
+```python
+# broker_sim.py - auto-close uses candles first
+async def _async_update_prices(self):
+    for pos in self.open_positions:
+        symbol = pos["symbol"]
+        # Try candles first (same source as chart)
+        price = None
+        try:
+            candles = await self._data_provider.get_candles(symbol, "60", 5)
+            if candles and len(candles) > 0:
+                price = candles[-1]["close"]
+        except Exception:
+            pass
+        
+        # Fallback to quote
+        if price is None:
+            quote = await self._data_provider.get_quote(symbol)
+            price = quote["price"]
+```
+
+**Result:** Closing prices now match chart candle closes. Both manual close and auto TP/SL use the same data source.
+
+---
+
+### 9. SL/TP Fix for Buy Trades + Accurate Close Price (2026-02-18)
+**Status:** ✅ **FIXED**
+**Reported by:** User (buy trades closing immediately after opening)
+**What Was Fixed:**
+- ✅ **SL/TP orientation validation** — Buy trades were getting inverted SL/TP (SL above entry, TP below)
+- ✅ **Frontend validation** — Added checks in `SignalsGrid.tsx` to validate/fix SL/TP before trade
+- ✅ **Backend validation** — Added checks in `broker_sim.py` to auto-fix inverted SL/TP on position open
+- ✅ **Accurate close price** — Now uses actual market price at trigger time, not TP/SL level
+
+**Implementation:**
+```typescript
+// SignalsGrid.tsx - SL/TP orientation validation
+if (direction === 'buy') {
+  if (stopLoss >= entryPrice) stopLoss = entryPrice * 0.95;  // Force below
+  if (takeProfit <= entryPrice) takeProfit = entryPrice * 1.10;  // Force above
+} else { // sell
+  if (stopLoss <= entryPrice) stopLoss = entryPrice * 1.05;  // Force above
+  if (takeProfit >= entryPrice) takeProfit = entryPrice * 0.90;  // Force below
+}
+```
+
+```python
+# broker_sim.py - Close price accuracy
+if pos["direction"] == "buy":
+    if tp and price >= tp:
+        to_close.append((pos["id"], price, "TP"))  # Use actual market price
+# ... instead of trigger price
+result = await self._async_close_position(pos_id, exit_price=exit_price)
+```
+
+**Result:** Buy trades now have correct SL/TP (SL below, TP above entry), and closed positions reflect actual market price at close time.
+
+---
+
 ### 1. Wrong Timezone (Warsaw) and Market Hours Logic
 **Status:** ✅ **FIXED**
 

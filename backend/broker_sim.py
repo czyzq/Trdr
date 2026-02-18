@@ -323,16 +323,26 @@ class AsyncSimulatedBroker(Broker):
             return []
 
     async def _async_update_prices(self) -> List[Dict[str, Any]]:
-        """Async price update with auto-close."""
+        """Async price update with auto-close - uses candle data for consistency with chart."""
         auto_closed = []
         to_close = []
-
         for pos in self.open_positions:
-            quote = await self._data_provider.get_quote(pos["symbol"])
-            if not quote:
-                continue
-
-            price = quote["price"]
+            symbol = pos["symbol"]
+            # Try candles first (same source as chart) for price consistency
+            price = None
+            try:
+                candles = await self._data_provider.get_candles(symbol, "60", 5)
+                if candles and len(candles) > 0:
+                    price = candles[-1]["close"]
+            except Exception:
+                pass
+            
+            # Fallback to quote if candles unavailable
+            if price is None:
+                quote = await self._data_provider.get_quote(symbol)
+                if not quote:
+                    continue
+                price = quote["price"]
             pos_leverage = pos.get("leverage", 1)
             if pos["direction"] == "buy":
                 pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage
@@ -344,30 +354,62 @@ class AsyncSimulatedBroker(Broker):
 
             tp = pos.get("take_profit")
             sl = pos.get("stop_loss")
+            
+            # Validate SL/TP are set correctly for direction (sanity check)
+            entry = pos["entry_price"]
             if pos["direction"] == "buy":
+                # For BUY: TP should be > entry, SL should be < entry
+                if tp and tp <= entry:
+                    print(f"[WARN] BUY position {pos['id']} has TP ({tp}) <= entry ({entry}), fixing...")
+                    tp = entry + abs(tp - entry)  # Mirror above entry
+                if sl and sl >= entry:
+                    print(f"[WARN] BUY position {pos['id']} has SL ({sl}) >= entry ({entry}), fixing...")
+                    sl = entry - abs(sl - entry)  # Mirror below entry
+                    
                 if tp and price >= tp:
-                    to_close.append((pos["id"], tp, "TP"))
+                    to_close.append((pos["id"], price, "TP"))  # Use actual market price
                 elif sl and price <= sl:
-                    to_close.append((pos["id"], sl, "SL"))
+                    to_close.append((pos["id"], price, "SL"))  # Use actual market price
             else:
+                # For SELL: TP should be < entry, SL should be > entry
+                if tp and tp >= entry:
+                    print(f"[WARN] SELL position {pos['id']} has TP ({tp}) >= entry ({entry}), fixing...")
+                    tp = entry - abs(tp - entry)  # Mirror below entry
+                if sl and sl <= entry:
+                    print(f"[WARN] SELL position {pos['id']} has SL ({sl}) <= entry ({entry}), fixing...")
+                    sl = entry + abs(sl - entry)  # Mirror above entry
+                    
                 if tp and price <= tp:
-                    to_close.append((pos["id"], tp, "TP"))
+                    to_close.append((pos["id"], price, "TP"))  # Use actual market price
                 elif sl and price >= sl:
-                    to_close.append((pos["id"], sl, "SL"))
+                    to_close.append((pos["id"], price, "SL"))  # Use actual market price
 
-        for pos_id, trigger_price, reason in to_close:
-            # Use trigger price (TP/SL level) for exit, not stale current_price
-            # current_price may still be entry_price if position just opened
-            result = await self._async_close_position(pos_id, exit_price=trigger_price)
+        for pos_id, exit_price, reason in to_close:
+            # Use actual market price at trigger time, not TP/SL level
+            result = await self._async_close_position(pos_id, exit_price=exit_price)
             if "error" not in result:
                 result["exit_reason"] = reason
                 auto_closed.append(result)
 
         # Recalculate unrealized
         for pos in self.open_positions:
-            quote = await self._data_provider.get_quote(pos["symbol"])
-            if quote:
-                price = quote["price"]
+            symbol = pos["symbol"]
+            # Try candles first for price consistency
+            price = None
+            try:
+                candles = await self._data_provider.get_candles(symbol, "60", 3)
+                if candles and len(candles) > 0:
+                    price = candles[-1]["close"]
+            except Exception:
+                pass
+            
+            # Fallback to quote
+            if price is None:
+                quote = await self._data_provider.get_quote(symbol)
+                if quote:
+                    price = quote["price"]
+                else:
+                    continue
                 pos_leverage = pos.get("leverage", 1)
                 if pos["direction"] == "buy":
                     pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage
@@ -386,6 +428,12 @@ class AsyncSimulatedBroker(Broker):
         await async_save_account(self.account)
 
         return auto_closed
+
+    def reload_from_db(self):
+        """Reload positions from DB - call after external DB changes."""
+        self.open_positions = db.load_open_positions()
+        self.closed_positions = db.load_closed_positions()
+        self.account = db.load_account()
 
     def reset(self) -> Dict[str, Any]:
         """Reset account."""
