@@ -84,7 +84,25 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     suggestedSize: 0.01,
     selectedSize: 0.01,
     loading: false,
+    displayTakeProfit: '',
+    displayStopLoss: '',
+    displaySelectedSize: '',
   });
+
+  const [hoveredIndicator, setHoveredIndicator] = useState&lt;string | null&gt;(null);
+  const [tooltipPosition, setTooltipPosition] = useState&lt;{ x: number; y: number }&gt;({ x: 0, y: 0 });
+
+  const indicatorTooltips: Record&lt;string, string&gt; = {
+    'RSI': 'RSI mierzy overbought/oversold (14-period); &lt;30 buy, &gt;70 sell.',
+    'MACD': 'Histogram momentum (EMA12-26); &gt;0 bullish, cross up buy.',
+    'SMA Cross': 'SMA20&gt;SMA50 uptrend buy bias.',
+    'BB': 'Price near lower band buy (mean-reversion).',
+    'ADX': '&gt;25 trending (trade momentum), &lt;20 ranging (mean-rev).',
+    'StochRSI': 'StochRSI &lt;0.2 oversold→buy, &gt;0.8 overbought→sell.',
+    'Volume': 'Volume confirms price moves; high volume on breakout = strong signal.',
+    'Momentum': 'Momentum &gt;0 uptrend buy; divergence warns reversal.',
+    'Candlestick': 'Patterns: hammer/engulfing bullish reversal buy; shooting star sell caution.',
+  };
 
   useEffect(() => {
     if (externalSignals && externalSignals.length > 0) {
@@ -130,7 +148,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
     };
 
     fetchSignals();
-    const interval = setInterval(fetchSignals, 5000); // Refresh every 5 seconds
+    const interval = setInterval(fetchSignals, 10000); // Refresh every 10 seconds (less aggressive)
     return () => clearInterval(interval);
   }, [externalSignals]);
 
@@ -175,6 +193,9 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
         takeProfit,
         suggestedSize,
         selectedSize: suggestedSize,
+        displayTakeProfit: takeProfit.toFixed(2),
+        displayStopLoss: stopLoss.toFixed(2),
+        displaySelectedSize: suggestedSize.toFixed(4),
         loading: false,
       });
     } catch (error) {
@@ -198,6 +219,9 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
         takeProfit,
         suggestedSize,
         selectedSize: suggestedSize,
+        displayTakeProfit: takeProfit.toFixed(2),
+        displayStopLoss: stopLoss.toFixed(2),
+        displaySelectedSize: suggestedSize.toFixed(4),
         loading: false,
       });
     } finally {
@@ -242,7 +266,20 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
   };
   
   const closeTradeModal = () => {
-    setTradeModal(prev => ({ ...prev, isOpen: false }));
+    setTradeModal({
+      isOpen: false,
+      symbol: '',
+      direction: 'buy',
+      entryPrice: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      suggestedSize: 0.01,
+      selectedSize: 0.01,
+      loading: false,
+      displayTakeProfit: '',
+      displayStopLoss: '',
+      displaySelectedSize: '',
+    });
   };
 
   const getScoreColor = (score: number): string => {
@@ -509,14 +546,19 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
             <div className="mb-3">
               <div className="flex justify-between text-sm mb-1">
                 <span style={{ color: '#22c55e' }}>Take Profit:</span>
-                <span style={{ color: '#22c55e' }}>${tradeModal.takeProfit.toFixed(2)}</span>
+                <span style={{ color: '#22c55e' }}>${tradeModal.displayTakeProfit}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setTradeModal(prev => ({ 
-                    ...prev, 
-                    takeProfit: prev.takeProfit - (prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5)
-                  }))}
+                  onClick={() => setTradeModal(prev => {
+                    const step = prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5;
+                    const newVal = prev.takeProfit - step;
+                    return { 
+                      ...prev, 
+                      takeProfit: newVal,
+                      displayTakeProfit: newVal.toFixed(2)
+                    };
+                  })}
                   className="px-3 py-1 rounded text-sm font-bold"
                   style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
                 >
@@ -525,8 +567,11 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                 <input
                   type="number"
                   step={tradeModal.symbol === 'BTC' ? 10 : tradeModal.symbol === 'XAU' ? 1 : 5}
-                  value={tradeModal.takeProfit.toFixed(2)}
-                  onChange={(e) => setTradeModal(prev => ({ ...prev, takeProfit: parseFloat(e.target.value) || prev.takeProfit }))}
+                  value={tradeModal.displayTakeProfit}
+                  onChange={(e) => setTradeModal(prev => {
+  const newVal = parseFloat(e.target.value) || prev.takeProfit;
+  return { ...prev, takeProfit: newVal, displayTakeProfit: newVal.toFixed(2) };
+})}
                   className="flex-1 px-3 py-1.5 rounded text-sm text-center"
                   style={{ 
                     backgroundColor: '#1a1f35', 
@@ -535,10 +580,15 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                   }}
                 />
                 <button
-                  onClick={() => setTradeModal(prev => ({ 
-                    ...prev, 
-                    takeProfit: prev.takeProfit + (prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5)
-                  }))}
+                  onClick={() => setTradeModal(prev => {
+                    const step = prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5;
+                    const newVal = prev.takeProfit + step;
+                    return { 
+                      ...prev, 
+                      takeProfit: newVal,
+                      displayTakeProfit: newVal.toFixed(2)
+                    };
+                  })}
                   className="px-3 py-1 rounded text-sm font-bold"
                   style={{ backgroundColor: '#1a1f35', color: '#22c55e' }}
                 >
@@ -551,14 +601,19 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
             <div className="mb-4">
               <div className="flex justify-between text-sm mb-1">
                 <span style={{ color: '#ef4444' }}>Stop Loss:</span>
-                <span style={{ color: '#ef4444' }}>${tradeModal.stopLoss.toFixed(2)}</span>
+                <span style={{ color: '#ef4444' }}>${tradeModal.displayStopLoss}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setTradeModal(prev => ({ 
-                    ...prev, 
-                    stopLoss: prev.stopLoss - (prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5)
-                  }))}
+                  onClick={() => setTradeModal(prev => {
+                    const step = prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5;
+                    const newVal = prev.stopLoss - step;
+                    return { 
+                      ...prev, 
+                      stopLoss: newVal,
+                      displayStopLoss: newVal.toFixed(2)
+                    };
+                  })}
                   className="px-3 py-1 rounded text-sm font-bold"
                   style={{ backgroundColor: '#1a1f35', color: '#ef4444' }}
                 >
@@ -567,8 +622,11 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                 <input
                   type="number"
                   step={tradeModal.symbol === 'BTC' ? 10 : tradeModal.symbol === 'XAU' ? 1 : 5}
-                  value={tradeModal.stopLoss.toFixed(2)}
-                  onChange={(e) => setTradeModal(prev => ({ ...prev, stopLoss: parseFloat(e.target.value) || prev.stopLoss }))}
+                  value={tradeModal.displayStopLoss}
+                  onChange={(e) => setTradeModal(prev => {
+  const newVal = parseFloat(e.target.value) || prev.stopLoss;
+  return { ...prev, stopLoss: newVal, displayStopLoss: newVal.toFixed(2) };
+})}
                   className="flex-1 px-3 py-1.5 rounded text-sm text-center"
                   style={{ 
                     backgroundColor: '#1a1f35', 
@@ -577,10 +635,15 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                   }}
                 />
                 <button
-                  onClick={() => setTradeModal(prev => ({ 
-                    ...prev, 
-                    stopLoss: prev.stopLoss + (prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5)
-                  }))}
+                  onClick={() => setTradeModal(prev => {
+                    const step = prev.symbol === 'BTC' ? 10 : prev.symbol === 'XAU' ? 1 : 5;
+                    const newVal = prev.stopLoss + step;
+                    return { 
+                      ...prev, 
+                      stopLoss: newVal,
+                      displayStopLoss: newVal.toFixed(2)
+                    };
+                  })}
                   className="px-3 py-1 rounded text-sm font-bold"
                   style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
                 >
@@ -600,7 +663,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                   onClick={() => setTradeModal(prev => {
                     const step = prev.symbol === 'BTC' ? 0.001 : (prev.symbol === 'XAG' || prev.symbol === 'XAU' || prev.symbol === 'US100') ? 0.003 : 0.01;
                     const min = prev.symbol === 'BTC' ? 0.001 : (prev.symbol === 'XAG' || prev.symbol === 'XAU' || prev.symbol === 'US100') ? 0.003 : 0.01;
-                    return { ...prev, selectedSize: Math.max(min, prev.selectedSize - step) };
+                    const newVal = Math.max(min, prev.selectedSize - step);
+                    return { ...prev, selectedSize: newVal, displaySelectedSize: newVal.toFixed(4) };
                   })}
                   className="px-3 py-1 rounded text-sm font-bold"
                   style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
@@ -611,10 +675,12 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                   type="number"
                   step={tradeModal.symbol === 'BTC' ? 0.001 : (tradeModal.symbol === 'XAG' || tradeModal.symbol === 'XAU' || tradeModal.symbol === 'US100') ? 0.003 : 0.01}
                   min={tradeModal.symbol === 'BTC' ? 0.001 : (tradeModal.symbol === 'XAG' || tradeModal.symbol === 'XAU' || tradeModal.symbol === 'US100') ? 0.003 : 0.01}
-                  value={tradeModal.selectedSize.toFixed(4)}
+                  value={tradeModal.displaySelectedSize}
                   onChange={(e) => setTradeModal(prev => {
                     const min = prev.symbol === 'BTC' ? 0.001 : (prev.symbol === 'XAG' || prev.symbol === 'XAU' || prev.symbol === 'US100') ? 0.003 : 0.01;
-                    return { ...prev, selectedSize: Math.max(min, parseFloat(e.target.value) || min) };
+                    const rawVal = parseFloat(e.target.value) || min;
+                    const newVal = Math.max(min, rawVal);
+                    return { ...prev, selectedSize: newVal, displaySelectedSize: newVal.toFixed(4) };
                   })}
                   className="flex-1 px-3 py-1.5 rounded text-sm text-center"
                   style={{ 
@@ -626,7 +692,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({ signals: externalSigna
                 <button
                   onClick={() => setTradeModal(prev => {
                     const step = prev.symbol === 'BTC' ? 0.001 : (prev.symbol === 'XAG' || prev.symbol === 'XAU' || prev.symbol === 'US100') ? 0.003 : 0.01;
-                    return { ...prev, selectedSize: prev.selectedSize + step };
+                    const newVal = prev.selectedSize + step;
+                    return { ...prev, selectedSize: newVal, displaySelectedSize: newVal.toFixed(4) };
                   })}
                   className="px-3 py-1 rounded text-sm font-bold"
                   style={{ backgroundColor: '#1a1f35', color: '#64748b' }}
