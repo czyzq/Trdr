@@ -7,7 +7,7 @@ import os
 from collections import OrderedDict
 from datetime import datetime
 from timezone import now_warsaw
-from typing import List, Optional
+from typing import List, Optional, Any
 
 _db = None
 _connected = False
@@ -668,3 +668,111 @@ async def async_load_mms_state(symbol: str) -> Optional[dict]:
 async def async_load_all_mms_states() -> dict:
     """Async: Load all MMS sequentiality states."""
     return await asyncio.to_thread(load_all_mms_states)
+
+# ── Settings ──────────────────────────────────────────────────────────
+
+DEFAULT_SETTINGS = {
+    "MAX_RISK_PER_TRADE_PCT": 2.0,
+    "MAX_DRAWDOWN_PCT": 20.0,
+    "MAX_OPEN_POSITIONS": 3,
+    "INITIAL_BALANCE_USD": 3000.0,
+}
+
+
+def get_setting(key: str, default: Optional[Any] = None) -> Any:
+    db = get_db()
+    if db is None:
+        return DEFAULT_SETTINGS.get(key, default)
+    doc = db.settings_current.find_one({"key": key})
+    if doc:
+        return doc.get("value")
+    return DEFAULT_SETTINGS.get(key, default)
+
+
+def set_setting(key: str, value: Any, updated_by: str = "system") -> bool:
+    db = get_db()
+    if db is None:
+        return False
+    now = datetime.utcnow().isoformat()
+    old_doc = db.settings_current.find_one({"key": key})
+    old_value = old_doc.get("value") if old_doc else None
+    db.settings_current.replace_one(
+        {"key": key},
+        {"key": key, "value": value, "updated_at": now, "updated_by": updated_by},
+        upsert=True
+    )
+    event_doc = {
+        "timestamp": now,
+        "key": key,
+        "old_value": old_value,
+        "new_value": value,
+        "updated_by": updated_by,
+    }
+    db.settings_events.insert_one(event_doc)
+    materialize_settings()
+    return True
+
+
+def list_settings() -> dict:
+    db = get_db()
+    if db is None:
+        return DEFAULT_SETTINGS.copy()
+    settings = {}
+    for doc in db.settings_current.find({}).sort("key", 1):
+        settings[doc["key"]] = doc["value"]
+    # Migrate missing defaults
+    for k, v in DEFAULT_SETTINGS.items():
+        if k not in settings:
+            set_setting(k, v)
+            settings[k] = v
+    return settings
+
+
+def ensure_settings_indexes():
+    """Create indexes on settings collections."""
+    db = get_db()
+    if db is None:
+        return
+    db.settings_current.create_index([("key", 1)], unique=True, background=True)
+    db.settings_events.create_index([("timestamp", -1)], background=True)
+    db.settings_events.create_index([("key", 1), ("timestamp", -1)], background=True)
+
+
+def materialize_settings():
+    """Aggregate latest per param from events."""
+    db = get_db()
+    if db is None:
+        return
+    pipeline = [
+        {"$sort": {"timestamp": -1}},
+        {"$group": {
+            "_id": "$key",
+            "doc": {"$first": "$$ROOT"}
+        }}
+    ]
+    latest_events = list(db.settings_events.aggregate(pipeline))
+    for item in latest_events:
+        event = item["doc"]
+        db.settings_current.replace_one(
+            {"key": event["key"]},
+            {
+                "key": event["key"],
+                "value": event["new_value"],
+                "updated_at": event["timestamp"],
+                "updated_by": event["updated_by"]
+            },
+            upsert=True
+        )
+
+
+# Async wrappers
+async def async_get_setting(key: str, default: Optional[Any] = None) -> Any:
+    return await asyncio.to_thread(get_setting, key, default)
+
+
+async def async_set_setting(key: str, value: Any, updated_by: str = "system") -> bool:
+    return await asyncio.to_thread(set_setting, key, value, updated_by)
+
+
+async def async_list_settings() -> dict:
+    return await asyncio.to_thread(list_settings)
