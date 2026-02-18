@@ -388,6 +388,42 @@ def ensure_candle_indexes():
     db = get_db()
     if db is None:
         return
+    
+def ensure_trades_indexes():
+    db = get_db()
+    if db:
+        db.trades.create_index([("status", 1), ("closed_at", -1)], background=True)
+        db.trades.create_index("status", background=True)
+        db.trades.create_index("opened_at", -1)
+        db.trades.create_index("symbol", background=True)
+
+
+async def async_calc_closed_stats():
+    pipeline = [
+        {"$match": {"status": "closed"}},
+        {"$group": {
+            "_id": None,
+            "total_count": {"$sum": 1},
+            "total_pnl": {"$sum": "$pnl_usd"},
+            "win_count": {"$sum": {"$cond": [{"$gte": ["$pnl_usd", 0]}, 1, 0]}},
+        }}
+    ]
+    db_conn = get_db()
+    if db_conn:
+        result = await asyncio.to_thread(list, db_conn.trades.aggregate(pipeline))
+        stats = result[0] if result else {"total_count": 0, "total_pnl": 0, "win_count": 0}
+    else:
+        stats = {"total_count": 0, "total_pnl": 0, "win_count": 0}
+    loss_count = stats["total_count"] - stats["win_count"]
+    win_rate = round(stats["win_count"] / stats["total_count"] * 100, 1) if stats["total_count"] else 0
+    return {
+        "total_pnl": round(stats["total_pnl"], 2),
+        "win_count": stats["win_count"],
+        "loss_count": loss_count,
+        "win_rate": win_rate,
+        "closed_trades": stats["total_count"],
+    }
+
     db.candles.create_index(
         [("symbol", 1), ("resolution", 1), ("timestamp", 1)],
         unique=True,
@@ -397,6 +433,19 @@ def ensure_candle_indexes():
         [("symbol", 1), ("resolution", 1)],
         background=True,
     )
+
+def ensure_trades_indexes():
+    """Create indexes on the trades collection for fast queries."""
+    db = get_db()
+    if db is None:
+        return
+    # Index for open/closed status queries
+    db.trades.create_index([("status", 1), ("opened_at", 1)], background=True)
+    db.trades.create_index([("status", 1), ("closed_at", -1)], background=True)
+    # Index for symbol-based queries
+    db.trades.create_index([("symbol", 1), ("status", 1)], background=True)
+    # Unique index for trade id
+    db.trades.create_index([("id", 1)], unique=True, background=True)
 
 
 # ── Candle Aggregation ────────────────────────────────────────────
@@ -589,6 +638,44 @@ async def async_delete_all_trades():
 async def async_count_candles(symbol: str, resolution: str) -> int:
     """Async: Count candles."""
     return await asyncio.to_thread(count_candles, symbol, resolution)
+
+async def async_ensure_trades_indexes():
+    """Async: Ensure trades indexes."""
+    return await asyncio.to_thread(ensure_trades_indexes)
+
+def sync_account_from_closed_trades_sync() -> dict:
+    """Fast sync of account stats from closed trades using MongoDB aggregation.
+    Returns stats dict with total_pnl_usd, win_count, loss_count, closed_trades.
+    """
+    db = get_db()
+    if db is None:
+        return {"total_pnl_usd": 0.0, "win_count": 0, "loss_count": 0, "closed_trades": 0}
+    
+    pipeline = [
+        {"$match": {"status": "closed"}},
+        {"$group": {
+            "_id": None,
+            "total_pnl_usd": {"$sum": "$pnl_usd"},
+            "win_count": {"$sum": {"$cond": [{"$gte": ["$pnl_usd", 0]}, 1, 0]}},
+            "loss_count": {"$sum": {"$cond": [{"$lt": ["$pnl_usd", 0]}, 1, 0]}},
+            "closed_trades": {"$sum": 1}
+        }}
+    ]
+    
+    result = list(db.trades.aggregate(pipeline))
+    if result:
+        doc = result[0]
+        return {
+            "total_pnl_usd": round(doc.get("total_pnl_usd", 0.0), 2),
+            "win_count": doc.get("win_count", 0),
+            "loss_count": doc.get("loss_count", 0),
+            "closed_trades": doc.get("closed_trades", 0)
+        }
+    return {"total_pnl_usd": 0.0, "win_count": 0, "loss_count": 0, "closed_trades": 0}
+
+async def async_sync_account_from_closed_trades() -> dict:
+    """Async: Fast sync of account stats from closed trades using aggregation."""
+    return await asyncio.to_thread(sync_account_from_closed_trades_sync)
 
 
 async def async_get_candle_date_range(symbol: str, resolution: str) -> Optional[dict]:

@@ -700,10 +700,10 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
 
     return round(max(min_size, min(size, max_size)), 4)
 
-async def update_account_equity():
-    """Update account equity based on open positions via broker."""
-    await broker._async_update_prices()
-    await sync_account_from_closed_trades()
+# async def update_account_equity():
+#     """Update account equity based on open positions via broker."""
+#     await broker._async_update_prices()
+#     await sync_account_from_closed_trades()
 
 # Semaphore to limit concurrent API calls
 _api_semaphore = asyncio.Semaphore(4)
@@ -920,7 +920,7 @@ async def generate_signals() -> List[Signal]:
             log_event(f"[SIGNAL] {signal.symbol}: {signal.direction.value} | Score: {signal.score:.2f} | Conf: {signal.confidence:.0%} | ${signal.current_price:.2f}", "event")
 
     # Update equity after signals
-    await update_account_equity()
+    await sync_account_from_closed_trades()
 
     return signals
 
@@ -1212,7 +1212,7 @@ async def get_logs():
 @app.get("/api/account")
 async def get_account():
     """Get account info with USD balance"""
-    await update_account_equity()
+    await sync_account_from_closed_trades()
     # Add initial_balance_usd to response for frontend calculations
     initial_balance = db.get_setting("INITIAL_BALANCE_USD", 3000.0)
     return {**account, "initial_balance_usd": initial_balance}
@@ -1587,13 +1587,13 @@ async def close_trade(position_id: str):
         "success" if pnl_usd >= 0 else "warning"
     )
 
-    await update_account_equity()
+    await sync_account_from_closed_trades()
     return result
 
 @app.get("/api/trades/open")
 async def get_open_trades():
     """Get all open positions with live P&L - always from DB for consistency"""
-    await update_account_equity()
+    await sync_account_from_closed_trades()
     # Load from DB to ensure we have data after restart
     db_positions = await async_load_open_positions()
     # Merge with in-memory (in-memory may have newer updates)
@@ -1630,7 +1630,7 @@ async def trades_close_position(position_id: str):
     """
     result = await broker.close_position(position_id)
     log_event(f"[CLOSE] Position {{position_id}} closed", "info")
-    await update_account_equity()
+    await sync_account_from_closed_trades()
     return result
 
 @app.post("/api/trades/update/{{position_id}}")
