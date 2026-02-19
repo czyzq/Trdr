@@ -25,12 +25,12 @@ export const SettingsTab: React.FC = () => {
     try {
       const res = await fetch(apiUrl("settings"));
       if (!res.ok) throw new Error("Failed to fetch");
-      const data = (await res.json()) as { settings: Setting[] };
+      const data = await res.json();
       setSettings(
-        data.settings.map((s: Setting) => ({
-          key: s.key || "",
-          value: parseFloat(String(s.value)) || 0,
-          note: s.note || "",
+        Object.entries(data).map(([key, value]) => ({
+        key,
+        value: parseFloat(String(value)) || 0,
+        note: "",
         })),
       );
     } catch (e) {
@@ -164,7 +164,7 @@ export const SettingsTab: React.FC = () => {
                         {s.key}
                       </td>
                       <td className="py-3 font-mono text-[#e2e8f0] bg-[#1a1f35]/30 px-2 py-1 rounded">
-                        {s.value.toFixed(2)}
+                        {Number.isInteger(s.value) ? s.value : s.value.toFixed(2)}
                       </td>
                       <td className="py-3 pr-8 text-[#9ca3af]">{s.note}</td>
                       <td className="py-3 text-right">

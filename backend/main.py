@@ -1230,6 +1230,20 @@ async def set_account_mode(mode: str):
     log_event(f"Trading mode changed to: {mode.upper()}", "event")
     return {"mode": account["mode"], "dry_run": account["dry_run"]}
 
+@app.get("/api/settings")
+async def get_settings():
+    return db.list_settings()
+
+@app.post("/api/settings")
+async def save_setting(key: str, value: float, note: str = ""):
+    db.set_setting(key, value, "frontend")
+    return {"status": "saved", "settings": db.list_settings()}
+
+@app.delete("/api/settings/{key}")
+async def delete_setting(key: str):
+    db.settings_current.delete_one({"key": key})
+    return {"status": "deleted", "settings": db.list_settings()}
+
 # =====================
 # INSTRUMENT SETTINGS
 # =====================

@@ -228,22 +228,7 @@ export const Dashboard: React.FC = () => {
               />
             </div>
           )}
-          {activeTab === "settings" && (
-            <div
-              className="h-full flex items-center justify-center"
-              style={{ color: "#4a5568" }}
-            >
-              <div className="text-center">
-                <div
-                  className="text-xs uppercase tracking-widest mb-2"
-                  style={{ color: "#64748b" }}
-                >
-                  Settings
-                </div>
-                <div className="text-xs">Configuration panel coming soon</div>
-              </div>
-            </div>
-          )}
+          {activeTab === "settings" && <SettingsTab/>}
         </div>
       </div>
 
