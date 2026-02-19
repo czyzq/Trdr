@@ -1316,157 +1316,165 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               {trades
                 .filter((t) => t.symbol === symbol)
                 .map((trade) => {
-                  // Find candle index for entry
-                  const entryDate = new Date(trade.opened_at);
-                  console.log(
-                    `[CandlestickChart ${symbol}] Looking for entry:`,
-                    trade.opened_at,
-                    "EntryDate:",
-                    entryDate.toISOString(),
-                  );
-                  console.log(
-                    `[CandlestickChart ${symbol}] validData length:`,
-                    validData.length,
-                  );
-                  console.log(
-                    `[CandlestickChart ${symbol}] First candle:`,
-                    validData[0]?.timestamp,
-                    "Last:",
-                    validData[validData.length - 1]?.timestamp,
-                  );
-                  const entryIdx = validData.findIndex((c, i) => {
-                    if (c.timestamp) {
-                      const candleDate = new Date(c.timestamp);
-                      const match = candleDate.getTime() >= entryDate.getTime();
-                      if (i < 3)
-                        console.log(
-                          `  Candle ${i}:`,
-                          c.timestamp,
-                          candleDate.getTime(),
-                          ">=",
-                          entryDate.getTime(),
-                          "?",
-                          match,
-                        );
-                      return match;
-                    }
-                    return false;
-                  });
-
-                  console.log(
-                    `[CandlestickChart ${symbol}] entryIdx:`,
-                    entryIdx,
-                  );
-                  if (entryIdx === -1) return null;
-
-                  const x = idxToX(entryIdx);
-                  const entryY = priceToY(trade.entry_price);
-                  const isBuy = trade.direction === "buy";
-                  const entryColor = isBuy ? "#91c8a5ff" : "#b07777ff";
-
-                  // Triangle marker for entry - smaller size
-                  const triangleSize = 3.5;
-                  const trianglePoints = isBuy
-                    ? `${x},${entryY - triangleSize} ${x - triangleSize},${entryY + triangleSize} ${x + triangleSize},${entryY + triangleSize}`
-                    : `${x},${entryY + triangleSize} ${x - triangleSize},${entryY - triangleSize} ${x + triangleSize},${entryY - triangleSize}`;
-
-                  return (
-                    <g key={`trade-${trade.id}`}>
-                      {/* Entry marker */}
-                      <polygon
-                        points={trianglePoints}
-                        fill={entryColor}
-                        stroke={entryColor}
-                        strokeWidth="2"
-                        style={{ cursor: "pointer" }}
-                        onMouseEnter={(e) => {
-                          setHoveredTrade(trade);
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const containerRect =
-                            containerRef.current?.getBoundingClientRect();
-                          if (containerRect) {
-                            setTooltipPos({
-                              x: rect.left - containerRect.left - 210,
-                              y: rect.top - containerRect.top - 10,
-                            });
-                          }
-                        }}
-                        onMouseLeave={() => setHoveredTrade(null)}
-                      />
-                      {/* Entry price line */}
-                      <line
-                        x1={x - candleWidth}
-                        y1={entryY}
-                        x2={x + candleWidth}
-                        y2={entryY}
-                        stroke={entryColor}
-                        strokeWidth="0.5"
-                        strokeDasharray="2,2"
-                        opacity="0.5"
-                      />
-
-                      {/* Exit marker if closed */}
-                      {trade.closed_at &&
-                        trade.exit_price &&
-                        (() => {
-                          const exitDate = new Date(trade.closed_at);
-                          const exitIdx = validData.findIndex((c, i) => {
-                            if (c.timestamp && i > entryIdx) {
-                              const candleDate = new Date(c.timestamp);
-                              return candleDate.getTime() >= exitDate.getTime();
-                            }
-                            return false;
-                          });
-
-                          if (exitIdx === -1) return null;
-
-                          const exitX = idxToX(exitIdx);
-                          const exitY = priceToY(trade.exit_price!);
-                          const exitColor = "#fbfbfeff";
-
-                          return (
-                            <g key={`exit-${trade.id}`}>
-                              {/* Square marker for exit */}
-                              <rect
-                                x={exitX - triangleSize / 2}
-                                y={exitY - triangleSize / 2}
-                                width={triangleSize}
-                                height={triangleSize}
-                                fill={exitColor}
-                                stroke={exitColor}
-                                strokeWidth="1"
-                                style={{ cursor: "pointer" }}
-                                onMouseEnter={(e) => {
-                                  setHoveredTrade(trade);
-                                  const rect =
-                                    e.currentTarget.getBoundingClientRect();
-                                  const containerRect =
-                                    containerRef.current?.getBoundingClientRect();
-                                  if (containerRect) {
-                                    setTooltipPos({
-                                      x: rect.left - containerRect.left - 210,
-                                      y: rect.top - containerRect.top - 10,
-                                    });
-                                  }
-                                }}
-                                onMouseLeave={() => setHoveredTrade(null)}
-                              />
-                              {/* Trade line connecting entry to exit */}
-                              <line
-                                x1={x}
-                                y1={entryY}
-                                x2={exitX}
-                                y2={exitY}
-                                stroke={exitColor}
-                                strokeWidth="1"
-                                opacity="0.3"
-                              />
-                            </g>
+                  try {
+                    // Find candle index for entry
+                    const entryDate = new Date(trade.opened_at + "Z"); // Ensure UTC parsing
+                    if (isNaN(entryDate.getTime())) return null;
+                    console.log(
+                      `[CandlestickChart ${symbol}] Looking for entry:`,
+                      trade.opened_at,
+                      "EntryDate:",
+                      entryDate.toISOString(),
+                    );
+                  
+                    console.log(
+                      `[CandlestickChart ${symbol}] validData length:`,
+                      validData.length,
+                    );
+                    console.log(
+                      `[CandlestickChart ${symbol}] First candle:`,
+                      validData[0]?.timestamp,
+                      "Last:",
+                      validData[validData.length - 1]?.timestamp,
+                    );
+                    const entryIdx = validData.findIndex((c, i) => {
+                      if (c.timestamp) {
+                        const candleDate = new Date(c.timestamp);
+                        const match = candleDate.getTime() >= entryDate.getTime();
+                        if (i < 3)
+                          console.log(
+                            `  Candle ${i}:`,
+                            c.timestamp,
+                            candleDate.getTime(),
+                            ">=",
+                            entryDate.getTime(),
+                            "?",
+                            match,
                           );
-                        })()}
-                    </g>
-                  );
-                })}
+                        return match;
+                      }
+                      return false;
+                    });
+                  
+                    console.log(
+                      `[CandlestickChart ${symbol}] entryIdx:`,
+                      entryIdx,
+                    );
+                    if (entryIdx === -1) return null;
+
+                    const x = idxToX(entryIdx);
+                    const entryY = priceToY(trade.entry_price);
+                    const isBuy = trade.direction === "buy";
+                    const entryColor = isBuy ? "#91c8a5ff" : "#b07777ff";
+                  
+                    // Triangle marker for entry - smaller size
+                    const triangleSize = 3.5;
+                    const trianglePoints = isBuy
+                      ? `${x},${entryY - triangleSize} ${x - triangleSize},${entryY + triangleSize} ${x + triangleSize},${entryY + triangleSize}`
+                      : `${x},${entryY + triangleSize} ${x - triangleSize},${entryY - triangleSize} ${x + triangleSize},${entryY - triangleSize}`;
+                  
+                    return (
+                      <g key={`trade-${trade.id}`}>
+                        {/* Entry marker */}
+                        <polygon
+                          points={trianglePoints}
+                          fill={entryColor}
+                          stroke={entryColor}
+                          strokeWidth="2"
+                          style={{ cursor: "pointer" }}
+                          onMouseEnter={(e) => {
+                            setHoveredTrade(trade);
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const containerRect =
+                              containerRef.current?.getBoundingClientRect();
+                            if (containerRect) {
+                              setTooltipPos({
+                                x: rect.left - containerRect.left - 210,
+                                y: rect.top - containerRect.top - 10,
+                              });
+                            }
+                          }}
+                          onMouseLeave={() => setHoveredTrade(null)}
+                        />
+                        {/* Entry price line */}
+                        <line
+                          x1={x - candleWidth}
+                          y1={entryY}
+                          x2={x + candleWidth}
+                          y2={entryY}
+                          stroke={entryColor}
+                          strokeWidth="0.5"
+                          strokeDasharray="2,2"
+                          opacity="0.5"
+                        />
+
+                        {/* Exit marker if closed */}
+                        {trade.closed_at &&
+                          trade.exit_price &&
+                          (() => {
+                            const exitDate = new Date(trade.closed_at);
+                            const exitIdx = validData.findIndex((c, i) => {
+                              if (c.timestamp && i > entryIdx) {
+                                const candleDate = new Date(c.timestamp);
+                                return candleDate.getTime() >= exitDate.getTime();
+                              }
+                              return false;
+                            });
+
+                            if (exitIdx === -1) return null;
+
+                            const exitX = idxToX(exitIdx);
+                            const exitY = priceToY(trade.exit_price!);
+                            const exitColor = "#fbfbfeff";
+
+                            return (
+                              <g key={`exit-${trade.id}`}>
+                                {/* Square marker for exit */}
+                                <rect
+                                  x={exitX - triangleSize / 2}
+                                  y={exitY - triangleSize / 2}
+                                  width={triangleSize}
+                                  height={triangleSize}
+                                  fill={exitColor}
+                                  stroke={exitColor}
+                                  strokeWidth="1"
+                                  style={{ cursor: "pointer" }}
+                                  onMouseEnter={(e) => {
+                                    setHoveredTrade(trade);
+                                    const rect =
+                                      e.currentTarget.getBoundingClientRect();
+                                    const containerRect =
+                                      containerRef.current?.getBoundingClientRect();
+                                    if (containerRect) {
+                                      setTooltipPos({
+                                        x: rect.left - containerRect.left - 210,
+                                        y: rect.top - containerRect.top - 10,
+                                      });
+                                    }
+                                  }}
+                                  onMouseLeave={() => setHoveredTrade(null)}
+                                />
+                                {/* Trade line connecting entry to exit */}
+                                <line
+                                  x1={x}
+                                  y1={entryY}
+                                  x2={exitX}
+                                  y2={exitY}
+                                  stroke={exitColor}
+                                  strokeWidth="1"
+                                  opacity="0.3"
+                                />
+                              </g>
+                            );
+                          })()}
+                      </g>
+                    );
+                  } catch (e) {
+                    console.warn('Bad trade:', trade.id, e);
+                    return null;
+                  }
+                }).filter(Boolean)
+                }
             </g>
           )}
         </svg>
