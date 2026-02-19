@@ -155,6 +155,17 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
     }
 
     const fetchSignals = async () => {
+      const cacheKey = 'signalsCache';
+      const cacheTimeKey = 'signalsTime';
+      const cacheTime = localStorage.getItem(cacheTimeKey);
+      if (cacheTime && Date.now() - parseInt(cacheTime) < 30000) {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          setSignals(JSON.parse(cached));
+          return;
+        }
+      }
+
       try {
         setLoading(true);
         const response = await fetch(apiUrl("signals"));
@@ -204,6 +215,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
               },
           );
           setSignals(mergedSignals);
+          localStorage.setItem(cacheKey, JSON.stringify(mergedSignals));
+          localStorage.setItem(cacheTimeKey, Date.now().toString());
         }
       } catch (error) {
         console.error("Failed to fetch signals:", error);

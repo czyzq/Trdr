@@ -51,6 +51,27 @@ export const TradesTab: React.FC = () => {
   }, [activeSection]);
 
   const fetchData = async () => {
+    const cacheKeyOpen = 'tradesOpen';
+    const cacheKeyHist = 'tradesHistory';
+    const cacheTimeKey = 'tradesTime';
+    const cacheTime = localStorage.getItem(cacheTimeKey);
+    if (cacheTime && Date.now() - parseInt(cacheTime) < 120000) {
+      const cachedOpen = localStorage.getItem(cacheKeyOpen);
+      const cachedHist = localStorage.getItem(cacheKeyHist);
+      if (cachedOpen && cachedHist) {
+        setOpenPositions(JSON.parse(cachedOpen).positions || []);
+        const histData = JSON.parse(cachedHist);
+        setClosedTrades(histData.trades || []);
+        setStats({
+          win_count: histData.win_count || 0,
+          loss_count: histData.loss_count || 0,
+          win_rate: histData.win_rate || 0,
+          total_pnl_usd: histData.total_pnl_usd || 0,
+        });
+        return;
+      }
+    }
+
     try {
       const [openRes, histRes] = await Promise.all([
         fetch(apiUrl("trades/open")),
@@ -59,6 +80,7 @@ export const TradesTab: React.FC = () => {
       if (openRes.ok) {
         const data = await openRes.json();
         setOpenPositions(data.positions || []);
+        localStorage.setItem(cacheKeyOpen, JSON.stringify(data));
       }
       if (histRes.ok) {
         const data = await histRes.json();
@@ -69,6 +91,8 @@ export const TradesTab: React.FC = () => {
           win_rate: data.win_rate || 0,
           total_pnl_usd: data.total_pnl_usd || 0,
         });
+        localStorage.setItem(cacheKeyHist, JSON.stringify(data));
+        localStorage.setItem(cacheTimeKey, Date.now().toString());
       }
     } catch (error) {
       console.error("Failed to fetch trades:", error);
