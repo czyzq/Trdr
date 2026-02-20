@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiUrl } from "../api";
+import { TradingToggle, BrokerToggle } from "./GlassToggle";
 
 // Trading Sessions - major market hours in UTC
 interface TradingSession {
@@ -98,11 +99,33 @@ const MarketStatus: React.FC = () => {
 
 interface SidebarProps {
   accountData?: any;
+  broker?: "simulation" | "ibkr";
+  autoTrade?: boolean;
+  onBrokerChange?: (broker: "simulation" | "ibkr") => void;
+  onAutoTradeChange?: (autoTrade: boolean) => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ accountData, broker = "simulation", autoTrade = false, onBrokerChange, onAutoTradeChange }) => {
   const [lastScan, setLastScan] = useState("--");
   const [isScanning, setIsScanning] = useState(false);
+
+  const handleBrokerChange = async (newBroker: "simulation" | "ibkr") => {
+    onBrokerChange?.(newBroker);
+    try {
+      await fetch(`${apiUrl("trading-mode")}?broker=${newBroker}&autoTrade=${autoTrade}`, { method: "POST" });
+    } catch (e) {
+      console.error("Failed to set broker:", e);
+    }
+  };
+
+  const handleAutoTradeChange = async (enabled: boolean) => {
+    onAutoTradeChange?.(enabled);
+    try {
+      await fetch(`${apiUrl("trading-mode")}?broker=${broker}&autoTrade=${enabled}`, { method: "POST" });
+    } catch (e) {
+      console.error("Failed to set mode:", e);
+    }
+  };
 
   const balance = accountData?.balance_usd ?? 0;
   const equity = accountData?.equity_usd ?? 0;
@@ -110,7 +133,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
   const closedTrades = accountData?.closed_trades ?? 0;
   const winRate = accountData?.win_rate ?? 0;
   const totalPnl = accountData?.total_pnl_usd ?? 0;
-  const mode = accountData?.mode ?? "simulate";
+  const accountMode = accountData?.mode ?? "simulate";
 
   useEffect(() => {
     const updateScan = () => {
@@ -131,17 +154,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
     const interval = setInterval(updateScan, 1000);
     return () => clearInterval(interval);
   }, [accountData]);
-
-  const toggleMode = async () => {
-    const newMode = mode === "simulate" ? "live" : "simulate";
-    try {
-      await fetch(`${apiUrl("account/mode")}?mode=${newMode}`, {
-        method: "POST",
-      });
-    } catch (error) {
-      console.error("Failed to toggle mode:", error);
-    }
-  };
 
   const resetAccount = async () => {
     try {
@@ -232,40 +244,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
         />
       </div>
 
-      {/* Mode Toggle */}
-      <div className="p-4" style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
-        <div
-          className="text-[10px] uppercase tracking-widest mb-2"
-          style={{ color: "#4a5568" }}
-        >
-          Trading Mode
-        </div>
-        <button
-          onClick={toggleMode}
-          className="w-full text-[11px] font-bold py-2 rounded-sm border transition-all"
-          style={{
-            backgroundColor:
-              mode === "simulate"
-                ? "rgba(234, 179, 8, 0.08)"
-                : "rgba(239, 68, 68, 0.08)",
-            borderColor:
-              mode === "simulate"
-                ? "rgba(234, 179, 8, 0.3)"
-                : "rgba(239, 68, 68, 0.3)",
-            color: mode === "simulate" ? "#eab308" : "var(--danger)",
-          }}
-        >
-          {mode === "simulate" ? "SIMULATION MODE" : "LIVE MODE"}
-        </button>
-        <div
-          className="text-[9px] mt-1.5 text-center"
-          style={{ color: "#374151" }}
-        >
-          {mode === "simulate"
-            ? "Paper trading with virtual USD"
-            : "Real trading - use caution"}
-        </div>
-      </div>
+      {/* Trading Mode */}
+      <TradingToggle
+        value={autoTrade}
+        onChange={handleAutoTradeChange}
+      />
+      
+      {/* Broker */}
+      <BrokerToggle
+        value={broker}
+        onChange={handleBrokerChange}
+      />
 
       {/* Instruments
       <div className="p-4" style={{ borderBottom: '1px solid var(--bg-tertiary)' }}>

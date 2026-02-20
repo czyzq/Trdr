@@ -263,6 +263,59 @@ class AdaptiveRegimeStrategy(BaseStrategy):
 
         technical_score = max(-1, min(1, technical_score))
 
+        # === V2 FILTERS ===
+
+        # ── VIX Filter (v2) ──
+        # Skip trading if VIX too high (extreme volatility)
+        vix = indicators.get("vix") or indicators.get("_vix")
+        vix_filter_active = False
+        vix_component = None
+        if vix and isinstance(vix, dict):
+            vix_value = vix.get("value", vix.get("VIX", 0))
+            if vix_value > 30:
+                # High volatility - reduce confidence, may skip
+                technical_score *= 0.3  # Strong dampening
+                vix_filter_active = True
+                vix_component = Component(
+                    type=ComponentType.TECHNICAL, name="VIX Filter",
+                    value=0.0,
+                    description=f"VIX {vix_value:.1f} > 30: HIGH VOLATILITY - signal dampened",
+                    confidence=0.9, indicators={"vix": vix_value, "action": "dampened"}
+                )
+            elif vix_value > 22:
+                technical_score *= 0.7
+                vix_filter_active = True
+                vix_component = Component(
+                    type=ComponentType.TECHNICAL, name="VIX Filter",
+                    value=0.0,
+                    description=f"VIX {vix_value:.1f} > 22: elevated volatility - mild dampening",
+                    confidence=0.7, indicators={"vix": vix_value, "action": "mild_dampen"}
+                )
+        if vix_component:
+            components.append(vix_component)
+
+        # ── Seasonality Filter (v2) ──
+        # Turn-of-month effect: days 1-3 of month have positive bias
+        from datetime import datetime
+        now = datetime.now()
+        is_turn_of_month = now.day <= 3
+        seasonality_bias = 0.0
+        if is_turn_of_month:
+            # Add +0.1 bias for turn-of-month (Sharpe ~1.8 in research)
+            seasonality_bias = 0.10
+            components.append(Component(
+                type=ComponentType.TECHNICAL, name="Seasonality",
+                value=seasonality_bias,
+                description=f"Turn-of-month (day {now.day}): +{seasonality_bias:.2f} bias",
+                confidence=0.6, indicators={"day": now.day, "effect": "turn_of_month"}
+            ))
+
+        # Apply seasonality bias
+        if seasonality_bias > 0:
+            technical_score = technical_score * 0.9 + seasonality_bias
+
+        # === END V2 FILTERS ===
+
         # Blend with news + HTF
         effective_news = news_score if abs(news_score) > 0.1 else 0.0
         if effective_news != 0:
@@ -599,6 +652,63 @@ class MMSStrategy(BaseStrategy):
         # Apply volatility factor (more volatile = stronger signal)
         raw_score *= vol_factor
         technical_score = max(-1, min(1, raw_score))
+
+        # === V2 FILTERS FOR MMS ===
+
+        # ── VIX Filter (v2) ──
+        # MMS is more sensitive to volatility - lower threshold
+        vix = indicators.get("vix") or indicators.get("_vix")
+        vix_component = None
+        if vix and isinstance(vix, dict):
+            vix_value = vix.get("value", vix.get("VIX", 0))
+            if vix_value > 25:
+                # MMS: skip if VIX > 25 (mean reversion fails in extreme volatility)
+                technical_score = 0.0  # Neutralize signal
+                vix_component = Component(
+                    type=ComponentType.TECHNICAL, name="VIX Filter (MMS)",
+                    value=0.0,
+                    description=f"VIX {vix_value:.1f} > 25: MMS disabled in extreme volatility",
+                    confidence=0.95, indicators={"vix": vix_value, "action": "disabled"}
+                )
+            elif vix_value > 20:
+                technical_score *= 0.5
+                vix_component = Component(
+                    type=ComponentType.TECHNICAL, name="VIX Filter (MMS)",
+                    value=0.0,
+                    description=f"VIX {vix_value:.1f} > 20: reduced MMS confidence",
+                    confidence=0.7, indicators={"vix": vix_value, "action": "reduced"}
+                )
+        if vix_component:
+            components.append(vix_component)
+
+        # ── Seasonality Filter (v2) ──
+        # MMS benefits more from turn-of-month (mean reversion stronger)
+        from datetime import datetime
+        now = datetime.now()
+        is_turn_of_month = now.day <= 3
+        if is_turn_of_month:
+            # MMS gets stronger bias: +0.15 (mean reversion effect stronger)
+            technical_score = technical_score * 0.85 + 0.15
+            components.append(Component(
+                type=ComponentType.TECHNICAL, name="Seasonality (MMS)",
+                value=0.15,
+                description=f"Turn-of-month (day {now.day}): +0.15 bias for MMS",
+                confidence=0.65, indicators={"day": now.day, "effect": "turn_of_month"}
+            ))
+
+        # ── No-Trade Zone (v2) ──
+        # Add buffer zone around band edges (MMS already waits for extremes, add 2% buffer)
+        if 0.03 < bb_position < 0.07 or 0.93 < bb_position < 0.97:
+            # Near buffer zone - reduce signal
+            technical_score *= 0.5
+            components.append(Component(
+                type=ComponentType.TECHNICAL, name="No-Trade Zone",
+                value=0.0,
+                description=f"BB position {bb_position:.2f} in buffer zone - reduced",
+                confidence=0.6, indicators={"bb_position": bb_position, "action": "buffer"}
+            ))
+
+        # === END V2 FILTERS ===
 
         # ── Sequentiality leverage adjustment ──
         seq_state = _get_seq_state(symbol)

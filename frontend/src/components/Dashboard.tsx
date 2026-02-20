@@ -34,6 +34,27 @@ export const Dashboard: React.FC = () => {
   const [accountData, setAccountData] = useState<any>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeName>(getStoredTheme());
+  const [broker, setBroker] = useState<"simulation" | "ibkr">("simulation");
+  const [autoTrade, setAutoTrade] = useState<boolean>(false);
+
+  // Load trading mode from API on mount
+  useEffect(() => {
+    const loadTradingMode = async () => {
+      try {
+        const res = await fetch(apiUrl("trading-mode"));
+        if (res.ok) {
+          const data = await res.json();
+          setBroker(data.broker);
+          setAutoTrade(data.autoTrade);
+          localStorage.setItem("cfd_broker", data.broker);
+          localStorage.setItem("cfd_autoTrade", String(data.autoTrade));
+        }
+      } catch (e) {
+        console.error("Failed to load trading mode:", e);
+      }
+    };
+    loadTradingMode();
+  }, []);
 
   // Apply theme CSS variables
   useEffect(() => {
@@ -75,6 +96,14 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     localStorage.setItem("cfd_selectedSymbol", selectedSymbol);
   }, [selectedSymbol]);
+
+  useEffect(() => {
+    localStorage.setItem("cfd_broker", broker);
+  }, [broker]);
+
+  useEffect(() => {
+    localStorage.setItem("cfd_autoTrade", String(autoTrade));
+  }, [autoTrade]);
 
   useEffect(() => {
     const timeInterval = setInterval(() => {
@@ -179,18 +208,6 @@ export const Dashboard: React.FC = () => {
           >
             v0.4.0
           </span>
-          <span
-            className="text-[10px] px-1.5 py-0.5 rounded-sm font-medium"
-            style={{
-              backgroundColor:
-                accountData?.mode === "simulate"
-                  ? "rgba(234, 179, 8, 0.15)"
-                  : "rgba(239, 68, 68, 0.15)",
-              color: accountData?.mode === "simulate" ? "#eab308" : "var(--danger)",
-            }}
-          >
-            {accountData?.mode === "simulate" ? "SIM" : "LIVE"}
-          </span>
         </div>
 
         {/* Desktop Tab Navigation */}
@@ -241,7 +258,13 @@ export const Dashboard: React.FC = () => {
           z-50 transition-transform duration-200 ease-in-out
         `}
         >
-          <Sidebar accountData={accountData} />
+          <Sidebar 
+              accountData={accountData} 
+              broker={broker}
+              autoTrade={autoTrade}
+              onBrokerChange={setBroker}
+              onAutoTradeChange={setAutoTrade}
+            />
         </div>
 
         {/* Tab Content */}

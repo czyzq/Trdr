@@ -358,3 +358,96 @@ def generate_sample_data(
                 current_dt += timedelta(minutes=interval_minutes)
 
     return candles
+
+
+# ──────────────────────────────────────────────────────────────────────
+# VIX Fetcher (v2)
+# ──────────────────────────────────────────────────────────────────────
+
+def get_volatility_index(symbol: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch volatility index for given symbol.
+    
+    Symbol mappings:
+    - XAU, Gold -> ^GVZ (Gold Volatility)
+    - US100, NQ, Nasdaq -> ^VXN (Nasdaq Volatility)
+    - SPX, S&P500 -> ^VIX (S&P 500 Volatility)
+    - XAG, Silver -> use Gold volatility as proxy
+    - BTC -> use S&P 500 VIX as proxy (no dedicated BTC VIX)
+    - Default -> ^VIX
+    """
+    import httpx
+    
+    # Map symbols to volatility indices
+    vix_map = {
+        "XAU": ("^GVZ", "Gold Volatility (GVZ)"),
+        "GOLD": ("^GVZ", "Gold Volatility (GVZ)"),
+        "GC": ("^GVZ", "Gold Volatility (GVZ)"),
+        "XAG": ("^GVZ", "Silver Volatility (proxy: Gold)"),
+        "SILVER": ("^GVZ", "Silver Volatility (proxy: Gold)"),
+        "SI": ("^GVZ", "Silver Volatility (proxy: Gold)"),
+        "US100": ("^VXN", "Nasdaq Volatility (VXN)"),
+        "NQ": ("^VXN", "Nasdaq Volatility (VXN)"),
+        "NASDAQ": ("^VXN", "Nasdaq Volatility (VXN)"),
+        "SPX": ("^VIX", "S&P 500 Volatility (VIX)"),
+        "SPY": ("^VIX", "S&P 500 Volatility (VIX)"),
+        "BTC": ("^VIX", "Crypto Volatility (proxy: VIX)"),
+        "BTCUSD": ("^VIX", "Crypto Volatility (proxy: VIX)"),
+    }
+    
+    # Get volatility symbol
+    vix_symbol, vix_name = vix_map.get(symbol.upper(), ("^VIX", "S&P 500 Volatility (VIX)"))
+    
+    # Get last 2 days to get latest value
+    end_ts = int(time.time())
+    start_ts = end_ts - (3 * 86400)  # 3 days back
+    
+    chart_url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{vix_symbol}"
+        f"?period1={start_ts}&period2={end_ts}&interval=1d"
+    )
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    }
+    
+    try:
+        with httpx.Client(follow_redirects=True) as client:
+            resp = client.get(chart_url, headers=headers, timeout=15)
+            resp.raise_for_status()
+        
+        data = resp.json()
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            return None
+            
+        timestamps = result[0].get("timestamp", [])
+        quote = result[0].get("indicators", {}).get("quote", [{}])[0]
+        closes = quote.get("close", [])
+        
+        if not closes or closes[-1] is None:
+            return None
+            
+        current_vix = closes[-1]
+        previous_vix = closes[-2] if len(closes) > 1 and closes[-2] is not None else current_vix
+        change_pct = ((current_vix - previous_vix) / previous_vix * 100) if previous_vix else 0
+        
+        return {
+            "value": round(current_vix, 2),
+            "timestamp": timestamps[-1] if timestamps else int(time.time()),
+            "change_pct": round(change_pct, 2),
+            "symbol": vix_symbol,
+            "name": vix_name,
+        }
+        
+    except Exception as e:
+        print(f"[VIX] Error fetching {vix_symbol}: {e}")
+        return None
+
+
+def get_vix() -> Optional[Dict[str, Any]]:
+    """
+    Fetch current VIX value from Yahoo Finance (S&P 500 Volatility).
+    Legacy function - use get_volatility_index() for instrument-specific VIX.
+    """
+    return get_volatility_index("SPX")

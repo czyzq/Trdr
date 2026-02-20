@@ -710,11 +710,12 @@ def get_signal_direction(score: float, min_score: float = 0.15) -> SignalDirecti
 # MAX_DRAWDOWN_PCT, MAX_OPEN_POSITIONS, MAX_RISK_PER_TRADE_PCT, INITIAL_BALANCE_USD
 
 def check_circuit_breaker() -> tuple[bool, str]:
-    """Check if trading should be halted due to drawdown or position limits.
+    """Check if trading should be adjusted due to drawdown or position limits.
 
-    Drawdown is calculated from EQUITY (balance + unrealized P&L), not just cash balance.
-    This properly accounts for leverage - a 5x leveraged position moving 4% against you
-    results in 20% equity drawdown, triggering the circuit breaker correctly.
+    Instead of blocking trading entirely when drawdown is high, we:
+    - Increase minimum signal score requirement
+    - Reduce position size
+    - This allows recovery while managing risk
     """
     # Use equity (balance + unrealized P&L) for drawdown calculation
     current_equity = account.get("equity_usd", account["balance_usd"])
@@ -722,15 +723,33 @@ def check_circuit_breaker() -> tuple[bool, str]:
     peak_equity = max(initial_balance, account.get("peak_equity_usd", account.get("peak_balance_usd", initial_balance)))
 
     drawdown_pct = ((peak_equity - current_equity) / peak_equity) * 100 if peak_equity > 0 else 0
-
     max_dd_pct = db.get_setting("MAX_DRAWDOWN_PCT", 20.0)
-    if drawdown_pct >= max_dd_pct:
-        return False, f"CIRCUIT BREAKER: {drawdown_pct:.1f}% drawdown exceeds {max_dd_pct}% limit"
 
     max_positions = db.get_setting("MAX_OPEN_POSITIONS", 3)
     if len(open_positions) >= max_positions:
         return False, f"Max {max_positions} positions reached"
 
+    # If drawdown exceeds limit, still allow trading but with stricter conditions
+    if drawdown_pct >= max_dd_pct:
+        # Calculate risk multiplier based on drawdown severity
+        # At 20% drawdown: 0.5x size, at 40%: 0.25x size
+        severity = min((drawdown_pct - max_dd_pct) / 20.0, 1.0)  # 0 to 1
+        size_multiplier = max(0.25, 1.0 - (severity * 0.75))  # 0.25 to 1.0
+        
+        # Increase min_score requirement (0.15 -> up to 0.45)
+        min_score_boost = severity * 0.30  # up to +0.30
+        
+        log_event(f"[CIRCUIT-BREAKER] {drawdown_pct:.1f}% DD | Size: {size_multiplier:.0%} | Min score: +{min_score_boost:.2f}", "warning")
+        
+        # Store in account for use in auto-trade
+        account["_risk_multiplier"] = size_multiplier
+        account["_min_score_boost"] = min_score_boost
+        return True, f"RESTRICTED: {drawdown_pct:.1f}% drawdown"
+
+    # Clear any previous restrictions
+    account["_risk_multiplier"] = 1.0
+    account["_min_score_boost"] = 0.0
+    
     return True, "OK"
 
 def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -> float:
@@ -882,6 +901,23 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                         htf_bias = max(-1, min(1, htf_bias))
         except Exception:
             pass  # MTF is optional
+
+        # ── VIX Filter (v2) ──
+        # Get instrument-specific volatility index
+        vix_data = None
+        try:
+            from historical_data import get_volatility_index
+            vix_data = get_volatility_index(symbol)
+            if vix_data:
+                indicators["vix"] = vix_data
+                print(f"[VIX] {symbol}: {vix_data['value']} ({vix_data['name']}, change: {vix_data['change_pct']:+.1f}%)")
+            else:
+                # Fallback to standard VIX
+                vix_data = get_volatility_index("SPX")
+                if vix_data:
+                    indicators["vix"] = vix_data
+        except Exception as e:
+            print(f"[VIX] Could not fetch VIX for {symbol}: {e}")
 
         # ── Volatility filter ──
         atr = indicators.get("atr_14", current_price * 0.01)
@@ -1055,6 +1091,10 @@ async def auto_trade_loop():
 
             # ── Step 3: Auto-execute trades on strong signals ──
             can_trade, reason = check_circuit_breaker()
+            # Get risk adjustments from circuit breaker
+            size_multiplier = account.get("_risk_multiplier", 1.0)
+            min_score_boost = account.get("_min_score_boost", 0.0)
+            
             if can_trade:
                 for signal in signals:
                     if signal.direction in (SignalDirection.NEUTRAL,):
@@ -1062,7 +1102,7 @@ async def auto_trade_loop():
 
                     sym = signal.symbol
                     info = INSTRUMENTS.get(sym, {})
-                    min_score = info.get("min_score", 0.15)
+                    min_score = info.get("min_score", 0.15) + min_score_boost
 
                     # Only auto-trade on signals that clear the threshold
                     if abs(signal.score) < min_score:
@@ -1118,7 +1158,7 @@ async def auto_trade_loop():
                         take_profit = entry_price - (atr * 3)
                         stop_loss = entry_price + (atr * 2)
 
-                    size = calculate_position_size(sym, entry_price, stop_loss)
+                    size = calculate_position_size(sym, entry_price, stop_loss) * size_multiplier
 
                     result = await broker.open_position(
                         symbol=sym, direction=direction, size=size,
@@ -1298,14 +1338,34 @@ async def get_account():
 
 @app.post("/api/account/mode")
 async def set_account_mode(mode: str):
-    global account
+    global account, AUTO_TRADE_ENABLED
     if mode not in ["simulate", "live"]:
         return {"error": "Invalid mode. Use 'simulate' or 'live'"}
+    
     account["mode"] = mode
     account["dry_run"] = (mode == "simulate")
+    
+    # Auto-trade: enabled only in live mode
+    AUTO_TRADE_ENABLED = (mode == "live")
+    
     await async_save_account(account)
-    log_event(f"Trading mode changed to: {mode.upper()}", "event")
-    return {"mode": account["mode"], "dry_run": account["dry_run"]}
+    log_event(f"[MODE] {mode.upper()} | Auto-trade: {'ON' if AUTO_TRADE_ENABLED else 'OFF'}", "event")
+    return {"mode": account["mode"], "auto_trade": AUTO_TRADE_ENABLED}
+
+@app.post("/api/account/broker")
+async def set_account_broker(broker: str):
+    """Set broker type - 'simulation' or 'ibkr'. Note: IBKR requires restart/reconnection."""
+    if broker not in ["simulation", "ibkr"]:
+        return {"error": "Invalid broker. Use 'simulation' or 'ibkr'"}
+    
+    # Map to internal type
+    broker_type = "sim" if broker == "simulation" else "ibkr"
+    
+    # Store preference in DB
+    db.set_setting("PREFERRED_BROKER", broker_type, "system")
+    
+    log_event(f"[BROKER] Preference changed to: {broker.upper()} (requires restart for IBKR)", "event")
+    return {"broker": broker, "message": "Broker preference saved. For IBKR, restart is required."}
 
 @app.get("/api/settings")
 async def get_settings():
@@ -1315,6 +1375,31 @@ async def get_settings():
     return {
         "db": db_settings,
         "broker": broker_settings,
+    }
+
+@app.get("/api/trading-mode")
+async def get_trading_mode():
+    """Get current trading mode from DB settings."""
+    broker = db.get_setting("PREFERRED_BROKER", "sim")
+    auto_trade = db.get_setting("AUTO_TRADE_ENABLED", False)
+    # Map internal "sim" to frontend "simulation"
+    broker_display = "simulation" if broker == "sim" else "ibkr"
+    return {
+        "broker": broker_display,
+        "autoTrade": bool(auto_trade),
+    }
+
+@app.post("/api/trading-mode")
+async def set_trading_mode(broker: str = "simulation", autoTrade: bool = False):
+    """Set trading mode in DB settings."""
+    # Map frontend "simulation" to internal "sim"
+    broker_type = "sim" if broker == "simulation" else broker
+    db.set_setting("PREFERRED_BROKER", broker_type, "system")
+    db.set_setting("AUTO_TRADE_ENABLED", 1 if autoTrade else 0, "system")
+    log_event(f"[TRADING-MODE] Broker: {broker}, Auto-trade: {'ON' if autoTrade else 'OFF'}", "event")
+    return {
+        "broker": broker,
+        "autoTrade": autoTrade,
     }
 
 @app.post("/api/settings")
@@ -1948,14 +2033,31 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
 
     chart_data = _format_candles(all_candles)
 
+    # Get instrument-specific VIX
+    vix_data = None
+    try:
+        from historical_data import get_volatility_index
+        vix_data = get_volatility_index(symbol)
+    except Exception:
+        pass
+
     # Update candle_cache for backward compat
     await async_save_candles(symbol, resolution, chart_data, source or "hybrid")
 
-    return {
+    response = {
         "symbol": symbol, "data": chart_data, "resolution": resolution,
         "count": len(chart_data), "source": source or "hybrid",
         "fetched_at": fetched_at,
     }
+    
+    if vix_data:
+        response["vix"] = {
+            "value": vix_data["value"],
+            "name": vix_data["name"],
+            "change_pct": vix_data["change_pct"],
+        }
+    
+    return response
 
 # Alert Endpoints
 @app.get("/api/alerts/config")

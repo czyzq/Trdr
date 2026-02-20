@@ -1,60 +1,62 @@
 # News & Twitter Sentiment Research
 
-## Tasks
+## Research Progress
 
-### 1. News Tab
-- Figure out best free news source for trading
-- Options to research:
-  - Yahoo Finance API (free)
-  - NewsAPI.org (free tier)
-  - RSS feeds from trading sites
+### Research Done (2026-02-20)
+
+#### Twitter/X
+- **X API (Twitter):** Now **pay-per-usage only** - no free tier. Expensive for scraping.
+- **Nitter:** Instance seems down/blocked
+- **RSS via Nitter:** Not working
+
+#### News Sources
+- **NewsAPI.org:** Requires registration, has free tier (100 requests/day)
+- **Yahoo Finance:** Has news but RSS feeds seem broken
+- **Need to try:**
+  - Finviz RSS
+  - Investing.com (may need API)
   - CryptoPanic API
-- Implement in backend
+  - RSS aggregator
 
-### 2. Twitter/X Scraping for Trade Signals
-- **Goal:** Scrape tweets from accounts that post trading signals
-- **Use case:** Sentiment analysis + signal confirmation
-- **Accounts to consider:** (need to find actual ones)
-  - Crypto traders
-  - Forex signals accounts
-  - Stock trading influencers
+### Still to Research
+1. Finviz RSS feeds
+2. CryptoPanic API
+3. TradingView community signals
+4. StockTwits API
 
-### Technical Options (Free)
+### Recommended Implementation Path
 
-#### Option A: Twitter API v2 (Free Tier)
-- 1.5M tweets/month free
-- Need developer account
-- Rate limits apply
+**Phase 1: News (easier)**
+1. Use NewsAPI.org free tier OR
+2. Scrape Yahoo Finance news page directly
 
-#### Option B: Nitter (Twitter frontend - RSS)
-- Free, open source
-- No API needed
-- RSS feeds available
-- Might break due to Twitter restrictions
+**Phase 2: Twitter Signals (harder)**
+1. Try X API pay-per-use (estimate costs)
+2. Alternative: Scrape trading signal websites directly
+3. Alternative: Use TradingView's community signals
 
-#### Option C: Web Scraping
-- Use Playwright/Cheerio
-- Scrape profile pages
-- Risk: IP blocks, TOS violations
+### Technical Notes
 
-#### Option D: Third-party aggregators
-- CryptoScreener signals
-- TradingView community
-- StockTwits API
+#### NewsAPI.org
+- Free tier: 100 requests/day
+- Endpoint: `https://newsapi.org/v2/everying?q=gold+OR+xau`
+- Registration required
 
-### Recommended Approach
-1. Start with **Twitter API free tier** if available
-2. Fallback to **RSS feeds** via Nitter or similar
-3. Use cronjob to poll every 1 hour
-
-### Implementation Plan
-1. Research free news APIs → implement news endpoint
-2. Research Twitter scraping options
-3. Create backend endpoint for Twitter signals
-4. Add cronjob to fetch every 1 hour
-5. Integrate with trading signals
+#### Direct Scraping (Yahoo Finance)
+- URL: `https://finance.yahoo.com/news/`
+- Use Cheerio or Playwright
+- No API key needed
 
 ---
 
-## Notes
+## Tasks
+
+- [ ] Try NewsAPI.org (register, test free tier)
+- [ ] Test Yahoo Finance direct scraping
+- [ ] Find working RSS feeds
+- [ ] Research X API costs
+- [ ] Alternative: Find trading signal websites to scrape
+- [ ] Implement backend endpoint for news
+- [ ] Implement Twitter/signal scraping
+- [ ] Add to cronjob (every 30-60 min)
 

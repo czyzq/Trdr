@@ -38,7 +38,6 @@ export const TradesTab: React.FC = () => {
     const saved = localStorage.getItem("cfd_tradesSection");
     return saved === "history" ? "history" : "open";
   });
-  const [minimized, setMinimized] = useState(false);
   const [stats, setStats] = useState({
     win_count: 0,
     loss_count: 0,
@@ -235,18 +234,6 @@ export const TradesTab: React.FC = () => {
             History ({closedTrades.length})
           </button>
         </div>
-        <button
-          onClick={() => setMinimized(!minimized)}
-          style={{
-            color: "var(--text-muted)",
-            transform: minimized ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform 0.2s",
-          }}
-          className="p-1"
-          title={minimized ? "Expand" : "Minimize"}
-        >
-          ▼
-        </button>
       </div>
 
       {/* Content */}
@@ -255,7 +242,6 @@ export const TradesTab: React.FC = () => {
         style={{ 
           backgroundColor: "var(--bg-secondary)", 
           border: "1px solid var(--bg-tertiary)",
-          display: minimized ? "none" : "flex",
         }}
       >
         {activeSection === "open" ? (

@@ -18,6 +18,11 @@ interface ChartResponse {
   count: number;
   source: string;
   fetched_at?: string;
+  vix?: {
+    value: number;
+    name: string;
+    change_pct: number;
+  };
 }
 
 interface Trade {
@@ -217,6 +222,18 @@ export const ChartsTab: React.FC = () => {
                   <span className="text-[10px]" style={{ color: "#4a5568" }}>
                     {instrument.name}
                   </span>
+                  {/* VIX Display */}
+                  {chartData?.vix && (
+                    <span
+                      className="text-[10px] ml-2 px-1.5 py-0.5 rounded"
+                      style={{
+                        backgroundColor: "var(--bg-tertiary)",
+                        color: chartData.vix.change_pct > 0 ? "var(--danger)" : "var(--success)",
+                      }}
+                    >
+                      VIX: {chartData.vix.value.toFixed(1)} ({chartData.vix.change_pct > 0 ? "+" : ""}{chartData.vix.change_pct.toFixed(1)}%)
+                    </span>
+                  )}
                   {/* Trade markers legend */}
                   {trades.some((t) => t.symbol === instrument.symbol) && (
                     <div
