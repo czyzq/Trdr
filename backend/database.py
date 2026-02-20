@@ -3,11 +3,13 @@ MongoDB persistence layer for CFD Trading Bot.
 Collections: account, trades, signal_cache, candle_cache, quote_cache, candles, event_log
 Falls back to in-memory if MONGO_URI is not set.
 """
+
 import os
 from collections import OrderedDict
 from datetime import datetime
+from typing import Any, List, Optional
+
 from timezone import now_warsaw
-from typing import List, Optional, Any
 
 _db = None
 _connected = False
@@ -23,21 +25,23 @@ def get_db():
 
     mongo_uri = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI")
     mongo_db = os.getenv("MONGO_DB", "cfd_trading_bot")
-    
+
     print(f"[DB] Checking MongoDB config...")
     print(f"[DB] MONGO_URI set: {bool(mongo_uri)} (length: {len(mongo_uri) if mongo_uri else 0})")
     print(f"[DB] MONGO_DB: {mongo_db}")
-    
+
     if not mongo_uri:
         print(f"[DB] MONGO_URI not set - using in-memory storage")
         _connected = True
         return None
 
     try:
-        from pymongo import MongoClient
         import ssl
+
+        from pymongo import MongoClient
+
         print(f"[DB] Connecting to MongoDB...")
-        
+
         # Connection with proper SSL handling for Atlas
         client = MongoClient(
             mongo_uri,
@@ -46,11 +50,11 @@ def get_db():
         )
         client.admin.command("ping")
         print(f"[DB] ✅ MongoDB connected successfully")
-        
+
         _db = client[mongo_db]
         _connected = True
         print(f"[DB] ✅ MongoDB connected successfully to database: {mongo_db}")
-        
+
         # Test write access
         try:
             _db.test_connection.insert_one({"test": True, "timestamp": datetime.utcnow()})
@@ -58,7 +62,7 @@ def get_db():
             print(f"[DB] ✅ Write access confirmed")
         except Exception as write_err:
             print(f"[DB] ⚠️ Connected but write test failed: {write_err}")
-        
+
         return _db
     except Exception as e:
         print(f"[DB] ❌ MongoDB connection failed: {type(e).__name__}: {e}")
@@ -120,6 +124,7 @@ def save_account(account: dict):
 
 # ── Trades ───────────────────────────────────────────────────────────
 
+
 def load_open_positions() -> list:
     """Load open positions from DB."""
     db = get_db()
@@ -167,6 +172,7 @@ def delete_all_trades():
 
 
 # ── Signal Cache ─────────────────────────────────────────────────────
+
 
 def load_signal_cache_db() -> dict:
     """Load signal history cache from DB."""
@@ -280,6 +286,7 @@ def store_candles(symbol: str, resolution: str, candles: list, source: str = "")
     db = get_db()
     if db is not None:
         from pymongo import UpdateOne
+
         ops = []
         for c in candles:
             ts = c.get("timestamp", "")
@@ -296,11 +303,13 @@ def store_candles(symbol: str, resolution: str, candles: list, source: str = "")
                 "volume": c.get("volume", 0),
                 "source": source,
             }
-            ops.append(UpdateOne(
-                {"symbol": symbol, "resolution": resolution, "timestamp": ts},
-                {"$set": doc},
-                upsert=True,
-            ))
+            ops.append(
+                UpdateOne(
+                    {"symbol": symbol, "resolution": resolution, "timestamp": ts},
+                    {"$set": doc},
+                    upsert=True,
+                )
+            )
         if ops:
             db.candles.bulk_write(ops, ordered=False)
     else:
@@ -388,7 +397,8 @@ def ensure_candle_indexes():
     db = get_db()
     if db is None:
         return
-    
+
+
 def ensure_trades_indexes():
     db = get_db()
     if db:
@@ -401,12 +411,14 @@ def ensure_trades_indexes():
 async def async_calc_closed_stats():
     pipeline = [
         {"$match": {"status": "closed"}},
-        {"$group": {
-            "_id": None,
-            "total_count": {"$sum": 1},
-            "total_pnl": {"$sum": "$pnl_usd"},
-            "win_count": {"$sum": {"$cond": [{"$gte": ["$pnl_usd", 0]}, 1, 0]}},
-        }}
+        {
+            "$group": {
+                "_id": None,
+                "total_count": {"$sum": 1},
+                "total_pnl": {"$sum": "$pnl_usd"},
+                "win_count": {"$sum": {"$cond": [{"$gte": ["$pnl_usd", 0]}, 1, 0]}},
+            }
+        },
     ]
     db_conn = get_db()
     if db_conn:
@@ -434,6 +446,7 @@ async def async_calc_closed_stats():
         background=True,
     )
 
+
 def ensure_trades_indexes():
     """Create indexes on the trades collection for fast queries."""
     db = get_db()
@@ -453,11 +466,11 @@ def ensure_trades_indexes():
 
 AGGREGATION_MAP = {
     "5": ("1", 5),
-    "15": ("5", 3),    # or ("1", 15)
-    "30": ("15", 2),   # or ("5", 6)
-    "60": ("30", 2),   # or ("15", 4)
+    "15": ("5", 3),  # or ("1", 15)
+    "30": ("15", 2),  # or ("5", 6)
+    "60": ("30", 2),  # or ("15", 4)
     "240": ("60", 4),  # 4H from 1H
-    "D": ("60", None), # daily from hourly — group by date
+    "D": ("60", None),  # daily from hourly — group by date
 }
 
 
@@ -518,23 +531,26 @@ def aggregate_candles(candles: list, target_resolution: str) -> list:
     group_size = max(1, n // src_minutes)
     result = []
     for i in range(0, len(candles), group_size):
-        group = candles[i:i + group_size]
+        group = candles[i : i + group_size]
         if not group:
             continue
-        result.append({
-            "timestamp": group[0].get("timestamp", ""),
-            "time": group[0].get("time", ""),
-            "open": group[0]["open"],
-            "high": max(c["high"] for c in group),
-            "low": min(c["low"] for c in group),
-            "close": group[-1]["close"],
-            "volume": sum(c.get("volume", 0) for c in group),
-        })
+        result.append(
+            {
+                "timestamp": group[0].get("timestamp", ""),
+                "time": group[0].get("time", ""),
+                "open": group[0]["open"],
+                "high": max(c["high"] for c in group),
+                "low": min(c["low"] for c in group),
+                "close": group[-1]["close"],
+                "volume": sum(c.get("volume", 0) for c in group),
+            }
+        )
     return result
 
 
 # ── Event Log ──────────────────────────────────────────────────────
 # Persists the last N log entries so they survive restarts.
+
 
 def save_event_log(events: list, max_entries: int = 200):
     """Persist recent event log entries to DB."""
@@ -566,25 +582,31 @@ def load_event_log() -> list:
 # =============================================================================
 import asyncio
 
+
 async def async_load_account() -> dict:
     """Async: Load account state from DB."""
     return await asyncio.to_thread(load_account)
+
 
 async def async_save_account(account: dict):
     """Async: Persist account state."""
     return await asyncio.to_thread(save_account, account)
 
+
 async def async_load_open_positions() -> list:
     """Async: Load open positions."""
     return await asyncio.to_thread(load_open_positions)
+
 
 async def async_load_closed_positions(limit: int = 1000) -> list:
     """Async: Load closed positions."""
     return await asyncio.to_thread(load_closed_positions, limit)
 
+
 async def async_save_trade(trade: dict):
     """Async: Save trade to DB."""
     return await asyncio.to_thread(save_trade, trade)
+
 
 async def async_load_candle_history(
     symbol: str,
@@ -596,29 +618,36 @@ async def async_load_candle_history(
     """Async: Load candle history."""
     return await asyncio.to_thread(load_candle_history, symbol, resolution, start, end, limit)
 
+
 async def async_store_candles(symbol: str, resolution: str, candles: list, source: str = ""):
     """Async: Store candles to history."""
     return await asyncio.to_thread(store_candles, symbol, resolution, candles, source)
+
 
 async def async_load_candles(symbol: str, resolution: str) -> Optional[dict]:
     """Async: Load cached candles."""
     return await asyncio.to_thread(load_candles, symbol, resolution)
 
+
 async def async_save_candles(symbol: str, resolution: str, candles: list, source: str):
     """Async: Save candles to cache."""
     return await asyncio.to_thread(save_candles, symbol, resolution, candles, source)
+
 
 async def async_load_signal_cache_db() -> dict:
     """Async: Load signal cache."""
     return await asyncio.to_thread(load_signal_cache_db)
 
+
 async def async_save_signal_cache_db(cache: dict):
     """Async: Save signal cache."""
     return await asyncio.to_thread(save_signal_cache_db, cache)
 
+
 async def async_save_event_log(events: list, max_entries: int = 200):
     """Async: Persist event log."""
     return await asyncio.to_thread(save_event_log, events, max_entries)
+
 
 async def async_load_event_log() -> list:
     """Async: Load event log."""
@@ -639,9 +668,11 @@ async def async_count_candles(symbol: str, resolution: str) -> int:
     """Async: Count candles."""
     return await asyncio.to_thread(count_candles, symbol, resolution)
 
+
 async def async_ensure_trades_indexes():
     """Async: Ensure trades indexes."""
     return await asyncio.to_thread(ensure_trades_indexes)
+
 
 def sync_account_from_closed_trades_sync() -> dict:
     """Fast sync of account stats from closed trades using MongoDB aggregation.
@@ -650,18 +681,20 @@ def sync_account_from_closed_trades_sync() -> dict:
     db = get_db()
     if db is None:
         return {"total_pnl_usd": 0.0, "win_count": 0, "loss_count": 0, "closed_trades": 0}
-    
+
     pipeline = [
         {"$match": {"status": "closed"}},
-        {"$group": {
-            "_id": None,
-            "total_pnl_usd": {"$sum": "$pnl_usd"},
-            "win_count": {"$sum": {"$cond": [{"$gte": ["$pnl_usd", 0]}, 1, 0]}},
-            "loss_count": {"$sum": {"$cond": [{"$lt": ["$pnl_usd", 0]}, 1, 0]}},
-            "closed_trades": {"$sum": 1}
-        }}
+        {
+            "$group": {
+                "_id": None,
+                "total_pnl_usd": {"$sum": "$pnl_usd"},
+                "win_count": {"$sum": {"$cond": [{"$gte": ["$pnl_usd", 0]}, 1, 0]}},
+                "loss_count": {"$sum": {"$cond": [{"$lt": ["$pnl_usd", 0]}, 1, 0]}},
+                "closed_trades": {"$sum": 1},
+            }
+        },
     ]
-    
+
     result = list(db.trades.aggregate(pipeline))
     if result:
         doc = result[0]
@@ -669,9 +702,10 @@ def sync_account_from_closed_trades_sync() -> dict:
             "total_pnl_usd": round(doc.get("total_pnl_usd", 0.0), 2),
             "win_count": doc.get("win_count", 0),
             "loss_count": doc.get("loss_count", 0),
-            "closed_trades": doc.get("closed_trades", 0)
+            "closed_trades": doc.get("closed_trades", 0),
         }
     return {"total_pnl_usd": 0.0, "win_count": 0, "loss_count": 0, "closed_trades": 0}
+
 
 async def async_sync_account_from_closed_trades() -> dict:
     """Async: Fast sync of account stats from closed trades using aggregation."""
@@ -697,6 +731,7 @@ async def async_load_quote(symbol: str) -> Optional[dict]:
 # MMS SEQUENTIALITY STATE
 # =============================================================================
 
+
 def save_mms_state(symbol: str, state: dict):
     """Save MMS sequentiality state for a symbol."""
     try:
@@ -704,9 +739,7 @@ def save_mms_state(symbol: str, state: dict):
         if db is None:
             return False
         db.mms_state.update_one(
-            {"symbol": symbol},
-            {"$set": {"state": state, "updated_at": datetime.utcnow()}},
-            upsert=True
+            {"symbol": symbol}, {"$set": {"state": state, "updated_at": datetime.utcnow()}}, upsert=True
         )
         return True
     except Exception as e:
@@ -756,6 +789,7 @@ async def async_load_all_mms_states() -> dict:
     """Async: Load all MMS sequentiality states."""
     return await asyncio.to_thread(load_all_mms_states)
 
+
 # ── Settings ──────────────────────────────────────────────────────────
 
 DEFAULT_SETTINGS = {
@@ -784,9 +818,7 @@ def set_setting(key: str, value: Any, updated_by: str = "system") -> bool:
     old_doc = db.settings_current.find_one({"key": key})
     old_value = old_doc.get("value") if old_doc else None
     db.settings_current.replace_one(
-        {"key": key},
-        {"key": key, "value": value, "updated_at": now, "updated_by": updated_by},
-        upsert=True
+        {"key": key}, {"key": key, "value": value, "updated_at": now, "updated_by": updated_by}, upsert=True
     )
     event_doc = {
         "timestamp": now,
@@ -830,13 +862,7 @@ def materialize_settings():
     db = get_db()
     if db is None:
         return
-    pipeline = [
-        {"$sort": {"timestamp": -1}},
-        {"$group": {
-            "_id": "$key",
-            "doc": {"$first": "$$ROOT"}
-        }}
-    ]
+    pipeline = [{"$sort": {"timestamp": -1}}, {"$group": {"_id": "$key", "doc": {"$first": "$$ROOT"}}}]
     latest_events = list(db.settings_events.aggregate(pipeline))
     for item in latest_events:
         event = item["doc"]
@@ -846,9 +872,9 @@ def materialize_settings():
                 "key": event["key"],
                 "value": event["new_value"],
                 "updated_at": event["timestamp"],
-                "updated_by": event["updated_by"]
+                "updated_by": event["updated_by"],
             },
-            upsert=True
+            upsert=True,
         )
 
 

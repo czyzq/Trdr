@@ -2,8 +2,9 @@
 Broker and data source settings
 Configurable refresh rates per broker/data source
 """
+
 import os
-from typing import Dict, Any
+from typing import Any, Dict
 
 # Broker type (set via BROKER_TYPE env var)
 # Options: "sim" (default), "ibkr"
@@ -59,9 +60,11 @@ BROKER_SETTINGS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+
 def get_current_broker_settings() -> Dict[str, Any]:
     """Get settings for currently configured broker"""
     return BROKER_SETTINGS.get(BROKER_TYPE, BROKER_SETTINGS["sim"])
+
 
 def get_all_settings() -> Dict[str, Any]:
     """Get all configuration for API response"""

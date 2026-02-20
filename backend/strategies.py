@@ -7,11 +7,13 @@ Strategies:
 
 Each strategy takes candles + indicators and returns (score, direction, components, tp, sl, confidence).
 """
-from typing import Dict, List, Optional, Tuple, Any
-from models import Signal, SignalDirection, Component, ComponentType
-from indicators import TechnicalIndicators
-from indicator_classes import ALL_INDICATOR_IDS
+
+from typing import Any, Dict, List, Optional, Tuple
+
 import database as db
+from indicator_classes import ALL_INDICATOR_IDS
+from indicators import TechnicalIndicators
+from models import Component, ComponentType, Signal, SignalDirection
 
 # ──────────────────────────────────────────────────────────────────────
 # Strategy registry
@@ -35,14 +37,16 @@ def list_strategies() -> List[Dict[str, Any]]:
                 indicators.append(ind.to_dict())
             else:
                 indicators.append({"id": ind, "enabled": True, "settings": {}})
-        
-        result.append({
-            "id": v.id,
-            "name": v.display_name,
-            "description": v.description,
-            "tooltip": getattr(v, "tooltip", ""),
-            "default_indicators": indicators,
-        })
+
+        result.append(
+            {
+                "id": v.id,
+                "name": v.display_name,
+                "description": v.description,
+                "tooltip": getattr(v, "tooltip", ""),
+                "default_indicators": indicators,
+            }
+        )
     return result
 
 
@@ -50,13 +54,15 @@ def list_strategies() -> List[Dict[str, Any]]:
 # Indicator config structure
 # ──────────────────────────────────────────────────────────────────────
 
+
 class IndicatorConfig:
     """Configuration for a single indicator in a strategy"""
+
     def __init__(self, indicator_id: str, enabled: bool = True, settings: dict = None):
         self.id = indicator_id
         self.enabled = enabled
         self.settings = settings or {}
-    
+
     def to_dict(self) -> dict:
         return {"id": self.id, "enabled": self.enabled, "settings": self.settings}
 
@@ -64,6 +70,7 @@ class IndicatorConfig:
 # ──────────────────────────────────────────────────────────────────────
 # Base class
 # ──────────────────────────────────────────────────────────────────────
+
 
 class BaseStrategy:
     id: str = ""
@@ -75,46 +82,48 @@ class BaseStrategy:
     def get_enabled_indicators(self) -> List[str]:
         """Return list of enabled indicator IDs"""
         return [ind.id for ind in self.default_indicators if ind.enabled]
-    
+
     def get_indicator_settings(self, indicator_id: str) -> dict:
         """Get settings for a specific indicator"""
         for ind in self.default_indicators:
             if ind.id == indicator_id:
                 return ind.settings
         return {}
-    
+
     def to_config(self, used_indicators: List[str] = None) -> dict:
         """Convert to config dict for API response"""
         indicators = []
         for ind in self.default_indicators:
             enabled = used_indicators is None or ind.id in used_indicators
-            indicators.append({
-                "id": ind.id,
-                "enabled": enabled,
-                "settings": ind.settings,
-            })
+            indicators.append(
+                {
+                    "id": ind.id,
+                    "enabled": enabled,
+                    "settings": ind.settings,
+                }
+            )
         return {
             "id": self.id,
             "display_name": self.display_name,
             "default_indicators": indicators,
         }
-    
+
     def save_strategy(self, name_suffix: str = "") -> str:
         """
         Save this strategy configuration to database with custom name.
         Returns the saved strategy ID.
-        
+
         Args:
             name_suffix: Custom suffix to add to strategy name (e.g., "_v1", "_custom")
-        
+
         Returns:
             Strategy ID (e.g., "adaptive_regime_custom1")
         """
         import database as db
-        
+
         # Build strategy ID
         strategy_id = f"{self.id}{name_suffix}" if name_suffix else self.id
-        
+
         # Convert indicators to dict format
         indicators_data = []
         for ind in self.default_indicators:
@@ -122,7 +131,7 @@ class BaseStrategy:
                 indicators_data.append(ind.to_dict())
             else:
                 indicators_data.append({"id": ind, "enabled": True, "settings": {}})
-        
+
         # Save to database
         setting_key = f"STRATEGY_{strategy_id.upper()}"
         setting_value = {
@@ -131,47 +140,50 @@ class BaseStrategy:
             "display_name": f"{self.display_name}{name_suffix}",
             "default_indicators": indicators_data,
         }
-        
+
         db.set_setting(setting_key, setting_value)
-        
+
         # Also add to STRATEGIES registry
         STRATEGIES[strategy_id] = self
-        
+
         return strategy_id
-    
+
     @staticmethod
     def load_strategy(strategy_id: str) -> Optional["BaseStrategy"]:
         """Load a saved strategy from database"""
         import database as db
-        
+
         setting_key = f"STRATEGY_{strategy_id.upper()}"
         saved = db.get_setting(setting_key)
-        
+
         if not saved:
             return None
-        
+
         # Load base strategy and apply saved config
         base_id = saved.get("base_strategy", strategy_id)
         base_strategy = STRATEGIES.get(base_id)
-        
+
         if not base_strategy:
             return None
-        
+
         # Create new instance with saved indicators
-        new_strategy = type(f"Custom{strategy_id.title().replace('_', '')}", (BaseStrategy,), {
-            "id": strategy_id,
-            "display_name": saved.get("display_name", strategy_id),
-            "description": base_strategy.description,
-            "default_indicators": [IndicatorConfig(
-                ind["id"], 
-                enabled=ind.get("enabled", True), 
-                settings=ind.get("settings", {})
-            ) for ind in saved.get("default_indicators", [])],
-        })
-        
+        new_strategy = type(
+            f"Custom{strategy_id.title().replace('_', '')}",
+            (BaseStrategy,),
+            {
+                "id": strategy_id,
+                "display_name": saved.get("display_name", strategy_id),
+                "description": base_strategy.description,
+                "default_indicators": [
+                    IndicatorConfig(ind["id"], enabled=ind.get("enabled", True), settings=ind.get("settings", {}))
+                    for ind in saved.get("default_indicators", [])
+                ],
+            },
+        )
+
         # Register it
         STRATEGIES[strategy_id] = new_strategy
-        
+
         return new_strategy()
 
     def score(
@@ -196,6 +208,7 @@ class BaseStrategy:
 # Strategy 1: Adaptive Regime (original)
 # ──────────────────────────────────────────────────────────────────────
 
+
 class AdaptiveRegimeStrategy(BaseStrategy):
     id = "adaptive_regime"
     display_name = "Adaptive Regime"
@@ -214,7 +227,7 @@ class AdaptiveRegimeStrategy(BaseStrategy):
 ✓ Markets showing clear directional movement
 ✓ You're comfortable with trend-following
 ✓ Higher volatility periods"""
-    
+
     # Which indicators this strategy uses by default - with settings
     default_indicators = [
         IndicatorConfig("RSI", enabled=True, settings={"period": 14, "overbought": 70, "oversold": 30}),
@@ -226,8 +239,7 @@ class AdaptiveRegimeStrategy(BaseStrategy):
         IndicatorConfig("MOMENTUM", enabled=True, settings={"period": 10}),
     ]
 
-    def score(self, candles, indicators, symbol, instrument_info, current_price,
-              htf_bias=0.0, news_score=0.0):
+    def score(self, candles, indicators, symbol, instrument_info, current_price, htf_bias=0.0, news_score=0.0):
         components = []
         scores = []
         weights = []
@@ -240,12 +252,20 @@ class AdaptiveRegimeStrategy(BaseStrategy):
 
         if adx_data:
             trend_dir = "UP" if adx_data["plus_di"] > adx_data["minus_di"] else "DOWN"
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="ADX (Trend)",
-                value=max(-1, min(1, (adx_value - 25) / 25)) if trend_dir == "UP" else max(-1, min(1, -(adx_value - 25) / 25)),
-                description=f"ADX {adx_value:.0f} ({regime}, {trend_dir}) +DI:{adx_data['plus_di']:.0f} -DI:{adx_data['minus_di']:.0f}",
-                confidence=0.8 if adx_value > 30 else 0.5, indicators=adx_data
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="ADX (Trend)",
+                    value=(
+                        max(-1, min(1, (adx_value - 25) / 25))
+                        if trend_dir == "UP"
+                        else max(-1, min(1, -(adx_value - 25) / 25))
+                    ),
+                    description=f"ADX {adx_value:.0f} ({regime}, {trend_dir}) +DI:{adx_data['plus_di']:.0f} -DI:{adx_data['minus_di']:.0f}",
+                    confidence=0.8 if adx_value > 30 else 0.5,
+                    indicators=adx_data,
+                )
+            )
 
         # --- RSI ---
         if indicators.get("rsi_14") is not None:
@@ -263,12 +283,16 @@ class AdaptiveRegimeStrategy(BaseStrategy):
             rsi_score = max(-1, min(1, rsi_score))
             zone = "OVERSOLD" if rsi < 30 else "OVERBOUGHT" if rsi > 70 else "NEUTRAL"
             rsi_weight = 0.15 if is_trending else 0.25
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="RSI (14)", value=rsi_score,
-                description=f"RSI {rsi:.1f} ({zone})",
-                confidence=0.85 if abs(rsi - 50) > 20 else 0.5,
-                indicators={"value": rsi, "zone": zone}
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="RSI (14)",
+                    value=rsi_score,
+                    description=f"RSI {rsi:.1f} ({zone})",
+                    confidence=0.85 if abs(rsi - 50) > 20 else 0.5,
+                    indicators={"value": rsi, "zone": zone},
+                )
+            )
             scores.append(rsi_score)
             weights.append(rsi_weight)
 
@@ -288,11 +312,16 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 stoch_score = min(stoch_score, -0.5)
             stoch_score = max(-1, min(1, stoch_score))
             if abs(stoch_score) > 0.1:
-                components.append(Component(
-                    type=ComponentType.TECHNICAL, name="StochRSI", value=stoch_score,
-                    description=f"StochRSI K:{k:.0f} D:{d:.0f}",
-                    confidence=0.7 if abs(k - 50) > 30 else 0.4, indicators=stoch
-                ))
+                components.append(
+                    Component(
+                        type=ComponentType.TECHNICAL,
+                        name="StochRSI",
+                        value=stoch_score,
+                        description=f"StochRSI K:{k:.0f} D:{d:.0f}",
+                        confidence=0.7 if abs(k - 50) > 30 else 0.4,
+                        indicators=stoch,
+                    )
+                )
                 scores.append(stoch_score)
                 weights.append(0.10)
 
@@ -308,11 +337,16 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 macd_score = max(-1, min(1, norm_hist * 2))
                 cross = "BULLISH" if macd_line > signal_line else "BEARISH"
                 macd_weight = 0.25 if is_trending else 0.15
-                components.append(Component(
-                    type=ComponentType.TECHNICAL, name="MACD", value=macd_score,
-                    description=f"MACD {cross} | hist/ATR: {norm_hist:.2f}",
-                    confidence=0.8 if abs(norm_hist) > 0.5 else 0.5, indicators=macd
-                ))
+                components.append(
+                    Component(
+                        type=ComponentType.TECHNICAL,
+                        name="MACD",
+                        value=macd_score,
+                        description=f"MACD {cross} | hist/ATR: {norm_hist:.2f}",
+                        confidence=0.8 if abs(norm_hist) > 0.5 else 0.5,
+                        indicators=macd,
+                    )
+                )
                 scores.append(macd_score)
                 weights.append(macd_weight)
 
@@ -327,13 +361,16 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 bb_score = -bb_position * 0.8
                 zone = "UPPER" if cp > bb["upper"] else "LOWER" if cp < bb["lower"] else "MIDDLE"
                 bb_weight = 0.15 if is_trending else 0.25
-                components.append(Component(
-                    type=ComponentType.TECHNICAL, name="Bollinger Bands",
-                    value=max(-1, min(1, bb_score)),
-                    description=f"BB {zone} (pos: {bb_position:.2f})",
-                    confidence=0.75 if abs(bb_position) > 0.8 else 0.4,
-                    indicators={"position": bb_position, "zone": zone}
-                ))
+                components.append(
+                    Component(
+                        type=ComponentType.TECHNICAL,
+                        name="Bollinger Bands",
+                        value=max(-1, min(1, bb_score)),
+                        description=f"BB {zone} (pos: {bb_position:.2f})",
+                        confidence=0.75 if abs(bb_position) > 0.8 else 0.4,
+                        indicators={"position": bb_position, "zone": zone},
+                    )
+                )
                 scores.append(max(-1, min(1, bb_score)))
                 weights.append(bb_weight)
 
@@ -346,11 +383,16 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 sma_score = max(-1, min(1, sma_diff_pct / 2))
                 trend = "BULLISH" if sma_20 > sma_50 else "BEARISH"
                 sma_weight = 0.20 if is_trending else 0.10
-                components.append(Component(
-                    type=ComponentType.TECHNICAL, name="SMA Cross (20/50)", value=sma_score,
-                    description=f"SMA20/50: {sma_diff_pct:.2f}% ({trend})",
-                    confidence=0.7, indicators={"sma_20": sma_20, "sma_50": sma_50, "trend": trend}
-                ))
+                components.append(
+                    Component(
+                        type=ComponentType.TECHNICAL,
+                        name="SMA Cross (20/50)",
+                        value=sma_score,
+                        description=f"SMA20/50: {sma_diff_pct:.2f}% ({trend})",
+                        confidence=0.7,
+                        indicators={"sma_20": sma_20, "sma_50": sma_50, "trend": trend},
+                    )
+                )
                 scores.append(sma_score)
                 weights.append(sma_weight)
 
@@ -358,11 +400,16 @@ class AdaptiveRegimeStrategy(BaseStrategy):
         vol = indicators.get("volume_profile")
         if vol and vol["vol_ratio"] > 1.5:
             vol_bias = max(-0.5, min(0.5, (vol["up_down_ratio"] - 1.0) * 0.3))
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="Volume", value=vol_bias,
-                description=f"Vol {vol['vol_ratio']:.1f}x avg | Up/Down: {vol['up_down_ratio']:.1f}",
-                confidence=0.6, indicators=vol
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="Volume",
+                    value=vol_bias,
+                    description=f"Vol {vol['vol_ratio']:.1f}x avg | Up/Down: {vol['up_down_ratio']:.1f}",
+                    confidence=0.6,
+                    indicators=vol,
+                )
+            )
             scores.append(vol_bias)
             weights.append(0.10)
 
@@ -372,11 +419,16 @@ class AdaptiveRegimeStrategy(BaseStrategy):
             base_price = indicators.get("sma_20", 1) or 1
             mom_pct = (momentum / base_price) * 100 if base_price else 0
             momentum_score = max(-1, min(1, mom_pct / 2))
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="Momentum (10)", value=momentum_score,
-                description=f"Momentum: {mom_pct:.2f}%",
-                confidence=0.6, indicators={"value": momentum, "pct": mom_pct}
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="Momentum (10)",
+                    value=momentum_score,
+                    description=f"Momentum: {mom_pct:.2f}%",
+                    confidence=0.6,
+                    indicators={"value": momentum, "pct": mom_pct},
+                )
+            )
             scores.append(momentum_score)
             weights.append(0.05)
 
@@ -385,11 +437,16 @@ class AdaptiveRegimeStrategy(BaseStrategy):
         if cp_data and cp_data.get("patterns") and abs(cp_data["net_bias"]) > 0.1:
             pattern_names = ", ".join(p["name"] for p in cp_data["patterns"])
             cp_score = max(-1, min(1, cp_data["net_bias"]))
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="Candlestick Patterns", value=cp_score,
-                description=f"Patterns: {pattern_names} (bias: {cp_data['net_bias']:.2f})",
-                confidence=0.7, indicators={"patterns": [p["name"] for p in cp_data["patterns"]], "net_bias": cp_data["net_bias"]}
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="Candlestick Patterns",
+                    value=cp_score,
+                    description=f"Patterns: {pattern_names} (bias: {cp_data['net_bias']:.2f})",
+                    confidence=0.7,
+                    indicators={"patterns": [p["name"] for p in cp_data["patterns"]], "net_bias": cp_data["net_bias"]},
+                )
+            )
             scores.append(cp_score)
             weights.append(0.15)
 
@@ -448,18 +505,23 @@ class AdaptiveRegimeStrategy(BaseStrategy):
         # ── Seasonality Filter (v2) ──
         # Turn-of-month effect: days 1-3 of month have positive bias
         from datetime import datetime
+
         now = datetime.now()
         is_turn_of_month = now.day <= 3
         seasonality_bias = 0.0
         if is_turn_of_month:
             # Add +0.1 bias for turn-of-month (Sharpe ~1.8 in research)
             seasonality_bias = 0.10
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="Seasonality",
-                value=seasonality_bias,
-                description=f"Turn-of-month (day {now.day}): +{seasonality_bias:.2f} bias",
-                confidence=0.6, indicators={"day": now.day, "effect": "turn_of_month"}
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="Seasonality",
+                    value=seasonality_bias,
+                    description=f"Turn-of-month (day {now.day}): +{seasonality_bias:.2f} bias",
+                    confidence=0.6,
+                    indicators={"day": now.day, "effect": "turn_of_month"},
+                )
+            )
 
         # Apply seasonality bias
         if seasonality_bias > 0:
@@ -547,9 +609,14 @@ class AdaptiveRegimeStrategy(BaseStrategy):
         rr = reward / risk if risk > 0 else 0
 
         return {
-            "score": final_score, "direction": direction, "components": components,
-            "confidence": confidence, "take_profit": take_profit, "stop_loss": stop_loss,
-            "risk_reward_ratio": rr, "technical_score": technical_score,
+            "score": final_score,
+            "direction": direction,
+            "components": components,
+            "confidence": confidence,
+            "take_profit": take_profit,
+            "stop_loss": stop_loss,
+            "risk_reward_ratio": rr,
+            "technical_score": technical_score,
         }
 
 
@@ -617,7 +684,7 @@ def mms_on_trade_result(symbol: str, is_win: bool):
             state["leverage_level"] = 2  # x0.25
         else:
             state["leverage_level"] = max(0, state["leverage_level"] - 2)
-    
+
     # Persist to database
     _save_seq_state(symbol, state)
 
@@ -650,6 +717,7 @@ class MMSStrategy(BaseStrategy):
 
     Confirmation: Stochastic RSI for entry timing.
     """
+
     id = "mms"
     display_name = "MMS Mean-Reversion"
     description = "Band-based mean reversion with sequentiality risk management (mastermindzx.pl)"
@@ -667,7 +735,7 @@ class MMSStrategy(BaseStrategy):
 ✓ Markets stuck in a range/channel
 ✓ You're patient (fewer signals, higher quality)
 ✓ Lower volatility, mean-reverting assets (GC=XAG=XAU)"""
-    
+
     # MMS uses fewer indicators - mainly BB, RSI, STOCH
     default_indicators = [
         IndicatorConfig("RSI", enabled=True, settings={"period": 14, "overbought": 70, "oversold": 30}),
@@ -676,8 +744,7 @@ class MMSStrategy(BaseStrategy):
         IndicatorConfig("SMA", enabled=True, settings={"period": 20, "period2": 50}),
     ]
 
-    def score(self, candles, indicators, symbol, instrument_info, current_price,
-              htf_bias=0.0, news_score=0.0):
+    def score(self, candles, indicators, symbol, instrument_info, current_price, htf_bias=0.0, news_score=0.0):
 
         components = []
         closes = indicators.get("_closes", [c["close"] for c in candles])
@@ -691,7 +758,7 @@ class MMSStrategy(BaseStrategy):
         bb_lower = bb["lower"]
         bb_middle = bb["middle"]
         bb_range = bb_upper - bb_lower if bb_upper != bb_lower else 1
-        bb_position = ((current_price - bb_lower) / bb_range)  # 0..1
+        bb_position = (current_price - bb_lower) / bb_range  # 0..1
 
         # How far outside the bands (>1 = above upper, <0 = below lower)
         band_score = 0.0
@@ -714,13 +781,16 @@ class MMSStrategy(BaseStrategy):
         band_score = max(-1, min(1, band_score))
         band_zone = "UPPER" if bb_position > 0.8 else "LOWER" if bb_position < 0.2 else "MIDDLE"
 
-        components.append(Component(
-            type=ComponentType.TECHNICAL, name="BB Position (MMS)",
-            value=band_score,
-            description=f"BB pos: {bb_position:.2f} ({band_zone}) — {'SELL zone' if band_score < -0.3 else 'BUY zone' if band_score > 0.3 else 'WAIT zone'}",
-            confidence=0.9 if abs(band_score) > 0.5 else 0.4,
-            indicators={"bb_position": bb_position, "zone": band_zone}
-        ))
+        components.append(
+            Component(
+                type=ComponentType.TECHNICAL,
+                name="BB Position (MMS)",
+                value=band_score,
+                description=f"BB pos: {bb_position:.2f} ({band_zone}) — {'SELL zone' if band_score < -0.3 else 'BUY zone' if band_score > 0.3 else 'WAIT zone'}",
+                confidence=0.9 if abs(band_score) > 0.5 else 0.4,
+                indicators={"bb_position": bb_position, "zone": band_zone},
+            )
+        )
 
         # ── 2. Reactionary candle confirmation ──
         # After touching band, we need a candle in the opposite direction
@@ -746,13 +816,16 @@ class MMSStrategy(BaseStrategy):
 
         react_score = max(-1, min(1, react_score))
         if abs(react_score) > 0.05:
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="Reactionary Candle",
-                value=react_score,
-                description=f"{'Confirmed' if abs(react_score) > 0.3 else 'Waiting'} — candle {'bearish' if react_score < 0 else 'bullish'}",
-                confidence=0.8 if abs(react_score) > 0.3 else 0.3,
-                indicators={}
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="Reactionary Candle",
+                    value=react_score,
+                    description=f"{'Confirmed' if abs(react_score) > 0.3 else 'Waiting'} — candle {'bearish' if react_score < 0 else 'bullish'}",
+                    confidence=0.8 if abs(react_score) > 0.3 else 0.3,
+                    indicators={},
+                )
+            )
 
         # ── 3. Stochastic RSI confirmation ──
         stoch = indicators.get("stoch_rsi")
@@ -762,7 +835,7 @@ class MMSStrategy(BaseStrategy):
             if k > 80 and band_score < -0.2:
                 stoch_score = -0.5  # Overbought confirms sell
             elif k < 20 and band_score > 0.2:
-                stoch_score = 0.5   # Oversold confirms buy
+                stoch_score = 0.5  # Oversold confirms buy
             elif k > 70:
                 stoch_score = -0.2
             elif k < 30:
@@ -770,13 +843,16 @@ class MMSStrategy(BaseStrategy):
 
             stoch_score = max(-1, min(1, stoch_score))
             if abs(stoch_score) > 0.1:
-                components.append(Component(
-                    type=ComponentType.TECHNICAL, name="StochRSI (MMS)",
-                    value=stoch_score,
-                    description=f"StochRSI K:{k:.0f} D:{d:.0f} — {'overbought' if k > 70 else 'oversold' if k < 30 else 'neutral'}",
-                    confidence=0.7 if abs(k - 50) > 25 else 0.4,
-                    indicators=stoch
-                ))
+                components.append(
+                    Component(
+                        type=ComponentType.TECHNICAL,
+                        name="StochRSI (MMS)",
+                        value=stoch_score,
+                        description=f"StochRSI K:{k:.0f} D:{d:.0f} — {'overbought' if k > 70 else 'oversold' if k < 30 else 'neutral'}",
+                        confidence=0.7 if abs(k - 50) > 25 else 0.4,
+                        indicators=stoch,
+                    )
+                )
 
         # ── 4. Distance from middle band (mean) ──
         # Stronger signal when further from mean
@@ -785,12 +861,16 @@ class MMSStrategy(BaseStrategy):
         mean_rev_score = max(-1, min(1, mean_rev_score))
 
         if abs(mean_rev_score) > 0.15:
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="Mean Distance",
-                value=mean_rev_score,
-                description=f"Distance from mean: {dist_from_mean:.2f} BB widths",
-                confidence=0.6, indicators={"distance": dist_from_mean}
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="Mean Distance",
+                    value=mean_rev_score,
+                    description=f"Distance from mean: {dist_from_mean:.2f} BB widths",
+                    confidence=0.6,
+                    indicators={"distance": dist_from_mean},
+                )
+            )
 
         # ── 5. ATR relative to price (volatility check) ──
         atr = indicators.get("atr_14", current_price * 0.01) or current_price * 0.01
@@ -801,12 +881,7 @@ class MMSStrategy(BaseStrategy):
 
         # ── Composite score ──
         # Weights: BB position (40%), reaction (25%), stoch (15%), mean distance (20%)
-        raw_score = (
-            band_score * 0.40
-            + react_score * 0.25
-            + stoch_score * 0.15
-            + mean_rev_score * 0.20
-        )
+        raw_score = band_score * 0.40 + react_score * 0.25 + stoch_score * 0.15 + mean_rev_score * 0.20
 
         # Apply volatility factor (more volatile = stronger signal)
         raw_score *= vol_factor
@@ -824,18 +899,22 @@ class MMSStrategy(BaseStrategy):
                 # MMS: skip if VIX > 25 (mean reversion fails in extreme volatility)
                 technical_score = 0.0  # Neutralize signal
                 vix_component = Component(
-                    type=ComponentType.TECHNICAL, name="VIX Filter (MMS)",
+                    type=ComponentType.TECHNICAL,
+                    name="VIX Filter (MMS)",
                     value=0.0,
                     description=f"VIX {vix_value:.1f} > 25: MMS disabled in extreme volatility",
-                    confidence=0.95, indicators={"vix": vix_value, "action": "disabled"}
+                    confidence=0.95,
+                    indicators={"vix": vix_value, "action": "disabled"},
                 )
             elif vix_value > 20:
                 technical_score *= 0.5
                 vix_component = Component(
-                    type=ComponentType.TECHNICAL, name="VIX Filter (MMS)",
+                    type=ComponentType.TECHNICAL,
+                    name="VIX Filter (MMS)",
                     value=0.0,
                     description=f"VIX {vix_value:.1f} > 20: reduced MMS confidence",
-                    confidence=0.7, indicators={"vix": vix_value, "action": "reduced"}
+                    confidence=0.7,
+                    indicators={"vix": vix_value, "action": "reduced"},
                 )
         if vix_component:
             components.append(vix_component)
@@ -843,29 +922,38 @@ class MMSStrategy(BaseStrategy):
         # ── Seasonality Filter (v2) ──
         # MMS benefits more from turn-of-month (mean reversion stronger)
         from datetime import datetime
+
         now = datetime.now()
         is_turn_of_month = now.day <= 3
         if is_turn_of_month:
             # MMS gets stronger bias: +0.15 (mean reversion effect stronger)
             technical_score = technical_score * 0.85 + 0.15
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="Seasonality (MMS)",
-                value=0.15,
-                description=f"Turn-of-month (day {now.day}): +0.15 bias for MMS",
-                confidence=0.65, indicators={"day": now.day, "effect": "turn_of_month"}
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="Seasonality (MMS)",
+                    value=0.15,
+                    description=f"Turn-of-month (day {now.day}): +0.15 bias for MMS",
+                    confidence=0.65,
+                    indicators={"day": now.day, "effect": "turn_of_month"},
+                )
+            )
 
         # ── No-Trade Zone (v2) ──
         # Add buffer zone around band edges (MMS already waits for extremes, add 2% buffer)
         if 0.03 < bb_position < 0.07 or 0.93 < bb_position < 0.97:
             # Near buffer zone - reduce signal
             technical_score *= 0.5
-            components.append(Component(
-                type=ComponentType.TECHNICAL, name="No-Trade Zone",
-                value=0.0,
-                description=f"BB position {bb_position:.2f} in buffer zone - reduced",
-                confidence=0.6, indicators={"bb_position": bb_position, "action": "buffer"}
-            ))
+            components.append(
+                Component(
+                    type=ComponentType.TECHNICAL,
+                    name="No-Trade Zone",
+                    value=0.0,
+                    description=f"BB position {bb_position:.2f} in buffer zone - reduced",
+                    confidence=0.6,
+                    indicators={"bb_position": bb_position, "action": "buffer"},
+                )
+            )
 
         # === END V2 FILTERS ===
 
@@ -875,12 +963,16 @@ class MMSStrategy(BaseStrategy):
         lev_mult = LEVERAGE_LADDER[lev_level]
         lev_label = LEVERAGE_LABELS[lev_level]
 
-        components.append(Component(
-            type=ComponentType.TECHNICAL, name="Sequentiality",
-            value=0.0,
-            description=f"Leverage: {lev_label} | Losses: {seq_state['consecutive_losses']} | {'Recovery' if seq_state['in_recovery'] else 'Normal'}",
-            confidence=1.0, indicators={"leverage": lev_mult, "level": lev_level}
-        ))
+        components.append(
+            Component(
+                type=ComponentType.TECHNICAL,
+                name="Sequentiality",
+                value=0.0,
+                description=f"Leverage: {lev_label} | Losses: {seq_state['consecutive_losses']} | {'Recovery' if seq_state['in_recovery'] else 'Normal'}",
+                confidence=1.0,
+                indicators={"leverage": lev_mult, "level": lev_level},
+            )
+        )
 
         # ── Direction thresholds ──
         # MMS uses tighter thresholds — band proximity is the trigger
@@ -920,17 +1012,28 @@ class MMSStrategy(BaseStrategy):
         rr = reward / risk if risk > 0 else 0
 
         return {
-            "score": technical_score, "direction": direction, "components": components,
-            "confidence": confidence, "take_profit": take_profit, "stop_loss": stop_loss,
-            "risk_reward_ratio": rr, "technical_score": technical_score,
-            "mms_leverage": lev_mult, "mms_leverage_label": lev_label,
+            "score": technical_score,
+            "direction": direction,
+            "components": components,
+            "confidence": confidence,
+            "take_profit": take_profit,
+            "stop_loss": stop_loss,
+            "risk_reward_ratio": rr,
+            "technical_score": technical_score,
+            "mms_leverage": lev_mult,
+            "mms_leverage_label": lev_label,
         }
 
     def _neutral(self, symbol, current_price, components):
         return {
-            "score": 0.0, "direction": SignalDirection.NEUTRAL, "components": components,
-            "confidence": 0.0, "take_profit": 0.0, "stop_loss": 0.0,
-            "risk_reward_ratio": 0.0, "technical_score": 0.0,
+            "score": 0.0,
+            "direction": SignalDirection.NEUTRAL,
+            "components": components,
+            "confidence": 0.0,
+            "take_profit": 0.0,
+            "stop_loss": 0.0,
+            "risk_reward_ratio": 0.0,
+            "technical_score": 0.0,
         }
 
 

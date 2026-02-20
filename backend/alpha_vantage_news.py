@@ -3,11 +3,13 @@ Alpha Vantage News Sentiment Client for CFD Trading Bot.
 Uses the NEWS_SENTIMENT endpoint with proper symbol mapping.
 Provides an async get_news() interface that main.py expects.
 """
+
 import os
 import time
-import httpx
 from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Any, Dict, List, Optional
+
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,10 +20,10 @@ ALPHA_BASE_URL = "https://www.alphavantage.co/query"
 # Map our internal symbols to Alpha Vantage NEWS_SENTIMENT tickers
 # Alpha Vantage uses specific ticker formats for commodities and crypto
 NEWS_TICKER_MAP = {
-    "XAU": "FOREX:XAU",       # Gold
-    "XAG": "FOREX:XAG",       # Silver
-    "US100": "QQQ",           # Nasdaq-100 via QQQ ETF
-    "BTC": "CRYPTO:BTC",      # Bitcoin
+    "XAU": "FOREX:XAU",  # Gold
+    "XAG": "FOREX:XAG",  # Silver
+    "US100": "QQQ",  # Nasdaq-100 via QQQ ETF
+    "BTC": "CRYPTO:BTC",  # Bitcoin
 }
 
 # Broader search topics when ticker-specific news is empty
@@ -40,7 +42,7 @@ class AlphaVantageNewsClient:
         self.client = httpx.Client(timeout=10)
         self.cache: Dict[str, List] = {}
         self.cache_time: Dict[str, float] = {}
-        self.cache_ttl = 3*3600  # Cache for 10 minutes (news doesn't change fast)
+        self.cache_ttl = 3 * 3600  # Cache for 10 minutes (news doesn't change fast)
         self.last_api_call = 0.0
         self.min_interval = 13.0  # Alpha Vantage free: 5 calls/min
 
@@ -127,15 +129,17 @@ class AlphaVantageNewsClient:
 
                 importance = min(1.0, abs(sentiment_score) + 0.3)
 
-                news.append({
-                    "headline": article.get("title", "")[:120],
-                    "sentiment": round(sentiment_score, 3),
-                    "direction": direction,
-                    "importance": round(importance, 2),
-                    "source": article.get("source", "Unknown"),
-                    "url": article.get("url", ""),
-                    "published": article.get("time_published", ""),
-                })
+                news.append(
+                    {
+                        "headline": article.get("title", "")[:120],
+                        "sentiment": round(sentiment_score, 3),
+                        "direction": direction,
+                        "importance": round(importance, 2),
+                        "source": article.get("source", "Unknown"),
+                        "url": article.get("url", ""),
+                        "published": article.get("time_published", ""),
+                    }
+                )
 
             self.cache[cache_key] = news
             self.cache_time[cache_key] = time.time()

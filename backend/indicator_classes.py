@@ -2,19 +2,21 @@
 Indicator classes for CFD trading bot
 Each indicator is a class with default settings
 """
+
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional
+
 from indicators import TechnicalIndicators
 
 
 class Indicator(ABC):
     """Base class for all technical indicators"""
-    
-    id: str = ""           # Unique identifier (RSI, MACD, BB, etc.)
-    name: str = ""         # Display name
+
+    id: str = ""  # Unique identifier (RSI, MACD, BB, etc.)
+    name: str = ""  # Display name
     description: str = ""  # Description
     default_params: dict = {}  # Default parameters
-    
+
     @abstractmethod
     def calculate(self, candles: List[Dict], params: dict = None) -> Optional[Any]:
         """
@@ -22,7 +24,7 @@ class Indicator(ABC):
         Returns indicator value(s) in format expected by strategies
         """
         pass
-    
+
     def get_value(self, indicators_result: Dict, prefix: str = None) -> Optional[Any]:
         """Get this indicator's value from full indicators result dict"""
         key = prefix or self.id.lower()
@@ -48,7 +50,7 @@ class RSI(Indicator):
         "overbought": 70,
         "oversold": 30,
     }
-    
+
     def calculate(self, candles: List[Dict], params: dict = None) -> Optional[float]:
         params = params or self.default_params
         closes = [c["close"] for c in candles]
@@ -64,16 +66,11 @@ class MACD(Indicator):
         "slow": 26,
         "signal": 9,
     }
-    
+
     def calculate(self, candles: List[Dict], params: dict = None) -> Optional[Dict]:
         params = params or self.default_params
         closes = [c["close"] for c in candles]
-        return TechnicalIndicators.macd(
-            closes,
-            params.get("fast", 12),
-            params.get("slow", 26),
-            params.get("signal", 9)
-        )
+        return TechnicalIndicators.macd(closes, params.get("fast", 12), params.get("slow", 26), params.get("signal", 9))
 
 
 class BollingerBands(Indicator):
@@ -84,15 +81,11 @@ class BollingerBands(Indicator):
         "period": 20,
         "std": 2,
     }
-    
+
     def calculate(self, candles: List[Dict], params: dict = None) -> Optional[Dict]:
         params = params or self.default_params
         closes = [c["close"] for c in candles]
-        return TechnicalIndicators.bollinger_bands(
-            closes,
-            params.get("period", 20),
-            params.get("std", 2)
-        )
+        return TechnicalIndicators.bollinger_bands(closes, params.get("period", 20), params.get("std", 2))
 
 
 class SMA(Indicator):
@@ -103,22 +96,22 @@ class SMA(Indicator):
         "period": 20,
         "period2": 50,  # For crossover detection
     }
-    
+
     def calculate(self, candles: List[Dict], params: dict = None) -> Optional[Dict]:
         params = params or self.default_params
         closes = [c["close"] for c in candles]
         period = params.get("period", 20)
-        
+
         sma_value = TechnicalIndicators.sma(closes, period)
         if sma_value is None:
             return None
-        
+
         # Also calculate second SMA if configured
         sma2_value = None
         period2 = params.get("period2")
         if period2:
             sma2_value = TechnicalIndicators.sma(closes, period2)
-        
+
         return {
             "sma": sma_value,
             "sma2": sma2_value,
@@ -132,16 +125,13 @@ class ADX(Indicator):
     default_params = {
         "period": 14,
     }
-    
+
     def calculate(self, candles: List[Dict], params: dict = None) -> Optional[Dict]:
         params = params or self.default_params
         highs = [c["high"] for c in candles]
         lows = [c["low"] for c in candles]
         closes = [c["close"] for c in candles]
-        return TechnicalIndicators.adx(
-            highs, lows, closes,
-            params.get("period", 14)
-        )
+        return TechnicalIndicators.adx(highs, lows, closes, params.get("period", 14))
 
 
 class StochasticRSI(Indicator):
@@ -152,15 +142,11 @@ class StochasticRSI(Indicator):
         "rsi_period": 14,
         "stoch_period": 14,
     }
-    
+
     def calculate(self, candles: List[Dict], params: dict = None) -> Optional[Dict]:
         params = params or self.default_params
         closes = [c["close"] for c in candles]
-        return TechnicalIndicators.stochastic_rsi(
-            closes,
-            params.get("rsi_period", 14),
-            params.get("stoch_period", 14)
-        )
+        return TechnicalIndicators.stochastic_rsi(closes, params.get("rsi_period", 14), params.get("stoch_period", 14))
 
 
 class Momentum(Indicator):
@@ -170,14 +156,11 @@ class Momentum(Indicator):
     default_params = {
         "period": 10,
     }
-    
+
     def calculate(self, candles: List[Dict], params: dict = None) -> Optional[float]:
         params = params or self.default_params
         closes = [c["close"] for c in candles]
-        return TechnicalIndicators.momentum(
-            closes,
-            params.get("period", 10)
-        )
+        return TechnicalIndicators.momentum(closes, params.get("period", 10))
 
 
 # All available indicators

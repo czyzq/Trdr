@@ -7,9 +7,10 @@ Defines the interfaces for:
 
 Switch between simulated and live brokers via BROKER_TYPE env var.
 """
+
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 
 class DataProvider(ABC):
@@ -24,9 +25,7 @@ class DataProvider(ABC):
         ...
 
     @abstractmethod
-    def get_candles(
-        self, symbol: str, resolution: str = "60", count: int = 100
-    ) -> Optional[List[Dict[str, Any]]]:
+    def get_candles(self, symbol: str, resolution: str = "60", count: int = 100) -> Optional[List[Dict[str, Any]]]:
         """
         Get historical OHLCV candles.
         resolution: "1", "5", "15", "30", "60", "D"

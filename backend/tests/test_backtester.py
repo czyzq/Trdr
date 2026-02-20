@@ -4,29 +4,30 @@ Tests for the backtesting engine and historical data module.
 Run:  python -m pytest tests/test_backtester.py -v
 """
 
-import sys
 import os
+import sys
+
 import pytest
 
 # Ensure backend dir is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backtester import (
-    run_backtest,
-    calculate_signal_score,
-    get_direction,
-    aggregate_to_daily,
-    BacktestResult,
-    BacktestTrade,
-    results_to_dict,
     LOOKBACK,
     MAX_HOLD_CANDLES,
+    BacktestResult,
+    BacktestTrade,
+    aggregate_to_daily,
+    calculate_signal_score,
+    get_direction,
+    results_to_dict,
+    run_backtest,
 )
 from historical_data import generate_sample_data, load_csv_candles
 from indicators import TechnicalIndicators
 
-
 # ── Fixtures ──
+
 
 @pytest.fixture
 def gold_candles():
@@ -56,6 +57,7 @@ def short_candles():
 
 
 # ── Sample data generator tests ──
+
 
 class TestSampleDataGenerator:
     def test_generates_correct_count(self):
@@ -108,10 +110,11 @@ class TestSampleDataGenerator:
     def test_chronological_order(self):
         candles = generate_sample_data("XAU", days=100, base_price=2000.0)
         for i in range(1, len(candles)):
-            assert candles[i]["timestamp"] > candles[i-1]["timestamp"]
+            assert candles[i]["timestamp"] > candles[i - 1]["timestamp"]
 
 
 # ── Indicator tests ──
+
 
 class TestIndicators:
     def test_rsi_range(self, gold_candles):
@@ -179,8 +182,8 @@ class TestIndicators:
         """Test that a bullish engulfing pattern is detected."""
         candles = [
             {"open": 105, "high": 106, "low": 99, "close": 100, "volume": 100},  # bearish
-            {"open": 102, "high": 103, "low": 98, "close": 99, "volume": 100},   # bearish
-            {"open": 98,  "high": 107, "low": 97, "close": 106, "volume": 200},  # big bullish engulfing
+            {"open": 102, "high": 103, "low": 98, "close": 99, "volume": 100},  # bearish
+            {"open": 98, "high": 107, "low": 97, "close": 106, "volume": 200},  # big bullish engulfing
         ]
         cp = TechnicalIndicators.candlestick_patterns(candles)
         assert cp is not None
@@ -211,6 +214,7 @@ class TestIndicators:
 
 # ── Signal scoring tests ──
 
+
 class TestSignalScoring:
     def test_score_range(self, gold_candles):
         ind = TechnicalIndicators.calculate_all(gold_candles, period=14)
@@ -239,10 +243,15 @@ class TestSignalScoring:
         """A perfectly flat market should produce neutral signals."""
         candles = []
         for i in range(100):
-            candles.append({
-                "open": 100.0, "high": 100.5, "low": 99.5,
-                "close": 100.0, "volume": 50000,
-            })
+            candles.append(
+                {
+                    "open": 100.0,
+                    "high": 100.5,
+                    "low": 99.5,
+                    "close": 100.0,
+                    "volume": 50000,
+                }
+            )
         ind = TechnicalIndicators.calculate_all(candles, period=14)
         if ind:
             ind["_closes"] = [100.0] * 100
@@ -252,6 +261,7 @@ class TestSignalScoring:
 
 
 # ── Backtest engine tests ──
+
 
 class TestBacktestEngine:
     def test_basic_run(self, gold_candles):
@@ -319,8 +329,7 @@ class TestBacktestEngine:
             curr = sorted_trades[i]
             # Current trade should start after previous trade exits
             assert curr.entry_idx >= prev.exit_idx, (
-                f"Trade overlap: trade {i-1} exits at {prev.exit_idx}, "
-                f"trade {i} enters at {curr.entry_idx}"
+                f"Trade overlap: trade {i-1} exits at {prev.exit_idx}, " f"trade {i} enters at {curr.entry_idx}"
             )
 
     def test_stop_loss_respected(self, gold_candles):
@@ -354,8 +363,7 @@ class TestBacktestEngine:
                 expected_sign = 1 if trade.exit_price > trade.entry_price else -1
                 actual_sign = 1 if trade.pnl_pct > 0 else -1
                 assert expected_sign == actual_sign, (
-                    f"BUY: entry={trade.entry_price}, exit={trade.exit_price}, "
-                    f"pnl={trade.pnl_pct}"
+                    f"BUY: entry={trade.entry_price}, exit={trade.exit_price}, " f"pnl={trade.pnl_pct}"
                 )
 
     def test_sell_pnl_calculation(self):
@@ -367,8 +375,7 @@ class TestBacktestEngine:
                 expected_sign = 1 if trade.exit_price < trade.entry_price else -1
                 actual_sign = 1 if trade.pnl_pct > 0 else -1
                 assert expected_sign == actual_sign, (
-                    f"SELL: entry={trade.entry_price}, exit={trade.exit_price}, "
-                    f"pnl={trade.pnl_pct}"
+                    f"SELL: entry={trade.entry_price}, exit={trade.exit_price}, " f"pnl={trade.pnl_pct}"
                 )
 
     def test_deterministic_results(self, gold_candles):
@@ -388,11 +395,13 @@ class TestBacktestEngine:
         assert "total_return_pct" in d
         # Should be JSON serialisable
         import json
+
         json_str = json.dumps(d)
         assert len(json_str) > 0
 
 
 # ── Multi-timeframe tests ──
+
 
 class TestMultiTimeframe:
     """Tests for aggregate_to_daily and multi-TF consistency."""
@@ -438,12 +447,14 @@ class TestMultiTimeframe:
 
 # ── Candle accumulation & aggregation tests ──
 
+
 class TestCandleAggregation:
     """Tests for the candle aggregation pipeline in database.py."""
 
     def test_aggregate_60m_from_15m(self):
         """Build 1H candles from 15m candles."""
         from database import aggregate_candles
+
         candles_15m = generate_sample_data("XAU", days=5, base_price=2000.0, resolution="15")
         result = aggregate_candles(candles_15m, "60")
         # 15m → 60m: ~4x fewer candles
@@ -458,6 +469,7 @@ class TestCandleAggregation:
     def test_aggregate_daily_from_60m(self):
         """Build daily candles from 1H candles."""
         from database import aggregate_candles
+
         candles_60m = generate_sample_data("XAU", days=10, base_price=2000.0, resolution="60")
         daily = aggregate_candles(candles_60m, "D")
         assert len(daily) > 0
@@ -473,6 +485,7 @@ class TestCandleAggregation:
     def test_aggregate_preserves_high_low(self):
         """Aggregated high/low must match extremes of source candles."""
         from database import aggregate_candles
+
         candles_15m = generate_sample_data("BTC", days=3, base_price=95000.0, resolution="15")
         hourly = aggregate_candles(candles_15m, "60")
         # Check that hourly high >= all source highs in that group
@@ -488,6 +501,7 @@ class TestCandleAggregation:
     def test_aggregate_volume_sums(self):
         """Aggregated volume should be the sum of source candle volumes."""
         from database import aggregate_candles
+
         candles_5m = generate_sample_data("US100", days=2, base_price=17500.0, resolution="5")
         hourly = aggregate_candles(candles_5m, "60")
         # Total volume should be preserved
@@ -497,7 +511,8 @@ class TestCandleAggregation:
 
     def test_store_and_load_candles_in_memory(self):
         """Test in-memory candle accumulation (no MongoDB)."""
-        from database import store_candles, load_candle_history, count_candles, _candle_history_mem
+        from database import _candle_history_mem, count_candles, load_candle_history, store_candles
+
         # Clear any existing state
         _candle_history_mem.clear()
 
@@ -520,13 +535,14 @@ class TestCandleAggregation:
         assert len(loaded) == 80
         # Should be chronological
         for i in range(1, len(loaded)):
-            assert loaded[i]["timestamp"] >= loaded[i-1]["timestamp"]
+            assert loaded[i]["timestamp"] >= loaded[i - 1]["timestamp"]
 
         # Clean up
         _candle_history_mem.clear()
 
 
 # ── CSV loader tests ──
+
 
 class TestIntradayBacktest:
     """Tests for intraday (15m/30m) backtesting."""
@@ -568,7 +584,10 @@ class TestIntradayBacktest:
     def test_30m_backtest_all_instruments(self):
         """30m backtest across all instruments."""
         configs = [
-            ("XAU", 2000.0), ("XAG", 23.0), ("US100", 17500.0), ("BTC", 95000.0),
+            ("XAU", 2000.0),
+            ("XAG", 23.0),
+            ("US100", 17500.0),
+            ("BTC", 95000.0),
         ]
         for sym, base in configs:
             candles = generate_sample_data(sym, days=30, base_price=base, resolution="30")
@@ -578,7 +597,7 @@ class TestIntradayBacktest:
     def test_intraday_chronological_order(self):
         candles = generate_sample_data("XAU", days=5, base_price=2000.0, resolution="15")
         for i in range(1, len(candles)):
-            assert candles[i]["timestamp"] > candles[i-1]["timestamp"]
+            assert candles[i]["timestamp"] > candles[i - 1]["timestamp"]
 
 
 class TestCSVLoader:
@@ -602,10 +621,7 @@ class TestCSVLoader:
 
     def test_load_with_multiplier(self, tmp_path):
         csv_file = tmp_path / "test_gold.csv"
-        csv_file.write_text(
-            "Date,Open,High,Low,Close,Volume\n"
-            "2025-01-02,190.0,195.0,188.0,193.0,50000\n"
-        )
+        csv_file.write_text("Date,Open,High,Low,Close,Volume\n" "2025-01-02,190.0,195.0,188.0,193.0,50000\n")
         candles = load_csv_candles(str(csv_file), multiplier=10.0)
         assert candles is not None
         assert candles[0]["close"] == 1930.0  # 193 * 10
@@ -613,10 +629,12 @@ class TestCSVLoader:
 
 # ── Time format tests (regression for the x-axis bug) ──
 
+
 class TestTimeFormatting:
     def test_realistic_prices_60m_times_aligned(self):
         """60-minute candles should have times ending in :00."""
         from realistic_prices import RealisticPriceFeeder
+
         feeder = RealisticPriceFeeder()
         candles = feeder.get_candles("XAU", resolution="60", count=20)
         assert candles is not None
@@ -631,6 +649,7 @@ class TestTimeFormatting:
     def test_realistic_prices_30m_times_aligned(self):
         """30-minute candles should have times ending in :00 or :30."""
         from realistic_prices import RealisticPriceFeeder
+
         feeder = RealisticPriceFeeder()
         candles = feeder.get_candles("XAU", resolution="30", count=20)
         assert candles is not None
@@ -642,6 +661,7 @@ class TestTimeFormatting:
     def test_realistic_prices_15m_times_aligned(self):
         """15-minute candles should have times at 15-minute intervals."""
         from realistic_prices import RealisticPriceFeeder
+
         feeder = RealisticPriceFeeder()
         candles = feeder.get_candles("XAU", resolution="15", count=20)
         assert candles is not None
@@ -654,6 +674,7 @@ class TestTimeFormatting:
     def test_realistic_prices_5m_times_aligned(self):
         """5-minute candles should have times at 5-minute intervals."""
         from realistic_prices import RealisticPriceFeeder
+
         feeder = RealisticPriceFeeder()
         candles = feeder.get_candles("XAU", resolution="5", count=20)
         assert candles is not None
@@ -666,6 +687,7 @@ class TestTimeFormatting:
     def test_realistic_prices_daily_format(self):
         """Daily candles should have MM/DD format."""
         from realistic_prices import RealisticPriceFeeder
+
         feeder = RealisticPriceFeeder()
         candles = feeder.get_candles("XAU", resolution="D", count=10)
         assert candles is not None
@@ -682,23 +704,23 @@ class TestTimeFormatting:
     def test_realistic_prices_chronological_order(self):
         """Candles should be in chronological order (oldest first)."""
         from realistic_prices import RealisticPriceFeeder
+
         feeder = RealisticPriceFeeder()
         candles = feeder.get_candles("XAU", resolution="60", count=20)
         assert candles is not None
         timestamps = [c["timestamp"] for c in candles]
         for i in range(1, len(timestamps)):
-            assert timestamps[i] > timestamps[i-1], (
-                f"Candles not in order: {timestamps[i-1]} >= {timestamps[i]}"
-            )
+            assert timestamps[i] > timestamps[i - 1], f"Candles not in order: {timestamps[i-1]} >= {timestamps[i]}"
 
     def test_candle_continuity(self):
         """Each candle's open should equal the previous candle's close (from index 1+)."""
         from realistic_prices import RealisticPriceFeeder
+
         feeder = RealisticPriceFeeder()
         candles = feeder.get_candles("XAU", resolution="60", count=20)
         assert candles is not None
         for i in range(1, len(candles)):
-            assert candles[i]["open"] == candles[i-1]["close"], (
+            assert candles[i]["open"] == candles[i - 1]["close"], (
                 f"Continuity break at index {i}: "
                 f"prev close={candles[i-1]['close']}, current open={candles[i]['open']}"
             )
