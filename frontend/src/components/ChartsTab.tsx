@@ -38,7 +38,7 @@ interface Trade {
 const instruments = [
   { symbol: "XAU", name: "Gold", color: "#eab308" },
   { symbol: "XAG", name: "Silver", color: "#94a3b8" },
-  { symbol: "US100", name: "Nasdaq-100", color: "#3b82f6" },
+  { symbol: "US100", name: "Nasdaq-100", color: "var(--accent)" },
   { symbol: "BTC", name: "Bitcoin", color: "#f97316" },
 ];
 
@@ -164,7 +164,7 @@ export const ChartsTab: React.FC = () => {
       <div className="flex items-center justify-between mb-3">
         <span
           className="text-[11px] font-medium uppercase tracking-wider"
-          style={{ color: "#64748b" }}
+          style={{ color: "var(--text-muted)" }}
         >
           Multi-Chart View
         </span>
@@ -175,9 +175,9 @@ export const ChartsTab: React.FC = () => {
               onClick={() => setSelectedResolution(res.value)}
               className="px-2 py-1 text-[10px] font-medium rounded-sm transition-all"
               style={{
-                color: selectedResolution === res.value ? "#e2e8f0" : "#4a5568",
+                color: selectedResolution === res.value ? "var(--text-primary)" : "#4a5568",
                 backgroundColor:
-                  selectedResolution === res.value ? "#1a1f35" : "transparent",
+                  selectedResolution === res.value ? "var(--bg-tertiary)" : "transparent",
               }}
             >
               {res.label}
@@ -195,13 +195,13 @@ export const ChartsTab: React.FC = () => {
               key={instrument.symbol}
               className="rounded-sm overflow-hidden"
               style={{
-                backgroundColor: "#0d1220",
-                border: "1px solid #1a1f35",
+                backgroundColor: "var(--bg-secondary)",
+                border: "1px solid var(--bg-tertiary)",
               }}
             >
               <div
                 className="flex items-center justify-between px-2 md:px-3 py-2"
-                style={{ borderBottom: "1px solid #1a1f35" }}
+                style={{ borderBottom: "1px solid var(--bg-tertiary)" }}
               >
                 <div className="flex items-center gap-2">
                   <div
@@ -210,7 +210,7 @@ export const ChartsTab: React.FC = () => {
                   />
                   <span
                     className="text-[11px] font-bold"
-                    style={{ color: "#e2e8f0" }}
+                    style={{ color: "var(--text-primary)" }}
                   >
                     {instrument.symbol}
                   </span>
@@ -221,7 +221,7 @@ export const ChartsTab: React.FC = () => {
                   {trades.some((t) => t.symbol === instrument.symbol) && (
                     <div
                       className="flex items-center gap-1 ml-2 text-[9px]"
-                      style={{ color: "#64748b" }}
+                      style={{ color: "var(--text-muted)" }}
                     >
                       <span title="Entry = ▲/▼ triangle, Exit = ■ square">
                         Trades:
@@ -254,7 +254,7 @@ export const ChartsTab: React.FC = () => {
                         <div
                           className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                           style={{
-                            backgroundColor: isStale ? "#ef4444" : "#22c55e",
+                            backgroundColor: isStale ? "var(--danger)" : "var(--success)",
                           }}
                           title={
                             isStale
@@ -265,8 +265,8 @@ export const ChartsTab: React.FC = () => {
                         <span
                           className="text-[9px] px-1 py-0.5 rounded-sm"
                           style={{
-                            backgroundColor: "#1a1f35",
-                            color: isStale ? "#ef4444" : "#64748b",
+                            backgroundColor: "var(--bg-tertiary)",
+                            color: isStale ? "var(--danger)" : "var(--text-muted)",
                           }}
                         >
                           {isLive ? "LIVE" : "CACHED"} {ageStr}

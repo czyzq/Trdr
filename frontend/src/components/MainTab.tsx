@@ -4,14 +4,14 @@ import { CandlestickChart } from "./CandlestickChart";
 import { OpenPositionsSummary } from "./OpenPositionsSummary";
 import { apiUrl } from "../api";
 
-// Interval-appropriate display candle counts (visible candles, not including warmup)
+// Interval-appropriate display candle counts (visible candles, reduced for BB visibility)
 const CANDLE_COUNTS: Record<string, number> = {
-  "1": 60, // 1 hour of 1m candles
-  "5": 72, // 6 hours of 5m candles
-  "15": 80, // 20 hours of 15m candles
-  "30": 80, // ~40 hours of 30m candles
-  "60": 72, // 3 days of 1h candles
-  "D": 90, // ~3 months of daily candles
+  "1": 40, // 40 min of 1m candles
+  "5": 50, // ~4 hours of 5m candles
+  "15": 55, // ~14 hours of 15m candles
+  "30": 55, // ~27 hours of 30m candles
+  "60": 48, // 2 days of 1h candles
+  "D": 60, // ~2 months of daily candles
 };
 
 interface MainTabProps {
@@ -23,7 +23,7 @@ interface MainTabProps {
 const instruments = [
   { symbol: "XAU", name: "Gold", color: "#eab308" },
   { symbol: "XAG", name: "Silver", color: "#94a3b8" },
-  { symbol: "US100", name: "Nasdaq-100", color: "#3b82f6" },
+  { symbol: "US100", name: "Nasdaq-100", color: "var(--accent)" },
   { symbol: "BTC", name: "Bitcoin", color: "#f97316" },
 ];
 
@@ -92,19 +92,19 @@ export const MainTab: React.FC<MainTabProps> = ({
     const ageMs = Date.now() - timestamp;
     if (section === "chart") {
       // Charts: green < 5min, yellow < 7.5min, red > 7.5min
-      if (ageMs < 300000) return "#22c55e";
+      if (ageMs < 300000) return "var(--success)";
       if (ageMs < 450000) return "#eab308";
-      return "#ef4444";
+      return "var(--danger)";
     } else if (section === "positions") {
       // Positions: green < 5s, yellow < 10s, red > 10s (refreshes every 1s)
-      if (ageMs < 5000) return "#22c55e";
+      if (ageMs < 5000) return "var(--success)";
       if (ageMs < 10000) return "#eab308";
-      return "#ef4444";
+      return "var(--danger)";
     } else {
       // Signals: green < 15s, yellow < 30s, red > 30s (refreshes every 10s)
-      if (ageMs < 15000) return "#22c55e";
+      if (ageMs < 15000) return "var(--success)";
       if (ageMs < 30000) return "#eab308";
-      return "#ef4444";
+      return "var(--danger)";
     }
   };
 
@@ -251,13 +251,13 @@ export const MainTab: React.FC<MainTabProps> = ({
     <div className="flex flex-col h-full p-2 md:p-4 gap-2 md:gap-3 overflow-auto">
       {/* Chart Section */}
       <div
-        className="flex-1 min-h-[300px] md:min-h-0 rounded-sm overflow-hidden"
-        style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
+        className="flex-1 min-h-[200px] md:min-h-0 rounded-sm overflow-hidden"
+        style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--bg-tertiary)" }}
       >
         {/* Chart Header */}
         <div
           className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 md:px-4 py-2 md:py-2.5 gap-2 sm:gap-0"
-          style={{ borderBottom: "1px solid #1a1f35" }}
+          style={{ borderBottom: "1px solid var(--bg-tertiary)" }}
         >
           <div className="flex items-center gap-2 md:gap-3 w-full sm:w-auto">
             {/* Symbol Tabs - scrollable on mobile */}
@@ -269,10 +269,10 @@ export const MainTab: React.FC<MainTabProps> = ({
                   className="px-2 md:px-2.5 py-1 text-[11px] font-medium rounded-sm transition-all whitespace-nowrap flex-shrink-0"
                   style={{
                     color:
-                      selectedSymbol === inst.symbol ? "#e2e8f0" : "#4a5568",
+                      selectedSymbol === inst.symbol ? "var(--text-primary)" : "#4a5568",
                     backgroundColor:
                       selectedSymbol === inst.symbol
-                        ? "#1a1f35"
+                        ? "var(--bg-tertiary)"
                         : "transparent",
                     borderLeft:
                       selectedSymbol === inst.symbol
@@ -322,7 +322,7 @@ export const MainTab: React.FC<MainTabProps> = ({
                     <span
                       className="text-[9px] px-1 py-0.5 rounded-sm"
                       style={{
-                        backgroundColor: "#1a1f35",
+                        backgroundColor: "var(--bg-tertiary)",
                         color: getStatusColor(lastRefresh.chart, "chart"),
                       }}
                     >
@@ -348,8 +348,8 @@ export const MainTab: React.FC<MainTabProps> = ({
                 }
                 className="text-[10px] font-medium rounded-sm py-1 px-1.5 outline-none cursor-pointer flex-shrink-0"
                 style={{
-                  color: "#e2e8f0",
-                  backgroundColor: "#1a1f35",
+                  color: "var(--text-primary)",
+                  backgroundColor: "var(--bg-tertiary)",
                   border: "1px solid #2d3548",
                 }}
                 title="Trading strategy for this symbol"
@@ -371,10 +371,10 @@ export const MainTab: React.FC<MainTabProps> = ({
                   className="px-2 py-1 text-[10px] font-medium rounded-sm transition-all flex-shrink-0"
                   style={{
                     color:
-                      selectedTimeframe === tf.value ? "#e2e8f0" : "#4a5568",
+                      selectedTimeframe === tf.value ? "var(--text-primary)" : "#4a5568",
                     backgroundColor:
                       selectedTimeframe === tf.value
-                        ? "#1a1f35"
+                        ? "var(--bg-tertiary)"
                         : "transparent",
                   }}
                 >
@@ -440,42 +440,46 @@ export const MainTab: React.FC<MainTabProps> = ({
       {/* Signals Section - collapsible */}
       <div
         className="rounded-sm overflow-hidden"
-        style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
+        style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--bg-tertiary)" }}
       >
         {/* Section Header */}
         <button
           onClick={() =>
             setExpandedSection(expandedSection === "signals" ? null : "signals")
           }
-          className="w-full flex items-center justify-between px-3 py-2 transition-colors hover:bg-opacity-50"
+          className="w-full flex items-center justify-between px-3 py-2 transition-colors"
           style={{
-            backgroundColor:
-              expandedSection === "signals" ? "#1a1f35" : "transparent",
+            backgroundColor: expandedSection === "signals" ? "var(--bg-tertiary)" : "transparent",
+            borderBottom: "0.1px solid var(--bg-tertiary)",
           }}
         >
           <span
             className="text-[11px] font-medium uppercase tracking-wider flex items-center gap-2"
-            style={{ color: "#64748b" }}
+            style={{ color: "var(--text-muted)" }}
           >
             Trading Signals
+            <span className="text-[10px] px-2 py-0.5 rounded-sm" style={{ backgroundColor: "var(--bg-secondary)", color: "var(--text-primary)" }}>
+              {signals.length}
+            </span>
             <span 
               className="w-1.5 h-1.5 rounded-full" 
               style={{ backgroundColor: getStatusColor(lastRefresh.signals, "signals") }}
               title={`Updated ${formatAge(lastRefresh.signals)} ago`}
             />
-            <span className="text-[9px] ml-1" style={{ color: getStatusColor(lastRefresh.signals, "signals") }}>
+            <span className="text-[9px]" style={{ color: getStatusColor(lastRefresh.signals, "signals") }}>
               {formatAge(lastRefresh.signals)}
             </span>
           </span>
           <span
             style={{
-              color: "#64748b",
+              color: expandedSection === "signals" ? "var(--text-muted)" : "var(--text-primary)",
               transform:
                 expandedSection === "signals"
                   ? "rotate(180deg)"
                   : "rotate(0deg)",
-              transition: "transform 0.2s",
+              transition: "transform 0.2s, color 0.2s",
             }}
+            className="text-[10px]"
           >
             ▼
           </span>

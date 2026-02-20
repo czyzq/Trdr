@@ -21,7 +21,7 @@ interface NewsResponse {
 const symbolColors: Record<string, string> = {
   XAU: "#eab308",
   XAG: "#94a3b8",
-  US100: "#3b82f6",
+  US100: "var(--accent)",
   BTC: "#f97316",
 };
 
@@ -51,9 +51,9 @@ export const NewsTab: React.FC = () => {
   }, [fetchNews]);
 
   const getDirColor = (direction: string) => {
-    if (direction === "buy") return "#22c55e";
-    if (direction === "sell") return "#ef4444";
-    return "#64748b";
+    if (direction === "buy") return "var(--success)";
+    if (direction === "sell") return "var(--danger)";
+    return "var(--text-muted)";
   };
 
   const formatTime = (dateString: string) => {
@@ -74,7 +74,7 @@ export const NewsTab: React.FC = () => {
       <div className="flex items-center justify-between mb-3">
         <span
           className="text-[11px] font-medium uppercase tracking-wider"
-          style={{ color: "#64748b" }}
+          style={{ color: "var(--text-muted)" }}
         >
           News & Sentiment
         </span>
@@ -82,7 +82,7 @@ export const NewsTab: React.FC = () => {
           <button
             onClick={() => fetchNews()}
             disabled={loading}
-            className="px-3 py-1 text-xs bg-[#1a1f35]/50 hover:bg-blue-500/70 rounded border border-[#2a3349]/50 text-[#e2e8f0] transition-all font-medium"
+            className="px-3 py-1 text-xs bg-[var(--bg-tertiary)]/50 hover:bg-blue-500/70 rounded border border-[var(--border-light)]/50 text-[var(--text-primary)] transition-all font-medium"
           >
             {loading ? "Loading..." : "Refresh"}
           </button>
@@ -95,7 +95,7 @@ export const NewsTab: React.FC = () => {
       {/* Content */}
       <div
         className="flex-1 overflow-auto rounded-sm"
-        style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
+        style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--bg-tertiary)" }}
       >
         {loading && newsData.length === 0 ? (
           <div
@@ -112,13 +112,13 @@ export const NewsTab: React.FC = () => {
             <div className="md:hidden p-2 space-y-2">
               {newsData.map((article, idx) => {
                 const dirColor = getDirColor(article.direction);
-                const symColor = symbolColors[article.symbol] || "#64748b";
+                const symColor = symbolColors[article.symbol] || "var(--text-muted)";
                 return (
                   <div
                     key={idx}
                     className="rounded-sm p-3"
                     style={{
-                      backgroundColor: "#0b0f1a",
+                      backgroundColor: "var(--bg-primary)",
                       border: "1px solid #131825",
                     }}
                   >
@@ -130,7 +130,7 @@ export const NewsTab: React.FC = () => {
                         />
                         <span
                           className="font-bold text-[11px]"
-                          style={{ color: "#e2e8f0" }}
+                          style={{ color: "var(--text-primary)" }}
                         >
                           {article.symbol}
                         </span>
@@ -181,7 +181,7 @@ export const NewsTab: React.FC = () => {
             {/* Desktop table */}
             <table className="w-full text-[11px] hidden md:table">
               <thead>
-                <tr style={{ borderBottom: "1px solid #1a1f35" }}>
+                <tr style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
                   <th
                     className="px-4 py-2.5 text-left font-medium uppercase tracking-wider"
                     style={{ color: "#4a5568" }}
@@ -229,7 +229,7 @@ export const NewsTab: React.FC = () => {
               <tbody>
                 {newsData.map((article, idx) => {
                   const dirColor = getDirColor(article.direction);
-                  const symColor = symbolColors[article.symbol] || "#64748b";
+                  const symColor = symbolColors[article.symbol] || "var(--text-muted)";
                   return (
                     <tr
                       key={idx}
@@ -251,7 +251,7 @@ export const NewsTab: React.FC = () => {
                           />
                           <span
                             className="font-bold"
-                            style={{ color: "#e2e8f0" }}
+                            style={{ color: "var(--text-primary)" }}
                           >
                             {article.symbol}
                           </span>
@@ -283,13 +283,13 @@ export const NewsTab: React.FC = () => {
                         <div className="flex items-center justify-center gap-1">
                           <div
                             className="w-8 h-1 rounded-full"
-                            style={{ backgroundColor: "#1a1f35" }}
+                            style={{ backgroundColor: "var(--bg-tertiary)" }}
                           >
                             <div
                               className="h-full rounded-full"
                               style={{
                                 width: `${article.importance * 100}%`,
-                                backgroundColor: "#64748b",
+                                backgroundColor: "var(--text-muted)",
                               }}
                             />
                           </div>

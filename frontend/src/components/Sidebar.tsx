@@ -39,7 +39,7 @@ function getSessionStatus(session: TradingSession): { open: boolean; status: str
     if (hoursLeft >= 0) {
       const h = Math.floor(hoursLeft);
       const m = Math.floor((hoursLeft - h) * 60);
-      return { open: true, status: `OTWARTY ${h}h ${m}m` };
+      return { open: true, status: `Opened ${h}h ${m}m` };
     }
   } else {
     // Calculate time until open
@@ -47,9 +47,9 @@ function getSessionStatus(session: TradingSession): { open: boolean; status: str
     if (hoursUntil < 0) hoursUntil += 24;
     const h = Math.floor(hoursUntil);
     const m = Math.floor((hoursUntil - h) * 60);
-    return { open: false, status: `za ${h}h ${m}m` };
+    return { open: false, status: `in ${h}h ${m}m` };
   }
-  return { open, status: open ? "OTWARTY" : "ZAMKNIĘTY" };
+  return { open, status: open ? "Opened" : "Closed" };
 }
 
 const MarketStatus: React.FC = () => {
@@ -69,7 +69,7 @@ const MarketStatus: React.FC = () => {
   }, []);
 
   return (
-    <div className="p-2 rounded-sm" style={{ backgroundColor: "#0b0f1a" }}>
+    <div className="p-2 rounded-sm" style={{ backgroundColor: "var(--bg-primary)" }}>
       <div className="text-[10px] mb-2" style={{ color: "#6b7280" }}>
         SESJE • {time.warsaw} ({time.utc} UTC)
       </div>
@@ -81,11 +81,11 @@ const MarketStatus: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <div
                   className="w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: open ? "#22c55e" : "#ef4444" }}
+                  style={{ backgroundColor: open ? "var(--success)" : "var(--danger)" }}
                 />
                 <span style={{ color: "#e5e7eb" }}>{s.name}</span>
               </div>
-              <span style={{ color: open ? "#22c55e" : "#9ca3af" }}>
+              <span style={{ color: open ? "var(--success)" : "var(--text-secondary)" }}>
                 {status}
               </span>
             </div>
@@ -151,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
     }
   };
 
-  const pnlColor = totalPnl >= 0 ? "#22c55e" : "#ef4444";
+  const pnlColor = totalPnl >= 0 ? "var(--success)" : "var(--danger)";
   // Use initial_balance from account if available, fallback to calculating from equity - balance
   const initialBalance = accountData?.initial_balance_usd ?? equity - totalPnl;
   const equityChange = totalPnl; // Total P&L is the equity change from initial
@@ -161,37 +161,37 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
   return (
     <div
       className="w-60 h-full flex flex-col overflow-y-auto"
-      style={{ backgroundColor: "#0d1220", borderRight: "1px solid #1a1f35" }}
+      style={{ backgroundColor: "var(--bg-secondary)", borderRight: "1px solid var(--bg-tertiary)" }}
     >
       {/* Balance Section */}
-      <div className="p-4" style={{ borderBottom: "1px solid #1a1f35" }}>
+      <div className="p-4" style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
         <div
           className="text-[10px] uppercase tracking-widest mb-1.5"
           style={{ color: "#4a5568" }}
         >
           Balance
         </div>
-        <div className="text-lg font-bold mb-0.5" style={{ color: "#e2e8f0" }}>
+        <div className="text-lg font-bold mb-0.5" style={{ color: "var(--text-primary)" }}>
           ${balance.toLocaleString("en-US", { minimumFractionDigits: 2 })}{" "}
-          <span className="text-xs font-normal" style={{ color: "#64748b" }}>
+          <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>
             USD
           </span>
         </div>
       </div>
 
       {/* Equity Section */}
-      <div className="p-4" style={{ borderBottom: "1px solid #1a1f35" }}>
+      <div className="p-4" style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
         <div
           className="text-[10px] uppercase tracking-widest mb-1.5"
           style={{ color: "#4a5568" }}
         >
           Equity
         </div>
-        <div className="text-base font-bold" style={{ color: "#e2e8f0" }}>
+        <div className="text-base font-bold" style={{ color: "var(--text-primary)" }}>
           ${equity.toLocaleString("en-US", { minimumFractionDigits: 2 })}{" "}
           <span
             className="text-[10px] font-normal"
-            style={{ color: "#64748b" }}
+            style={{ color: "var(--text-muted)" }}
           >
             USD
           </span>
@@ -210,19 +210,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
       {/* Stats Grid */}
       <div
         className="p-4 grid grid-cols-2 gap-3"
-        style={{ borderBottom: "1px solid #1a1f35" }}
+        style={{ borderBottom: "1px solid var(--bg-tertiary)" }}
       >
-        <StatBox label="Open" value={openTrades.toString()} color="#3b82f6" />
+        <StatBox label="Open" value={openTrades.toString()} color="var(--accent)" />
         <StatBox
           label="Closed"
           value={closedTrades.toString()}
-          color="#64748b"
+          color="var(--text-muted)"
         />
         <StatBox
           label="Win Rate"
           value={`${winRate}%`}
           color={
-            winRate >= 50 ? "#22c55e" : winRate > 0 ? "#ef4444" : "#64748b"
+            winRate >= 50 ? "var(--success)" : winRate > 0 ? "var(--danger)" : "var(--text-muted)"
           }
         />
         <StatBox
@@ -233,7 +233,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
       </div>
 
       {/* Mode Toggle */}
-      <div className="p-4" style={{ borderBottom: "1px solid #1a1f35" }}>
+      <div className="p-4" style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
         <div
           className="text-[10px] uppercase tracking-widest mb-2"
           style={{ color: "#4a5568" }}
@@ -252,7 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
               mode === "simulate"
                 ? "rgba(234, 179, 8, 0.3)"
                 : "rgba(239, 68, 68, 0.3)",
-            color: mode === "simulate" ? "#eab308" : "#ef4444",
+            color: mode === "simulate" ? "#eab308" : "var(--danger)",
           }}
         >
           {mode === "simulate" ? "SIMULATION MODE" : "LIVE MODE"}
@@ -268,7 +268,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
       </div>
 
       {/* Instruments
-      <div className="p-4" style={{ borderBottom: '1px solid #1a1f35' }}>
+      <div className="p-4" style={{ borderBottom: '1px solid var(--bg-tertiary)' }}>
         <div className="text-[10px] uppercase tracking-widest mb-2.5" style={{ color: '#4a5568' }}>
           Instruments
         </div>
@@ -276,7 +276,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
           {[
             { symbol: 'XAU', name: 'Gold', color: '#eab308' },
             { symbol: 'XAG', name: 'Silver', color: '#94a3b8' },
-            { symbol: 'US100', name: 'Nasdaq', color: '#3b82f6' },
+            { symbol: 'US100', name: 'Nasdaq', color: 'var(--accent)' },
             { symbol: 'BTC', name: 'Bitcoin', color: '#f97316' },
           ].map((inst) => (
             <div key={inst.symbol} className="flex items-center justify-between py-1">
@@ -295,13 +295,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
       </div> */}
 
       {/* Market Status - replaces Scanner/Last scan */}
-      <div className="p-3" style={{ borderBottom: "1px solid #1a1f35" }}>
+      <div className="p-3" style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
         <MarketStatus />
       </div>
 
       {/* Scanner Status - replaced by MarketStatus */}
       {/*
-      <div className="p-4" style={{ borderBottom: "1px solid #1a1f35" }}>
+      <div className="p-4" style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
         <div className="flex items-center justify-between mb-2">
           <div
             className="text-[10px] uppercase tracking-widest"
@@ -312,9 +312,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
           <div className="flex items-center gap-1.5">
             <div
               className={`w-1.5 h-1.5 rounded-full ${isScanning ? "animate-pulse" : ""}`}
-              style={{ backgroundColor: "#22c55e" }}
+              style={{ backgroundColor: "var(--success)" }}
             />
-            <span className="text-[10px]" style={{ color: "#22c55e" }}>
+            <span className="text-[10px]" style={{ color: "var(--success)" }}>
               Active
             </span>
           </div>
@@ -328,7 +328,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
           onClick={resetAccount}
           className="w-full text-[10px] py-1.5 rounded-sm border transition-all hover:bg-opacity-10"
           style={{
-            borderColor: "#1a1f35",
+            borderColor: "var(--bg-tertiary)",
             color: "#4a5568",
           }}
         >
@@ -344,7 +344,7 @@ const StatBox: React.FC<{ label: string; value: string; color: string }> = ({
   value,
   color,
 }) => (
-  <div className="p-2.5 rounded-sm" style={{ backgroundColor: "#0b0f1a" }}>
+  <div className="p-2.5 rounded-sm" style={{ backgroundColor: "var(--bg-primary)" }}>
     <div
       className="text-[9px] uppercase tracking-widest mb-1"
       style={{ color: "#4a5568" }}

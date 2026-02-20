@@ -2,6 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme CSS Variables */
+:root {
+  --bg-primary: #0b0f1a;
+  --bg-secondary: #0d1220;
+  --bg-tertiary: #1a1f35;
+  --border: #1a1f35;
+  --border-light: #2a3349;
+  --text-primary: #e2e8f0;
+  --text-secondary: #9ca3af;
+  --text-muted: #64748b;
+  --accent: #3b82f6;
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --chart-bg: #0d1220;
+  --grid-line: #1a1f35;
+  --chart-text: #374151;
+  --chart-candle-up: #22c55e;
+  --chart-candle-down: #ef4444;
+}
+
+:root.theme-black {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-tertiary: #171717;
+  --border: #262626;
+  --border-light: #404040;
+  --text-primary: #f5f5f5;
+  --text-secondary: #a3a3a3;
+  --text-muted: #737373;
+  --accent: #ffffff;
+  --success: #4ade80;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --chart-bg: #000000;
+  --grid-line: #171717;
+  --chart-text: #525252;
+  --chart-candle-up: #4ade80;
+  --chart-candle-down: #f87171;
+}
+
+:root.theme-daylight {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --border: #e2e8f0;
+  --border-light: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --accent: #2563eb;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --warning: #d97706;
+  --chart-bg: #ffffff;
+  --grid-line: #e2e8f0;
+  --chart-text: #6b7280;
+  --chart-candle-up: #16a34a;
+  --chart-candle-down: #dc2626;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -10,8 +71,8 @@
 
 body {
   font-family: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
-  background-color: #0b0f1a;
-  color: #c8cdd8;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -27,16 +88,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0b0f1a;
+  background: var(--bg-primary);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e2538;
+  background: var(--bg-tertiary);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3350;
+  background: var(--border-light);
 }
 
 /* Animations */

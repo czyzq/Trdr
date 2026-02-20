@@ -53,11 +53,11 @@ const formatDuration = (openedAt: string): string => {
 
 // Get status color: green < 5s, yellow < 10s, red > 10s
 const getStatusColor = (timestamp: number | null | undefined): string => {
-  if (!timestamp) return "#ef4444";
+  if (!timestamp) return "var(--danger)";
   const ageMs = Date.now() - timestamp;
-  if (ageMs < 5000) return "#22c55e";
-  if (ageMs < 10000) return "#eab308";
-  return "#ef4444";
+  if (ageMs < 5000) return "var(--success)";
+  if (ageMs < 10000) return "var(--warning)";
+  return "var(--danger)";
 };
 
 const formatAge = (timestamp: number | null | undefined): string => {
@@ -86,6 +86,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
 }) => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(false);
+  const [minimized, setMinimized] = useState(false);
   // Use external lastRefresh if provided, otherwise use internal
   const [internalLastFetched, setInternalLastFetched] = useState<number>(Date.now());
   const lastFetched = internalLastFetched;
@@ -300,36 +301,49 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
   if (positions.length === 0) {
     return (
       <div
-        className="rounded-sm p-3"
-        style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
+        className="rounded-sm overflow-hidden"
+        style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--bg-tertiary)" }}
       >
-        <div className="flex items-center justify-between">
+        {/* Header - clickable to minimize */}
+        <button
+          onClick={() => setMinimized(!minimized)}
+          className="w-full flex items-center justify-between px-3 py-2 transition-colors"
+          style={{
+            backgroundColor: minimized ? "transparent" : "var(--bg-tertiary)",
+            borderBottom: "0.1px solid var(--bg-tertiary)",
+          }}
+        >
           <span
-            className="text-[11px] font-medium uppercase tracking-wider"
-            style={{ color: "#4a5568" }}
+            className="text-[11px] font-medium uppercase tracking-wider flex items-center gap-2"
+            style={{ color: "var(--text-muted)" }}
           >
             Open Positions
-          </span>
-          <div className="flex items-center gap-1.5">
-            <span 
-              className="w-1.5 h-1.5 rounded-full" 
-              style={{ backgroundColor: getStatusColor(lastFetched) }}
-              title={`Updated ${formatAge(lastFetched)} ago`}
-            />
-            <span
-              className="text-[10px] px-2 py-0.5 rounded-sm"
-              style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
-            >
+            <span className="text-[10px] px-2 py-0.5 rounded-sm" style={{ backgroundColor: "var(--bg-secondary)", color: "var(--text-muted)" }}>
               0
             </span>
-            <span className="text-[9px]" style={{ color: getStatusColor(lastFetched) }}>
-              {formatAge(lastFetched)}
-            </span>
+            {!minimized && (
+              <span className="text-[9px]" style={{ color: getStatusColor(lastFetched) }}>
+                {formatAge(lastFetched)}
+              </span>
+            )}
+          </span>
+          <span
+            style={{
+              color: minimized ? "var(--text-primary)" : "var(--text-muted)",
+              transform: minimized ? "rotate(0deg)" : "rotate(180deg)",
+              transition: "transform 0.2s, color 0.2s",
+            }}
+            className="text-[10px]"
+          >
+            ▼
+          </span>
+        </button>
+
+        {!minimized && (
+          <div className="px-3 py-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
+            No open positions
           </div>
-        </div>
-        <div className="text-[10px] mt-2" style={{ color: "#4a5568" }}>
-          No open positions
-        </div>
+        )}
       </div>
     );
   }
@@ -346,43 +360,68 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
   return (
     <div
       className="rounded-sm overflow-hidden"
-      style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
+      style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--bg-tertiary)" }}
     >
-      {/* Header - ALL IN ONE LINE */}
-      <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid #1a1f35" }}>
+      {/* Header - clickable to minimize */}
+      <button
+        onClick={() => setMinimized(!minimized)}
+        className="w-full flex items-center justify-between px-3 py-2 transition-colors"
+        style={{
+          backgroundColor: minimized ? "transparent" : "var(--bg-tertiary)",
+          borderBottom: "0.1px solid var(--bg-tertiary)",
+        }}
+      >
         {/* Left: Title + Count + Status */}
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
-            Open Positions
-          </span>
-          <span className="text-[10px] px-2 py-0.5 rounded-sm" style={{ backgroundColor: "#1a1f35", color: "#e2e8f0" }}>
+        <span
+          className="text-[11px] font-medium uppercase tracking-wider flex items-center gap-2"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Open Positions
+          <span className="text-[10px] px-2 py-0.5 rounded-sm" style={{ backgroundColor: "var(--bg-secondary)", color: "var(--text-primary)" }}>
             {positions.length}
           </span>
-          <span 
-            className="w-1.5 h-1.5 rounded-full" 
-            style={{ backgroundColor: getStatusColor(lastFetched) }}
-            title={`Updated ${formatAge(lastFetched)} ago`}
-          />
-          <span className="text-[9px]" style={{ color: getStatusColor(lastFetched) }}>
-            {formatAge(lastFetched)}
+          {!minimized && (
+            <>
+              <span 
+                className="w-1.5 h-1.5 rounded-full" 
+                style={{ backgroundColor: getStatusColor(lastFetched) }}
+                title={`Updated ${formatAge(lastFetched)} ago`}
+              />
+              <span className="text-[9px]" style={{ color: getStatusColor(lastFetched) }}>
+                {formatAge(lastFetched)}
+              </span>
+            </>
+          )}
+        </span>
+
+        {/* Right: Margin + P&L + Minimize */}
+        <div className="flex items-center gap-3">
+          {positions.length > 0 && (
+            <div className="flex items-center gap-3 text-[10px]">
+              <span><span style={{ color: "var(--text-muted)" }}>Margin: </span><span style={{ color: "var(--text-primary)" }}>${totalMargin.toFixed(2)}</span></span>
+              <span><span style={{ color: "var(--text-muted)" }}>P&L: </span><span style={{ color: totalPnl >= 0 ? "var(--success)" : "var(--danger)" }}>{totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}</span></span>
+            </div>
+          )}
+          <span
+            style={{
+              color: minimized ? "var(--text-primary)" : "var(--text-muted)",
+              transform: minimized ? "rotate(0deg)" : "rotate(180deg)",
+              transition: "transform 0.2s, color 0.2s",
+            }}
+            className="text-[10px]"
+          >
+            ▼
           </span>
         </div>
-        
-        {/* Right: Margin + P&L */}
-        {positions.length > 0 && (
-          <div className="flex items-center gap-3 text-[10px]">
-            <span><span style={{ color: "#4a5568" }}>Margin: </span><span style={{ color: "#e2e8f0" }}>${totalMargin.toFixed(2)}</span></span>
-            <span><span style={{ color: "#4a5568" }}>P&L: </span><span style={{ color: totalPnl >= 0 ? "#22c55e" : "#ef4444" }}>{totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}</span></span>
-          </div>
-        )}
-      </div>
+      </button>
 
       {/* Positions List */}
-      <div className="divide-y" style={{ borderColor: "#1a1f35" }}>
+      {!minimized && (
+        <div className="flex flex-col">
         {positions.map((pos) => {
           const pnlColor =
-            (pos.unrealized_pnl_usd || 0) >= 0 ? "#22c55e" : "#ef4444";
-          const dirColor = pos.direction === "buy" ? "#22c55e" : "#ef4444";
+            (pos.unrealized_pnl_usd || 0) >= 0 ? "var(--success)" : "var(--danger)";
+          const dirColor = pos.direction === "buy" ? "var(--success)" : "var(--danger)";
           const pnlPct =
             pos.margin_usd > 0
               ? ((pos.unrealized_pnl_usd || 0) / pos.margin_usd) * 100
@@ -391,7 +430,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
           const isEditing = editingPosition === pos.id;
 
           return (
-            <div key={pos.id} className="px-3 py-2">
+            <div key={pos.id} className="px-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
               {/* Main Row */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -399,7 +438,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span
                       className="text-xs font-bold"
-                      style={{ color: "#e2e8f0" }}
+                      style={{ color: "var(--text-primary)" }}
                     >
                       {pos.symbol}
                     </span>
@@ -415,13 +454,13 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                   </div>
 
                   {/* Size, Leverage & Entry */}
-                  <div className="text-[10px]" style={{ color: "#4a5568" }}>
+                  <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
                     {pos.size.toFixed(4)} lot (x{pos.leverage || 1}) @{" "}
                     {pos.entry_price.toFixed(2)}
                   </div>
 
                   {/* Current Price */}
-                  <div className="text-[10px]" style={{ color: "#64748b" }}>
+                  <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
                     → {pos.current_price.toFixed(2)}
                   </div>
                 </div>
@@ -456,7 +495,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                     className="px-2 py-1 text-[9px] font-bold rounded-sm transition-all"
                     style={{
                       backgroundColor: "rgba(59, 130, 246, 0.1)",
-                      color: "#3b82f6",
+                      color: "var(--accent)",
                       border: "1px solid rgba(59, 130, 246, 0.3)",
                       opacity: loading ? 0.5 : 1,
                     }}
@@ -471,7 +510,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                     className="px-2 py-1 text-[9px] font-bold rounded-sm transition-all"
                     style={{
                       backgroundColor: "rgba(239, 68, 68, 0.1)",
-                      color: "#ef4444",
+                      color: "var(--danger)",
                       border: "1px solid rgba(239, 68, 68, 0.3)",
                       opacity: loading ? 0.5 : 1,
                     }}
@@ -485,21 +524,21 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
               {!isEditing && (
                 <div className="flex items-center justify-between mt-1">
                   <div className="flex items-center gap-4 text-[9px]">
-                    <span style={{ color: "#4a5568" }}>
+                    <span style={{ color: "var(--text-muted)" }}>
                       SL:{" "}
-                      <span style={{ color: "#ef4444" }}>
+                      <span style={{ color: "var(--danger)" }}>
                         {pos.stop_loss.toFixed(2)}
                       </span>
                     </span>
-                    <span style={{ color: "#4a5568" }}>
+                    <span style={{ color: "var(--text-muted)" }}>
                       TP:{" "}
-                      <span style={{ color: "#22c55e" }}>
+                      <span style={{ color: "var(--success)" }}>
                         {pos.take_profit.toFixed(2)}
                       </span>
                     </span>
                   </div>
                   {pos.opened_at && (
-                    <span className="text-[9px]" style={{ color: "#64748b" }}>
+                    <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
                       {formatTime(pos.opened_at)} (
                       {formatDuration(pos.opened_at)})
                     </span>
@@ -511,18 +550,18 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
               {isEditing && (
                 <div
                   className="mt-2 p-2 rounded-sm"
-                  style={{ backgroundColor: "#0b0f1a" }}
+                  style={{ backgroundColor: "var(--bg-primary)" }}
                 >
                   {/* Stop Loss */}
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px]" style={{ color: "#ef4444" }}>
+                    <span className="text-[10px]" style={{ color: "var(--danger)" }}>
                       Stop Loss:
                     </span>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => setEditSl((prev) => prev - config.step)}
                         className="px-2 py-0.5 text-[10px] rounded"
-                        style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                        style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                       >
                         −
                       </button>
@@ -534,15 +573,15 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                         }
                         className="w-20 px-2 py-0.5 text-[10px] text-center rounded"
                         style={{
-                          backgroundColor: "#1a1f35",
-                          border: "1px solid #ef444433",
-                          color: "#ef4444",
+                          backgroundColor: "var(--bg-tertiary)",
+                          // border: "1px solid var(--danger)33",
+                          color: "var(--danger)",
                         }}
                       />
                       <button
                         onClick={() => setEditSl((prev) => prev + config.step)}
                         className="px-2 py-0.5 text-[10px] rounded"
-                        style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                        style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                       >
                         +
                       </button>
@@ -551,14 +590,14 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
 
                   {/* Take Profit */}
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px]" style={{ color: "#22c55e" }}>
+                    <span className="text-[10px]" style={{ color: "var(--success)" }}>
                       Take Profit:
                     </span>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => setEditTp((prev) => prev - config.step)}
                         className="px-2 py-0.5 text-[10px] rounded"
-                        style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                        style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                       >
                         −
                       </button>
@@ -570,15 +609,15 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                         }
                         className="w-20 px-2 py-0.5 text-[10px] text-center rounded"
                         style={{
-                          backgroundColor: "#1a1f35",
-                          border: "1px solid #22c55e33",
-                          color: "#22c55e",
+                          backgroundColor: "var(--bg-tertiary)",
+                          border: "1px solid var(--success)33",
+                          color: "var(--success)",
                         }}
                       />
                       <button
                         onClick={() => setEditTp((prev) => prev + config.step)}
                         className="px-2 py-0.5 text-[10px] rounded"
-                        style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                        style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                       >
                         +
                       </button>
@@ -590,7 +629,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                     <button
                       onClick={cancelEdit}
                       className="px-3 py-1 text-[9px] rounded-sm"
-                      style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                      style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                     >
                       Cancel
                     </button>
@@ -600,7 +639,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                       className="px-3 py-1 text-[9px] font-bold rounded-sm"
                       style={{
                         backgroundColor: "rgba(34, 197, 94, 0.1)",
-                        color: "#22c55e",
+                        color: "var(--success)",
                         border: "1px solid rgba(34, 197, 94, 0.3)",
                         opacity: loading ? 0.5 : 1,
                       }}
@@ -614,6 +653,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
           );
         })}
       </div>
+      )}
     </div>
   );
 };

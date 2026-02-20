@@ -75,7 +75,7 @@ const MiniSparkline: React.FC<{ data: number[] }> = ({ data }) => {
     })
     .join(" ");
   const isUp = data[data.length - 1] > data[0];
-  const color = isUp ? "#22c55e" : "#ef4444";
+  const color = isUp ? "var(--success)" : "var(--danger)";
 
   return (
     <svg width="64" height="16" viewBox="0 0 64 16">
@@ -460,11 +460,11 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
   };
 
   const getScoreColor = (score: number): string => {
-    if (score > 0.5) return "#22c55e";
+    if (score > 0.5) return "var(--success)";
     if (score > 0.2) return "#4ade80";
-    if (score > -0.2) return "#64748b";
+    if (score > -0.2) return "var(--text-muted)";
     if (score > -0.5) return "#f87171";
-    return "#ef4444";
+    return "var(--danger)";
   };
 
   const getScoreBarWidth = (score: number): number => {
@@ -487,7 +487,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
           style={{
             backgroundColor: "rgba(239, 68, 68, 0.1)",
             border: "1px solid rgba(239, 68, 68, 0.3)",
-            color: "#ef4444",
+            color: "var(--danger)",
           }}
         >
           {errorMessage}
@@ -507,10 +507,10 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
             const scoreColor = getScoreColor(signal.score);
             const isBuy = signal.direction === "buy";
             const dirColor = isBuy
-              ? "#22c55e"
+              ? "var(--success)"
               : signal.direction === "sell"
-                ? "#ef4444"
-                : "#64748b";
+                ? "var(--danger)"
+                : "var(--text-muted)";
 
             return (
               <div
@@ -518,7 +518,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                 onClick={() => onSignalClick?.(signal)}
                 className="rounded-sm p-3"
                 style={{
-                  backgroundColor: "#0b0f1a",
+                  backgroundColor: "var(--bg-primary)",
                   border: "1px solid #131825",
                 }}
               >
@@ -527,7 +527,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                   <div className="flex items-center gap-2">
                     <span
                       className="font-bold text-xs"
-                      style={{ color: "#e2e8f0" }}
+                      style={{ color: "var(--text-primary)" }}
                     >
                       {signal.symbol}
                     </span>
@@ -568,13 +568,13 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                   </div>
                   <div>
                     <span style={{ color: "#4a5568" }}>TP: </span>
-                    <span style={{ color: "#22c55e" }}>
+                    <span style={{ color: "var(--success)" }}>
                       {formatPrice(signal.take_profit)}
                     </span>
                   </div>
                   <div>
                     <span style={{ color: "#4a5568" }}>SL: </span>
-                    <span style={{ color: "#ef4444" }}>
+                    <span style={{ color: "var(--danger)" }}>
                       {formatPrice(signal.stop_loss)}
                     </span>
                   </div>
@@ -608,7 +608,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                       className="px-3 py-1 text-[10px] font-bold rounded-sm transition-all"
                       style={{
                         backgroundColor: "rgba(34, 197, 94, 0.1)",
-                        color: "#22c55e",
+                        color: "var(--success)",
                         border: "1px solid rgba(34, 197, 94, 0.2)",
                       }}
                     >
@@ -623,7 +623,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                       className="px-3 py-1 text-[10px] font-bold rounded-sm transition-all"
                       style={{
                         backgroundColor: "rgba(239, 68, 68, 0.1)",
-                        color: "#ef4444",
+                        color: "var(--danger)",
                         border: "1px solid rgba(239, 68, 68, 0.2)",
                       }}
                     >
@@ -641,7 +641,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
       <div className="hidden md:block">
         <table className="w-full text-[11px]">
           <thead>
-            <tr style={{ borderBottom: "1px solid #1a1f35" }}>
+            <tr style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
               <th
                 className="px-4 py-2 text-left font-medium uppercase tracking-wider"
                 style={{ color: "#4a5568" }}
@@ -709,10 +709,10 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
               const scoreColor = getScoreColor(signal.score);
               const isBuy = signal.direction === "buy";
               const dirColor = isBuy
-                ? "#22c55e"
+                ? "var(--success)"
                 : signal.direction === "sell"
-                  ? "#ef4444"
-                  : "#64748b";
+                  ? "var(--danger)"
+                  : "var(--text-muted)";
 
               return (
                 <tr
@@ -731,7 +731,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                   <td className="px-4 py-2.5">
                     <span
                       className="font-bold text-xs"
-                      style={{ color: "#e2e8f0" }}
+                      style={{ color: "var(--text-primary)" }}
                     >
                       {signal.symbol}
                     </span>
@@ -740,7 +740,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                     <div className="flex items-center justify-center gap-1.5">
                       <div
                         className="w-12 h-1.5 rounded-full overflow-hidden"
-                        style={{ backgroundColor: "#1a1f35" }}
+                        style={{ backgroundColor: "var(--bg-tertiary)" }}
                       >
                         <div
                           className="h-full rounded-full transition-all"
@@ -788,13 +788,13 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                   </td>
                   <td
                     className="px-3 py-2.5 text-right"
-                    style={{ color: "#22c55e" }}
+                    style={{ color: "var(--success)" }}
                   >
                     {formatPrice(signal.take_profit)}
                   </td>
                   <td
                     className="px-3 py-2.5 text-right"
-                    style={{ color: "#ef4444" }}
+                    style={{ color: "var(--danger)" }}
                   >
                     {formatPrice(signal.stop_loss)}
                   </td>
@@ -817,7 +817,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                         className="px-2 py-0.5 text-[9px] font-bold rounded-sm transition-all"
                         style={{
                           backgroundColor: "rgba(34, 197, 94, 0.1)",
-                          color: "#22c55e",
+                          color: "var(--success)",
                           border: "1px solid rgba(34, 197, 94, 0.2)",
                         }}
                       >
@@ -832,7 +832,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                         className="px-2 py-0.5 text-[9px] font-bold rounded-sm transition-all"
                         style={{
                           backgroundColor: "rgba(239, 68, 68, 0.1)",
-                          color: "#ef4444",
+                          color: "var(--danger)",
                           border: "1px solid rgba(239, 68, 68, 0.2)",
                         }}
                       >
@@ -856,18 +856,18 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
         >
           <div
             className="p-5 rounded-lg w-96 max-w-[90vw]"
-            style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
+            style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--bg-tertiary)" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-bold mb-4" style={{ color: "#e2e8f0" }}>
+            <h3 className="text-lg font-bold mb-4" style={{ color: "var(--text-primary)" }}>
               {tradeModal.direction === "buy" ? "Buy" : "Sell"}{" "}
               {tradeModal.symbol}
             </h3>
 
             {/* Entry Price */}
             <div className="flex justify-between text-sm mb-3">
-              <span style={{ color: "#64748b" }}>Entry Price:</span>
-              <span style={{ color: "#e2e8f0" }}>
+              <span style={{ color: "var(--text-muted)" }}>Entry Price:</span>
+              <span style={{ color: "var(--text-primary)" }}>
                 ${tradeModal.entryPrice.toFixed(2)}
               </span>
             </div>
@@ -875,8 +875,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
             {/* Take Profit with +/- */}
             <div className="mb-3">
               <div className="flex justify-between text-sm mb-1">
-                <span style={{ color: "#22c55e" }}>Take Profit:</span>
-                <span style={{ color: "#22c55e" }}>
+                <span style={{ color: "var(--success)" }}>Take Profit:</span>
+                <span style={{ color: "var(--success)" }}>
                   ${tradeModal.displayTakeProfit}
                 </span>
               </div>
@@ -899,7 +899,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                     })
                   }
                   className="px-3 py-1 rounded text-sm font-bold"
-                  style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                  style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                 >
                   −
                 </button>
@@ -926,9 +926,9 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                   }
                   className="flex-1 px-3 py-1.5 rounded text-sm text-center"
                   style={{
-                    backgroundColor: "#1a1f35",
-                    border: "1px solid #22c55e33",
-                    color: "#22c55e",
+                    backgroundColor: "var(--bg-tertiary)",
+                    border: "1px solid var(--success)33",
+                    color: "var(--success)",
                   }}
                 />
                 <button
@@ -949,7 +949,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                     })
                   }
                   className="px-3 py-1 rounded text-sm font-bold"
-                  style={{ backgroundColor: "#1a1f35", color: "#22c55e" }}
+                  style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--success)" }}
                 >
                   +
                 </button>
@@ -959,8 +959,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
             {/* Stop Loss with +/- */}
             <div className="mb-4">
               <div className="flex justify-between text-sm mb-1">
-                <span style={{ color: "#ef4444" }}>Stop Loss:</span>
-                <span style={{ color: "#ef4444" }}>
+                <span style={{ color: "var(--danger)" }}>Stop Loss:</span>
+                <span style={{ color: "var(--danger)" }}>
                   ${tradeModal.displayStopLoss}
                 </span>
               </div>
@@ -983,7 +983,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                     })
                   }
                   className="px-3 py-1 rounded text-sm font-bold"
-                  style={{ backgroundColor: "#1a1f35", color: "#ef4444" }}
+                  style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--danger)" }}
                 >
                   −
                 </button>
@@ -1010,9 +1010,9 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                   }
                   className="flex-1 px-3 py-1.5 rounded text-sm text-center"
                   style={{
-                    backgroundColor: "#1a1f35",
-                    border: "1px solid #ef444433",
-                    color: "#ef4444",
+                    backgroundColor: "var(--bg-tertiary)",
+                    border: "1px solid var(--danger)33",
+                    color: "var(--danger)",
                   }}
                 />
                 <button
@@ -1033,7 +1033,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                     })
                   }
                   className="px-3 py-1 rounded text-sm font-bold"
-                  style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                  style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                 >
                   +
                 </button>
@@ -1043,8 +1043,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
             {/* Position Size */}
             <div className="mb-4">
               <div className="flex justify-between text-sm mb-1">
-                <span style={{ color: "#64748b" }}>Position Size:</span>
-                <span style={{ color: "#22c55e", fontSize: "11px" }}>
+                <span style={{ color: "var(--text-muted)" }}>Position Size:</span>
+                <span style={{ color: "var(--success)", fontSize: "11px" }}>
                   Suggested: {tradeModal.suggestedSize.toFixed(4)}
                 </span>
               </div>
@@ -1077,7 +1077,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                     })
                   }
                   className="px-3 py-1 rounded text-sm font-bold"
-                  style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                  style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                 >
                   −
                 </button>
@@ -1123,9 +1123,9 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                   }
                   className="flex-1 px-3 py-1.5 rounded text-sm text-center"
                   style={{
-                    backgroundColor: "#1a1f35",
+                    backgroundColor: "var(--bg-tertiary)",
                     border: "1px solid #2d3748",
-                    color: "#e2e8f0",
+                    color: "var(--text-primary)",
                   }}
                 />
                 <button
@@ -1148,7 +1148,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                     })
                   }
                   className="px-3 py-1 rounded text-sm font-bold"
-                  style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+                  style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
                 >
                   +
                 </button>
@@ -1158,7 +1158,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
             {/* Risk/Reward display - now with lot size AND leverage */}
             <div
               className="flex justify-between text-xs mb-4 px-1"
-              style={{ color: "#64748b" }}
+              style={{ color: "var(--text-muted)" }}
             >
               <span>
                 Risk: $
@@ -1179,8 +1179,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                     Math.abs(tradeModal.takeProfit - tradeModal.entryPrice) /
                       Math.abs(tradeModal.entryPrice - tradeModal.stopLoss) >=
                     1.5
-                      ? "#22c55e"
-                      : "#64748b",
+                      ? "var(--success)"
+                      : "var(--text-muted)",
                 }}
               >
                 R:R{" "}
@@ -1193,8 +1193,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
 
             {/* Wskaźniki techniczne z tooltipami */}
             {tradeModal.signalComponents && tradeModal.signalComponents.length > 0 && (
-              <div className="mb-4 p-3 rounded" style={{ backgroundColor: "#0b0f1a", border: "1px solid #1a1f35" }}>
-                <div className="text-xs font-medium mb-2" style={{ color: "#64748b" }}>
+              <div className="mb-4 p-3 rounded" style={{ backgroundColor: "var(--bg-primary)", border: "1px solid var(--bg-tertiary)" }}>
+                <div className="text-xs font-medium mb-2" style={{ color: "var(--text-muted)" }}>
                   Wskaźniki (najedź dla szczegółów)
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -1205,7 +1205,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                         <span
                           className="text-[10px] px-2 py-1 rounded cursor-help"
                           style={{ 
-                            backgroundColor: "#1a1f35", 
+                            backgroundColor: "var(--bg-tertiary)", 
                             color: "#94a3b8",
                             border: "1px solid #2d3748"
                           }}
@@ -1218,7 +1218,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                             className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 rounded shadow-lg text-xs hidden group-hover:block"
                             style={{ 
                               backgroundColor: "#1e293b", 
-                              color: "#e2e8f0",
+                              color: "var(--text-primary)",
                               border: "1px solid #475569"
                             }}
                           >
@@ -1228,7 +1228,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                             <div className="mb-2" style={{ color: "#cbd5e1" }}>
                               {tooltip.desc}
                             </div>
-                            <div style={{ color: "#22c55e" }}>
+                            <div style={{ color: "var(--success)" }}>
                               💡 {tooltip.combine}
                             </div>
                           </div>
@@ -1248,7 +1248,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                 className="flex-1 py-2.5 px-4 rounded font-medium text-sm"
                 style={{
                   backgroundColor:
-                    tradeModal.direction === "buy" ? "#22c55e" : "#ef4444",
+                    tradeModal.direction === "buy" ? "var(--success)" : "var(--danger)",
                   color: "#fff",
                   opacity: tradeModal.loading ? 0.5 : 1,
                 }}
@@ -1261,8 +1261,8 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                 onClick={closeTradeModal}
                 className="py-2.5 px-4 rounded text-sm"
                 style={{
-                  backgroundColor: "#1a1f35",
-                  color: "#64748b",
+                  backgroundColor: "var(--bg-tertiary)",
+                  color: "var(--text-muted)",
                 }}
               >
                 Cancel

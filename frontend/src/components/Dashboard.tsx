@@ -8,6 +8,7 @@ import { MainTab } from "./MainTab";
 import { TradesTab } from "./TradesTab";
 import { SettingsTab } from "./SettingsTab";
 import { apiUrl } from "../api";
+import { getStoredTheme, themes, ThemeName } from "../theme";
 
 type TabType = "main" | "charts" | "trades" | "news" | "console" | "settings";
 
@@ -32,6 +33,41 @@ export const Dashboard: React.FC = () => {
   });
   const [accountData, setAccountData] = useState<any>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeName>(getStoredTheme());
+
+  // Apply theme CSS variables
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove("theme-original", "theme-black", "theme-daylight");
+    root.classList.add(`theme-${theme}`);
+    const colors = themes[theme].colors;
+    root.style.setProperty("--bg-primary", colors.bgPrimary);
+    root.style.setProperty("--bg-secondary", colors.bgSecondary);
+    root.style.setProperty("--bg-tertiary", colors.bgTertiary);
+    root.style.setProperty("--border", colors.border);
+    root.style.setProperty("--border-light", colors.borderLight);
+    root.style.setProperty("--text-primary", colors.textPrimary);
+    root.style.setProperty("--text-secondary", colors.textSecondary);
+    root.style.setProperty("--text-muted", colors.textMuted);
+    root.style.setProperty("--accent", colors.accent);
+    root.style.setProperty("--success", colors.success);
+    root.style.setProperty("--danger", colors.danger);
+    root.style.setProperty("--warning", colors.warning);
+    root.style.setProperty("--chart-bg", colors.chartBg);
+    root.style.setProperty("--grid-line", colors.gridLine);
+    root.style.setProperty("--chart-text", colors.chartText);
+    root.style.setProperty("--chart-candle-up", colors.chartCandleUp);
+    root.style.setProperty("--chart-candle-down", colors.chartCandleDown);
+  }, [theme]);
+
+  // Listen for theme changes from Settings
+  useEffect(() => {
+    const handleThemeChange = (e: CustomEvent<ThemeName>) => {
+      setTheme(e.detail);
+    };
+    window.addEventListener("themechange", handleThemeChange as EventListener);
+    return () => window.removeEventListener("themechange", handleThemeChange as EventListener);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("cfd_activeTab", activeTab);
@@ -96,14 +132,14 @@ export const Dashboard: React.FC = () => {
   return (
     <div
       className="w-full h-screen flex flex-col"
-      style={{ backgroundColor: "#0b0f1a" }}
+      style={{ backgroundColor: "var(--bg-primary)" }}
     >
       {/* Top Header Bar */}
       <div
         className="flex items-center justify-between px-3 md:px-5 py-2 md:py-2.5 flex-shrink-0"
         style={{
-          backgroundColor: "#0d1220",
-          borderBottom: "1px solid #1a1f35",
+          backgroundColor: "var(--bg-secondary)",
+          borderBottom: "1px solid var(--bg-tertiary)",
         }}
       >
         <div className="flex items-center gap-2 md:gap-4">
@@ -112,8 +148,8 @@ export const Dashboard: React.FC = () => {
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="md:hidden flex items-center justify-center w-7 h-7 rounded-sm"
             style={{
-              backgroundColor: sidebarOpen ? "#1a1f35" : "transparent",
-              color: "#64748b",
+              backgroundColor: sidebarOpen ? "var(--bg-tertiary)" : "transparent",
+              color: "var(--text-muted)",
             }}
           >
             <span className="text-sm">{sidebarOpen ? "✕" : "☰"}</span>
@@ -122,26 +158,26 @@ export const Dashboard: React.FC = () => {
           <div className="flex items-center gap-2">
             <div
               className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: "#22c55e" }}
+              style={{ backgroundColor: "var(--success)" }}
             />
             <span
               className="text-xs font-bold tracking-wider uppercase hidden sm:inline"
-              style={{ color: "#e2e8f0", letterSpacing: "0.15em" }}
+              style={{ color: "var(--text-primary)", letterSpacing: "0.15em" }}
             >
               CFD Trading Bot
             </span>
             <span
               className="text-xs font-bold tracking-wider uppercase sm:hidden"
-              style={{ color: "#e2e8f0", letterSpacing: "0.15em" }}
+              style={{ color: "var(--text-primary)", letterSpacing: "0.15em" }}
             >
               CFD Bot
             </span>
           </div>
           <span
             className="text-[10px] px-2 py-0.5 rounded-sm font-medium hidden sm:inline-block"
-            style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+            style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-muted)" }}
           >
-            v0.2.0
+            v0.4.0
           </span>
           <span
             className="text-[10px] px-1.5 py-0.5 rounded-sm font-medium"
@@ -150,7 +186,7 @@ export const Dashboard: React.FC = () => {
                 accountData?.mode === "simulate"
                   ? "rgba(234, 179, 8, 0.15)"
                   : "rgba(239, 68, 68, 0.15)",
-              color: accountData?.mode === "simulate" ? "#eab308" : "#ef4444",
+              color: accountData?.mode === "simulate" ? "#eab308" : "var(--danger)",
             }}
           >
             {accountData?.mode === "simulate" ? "SIM" : "LIVE"}
@@ -165,9 +201,9 @@ export const Dashboard: React.FC = () => {
               onClick={() => handleTabSwitch(tab.id)}
               className="px-3 py-1.5 text-[11px] font-medium tracking-wide uppercase transition-all rounded-sm"
               style={{
-                color: activeTab === tab.id ? "#e2e8f0" : "#4a5568",
+                color: activeTab === tab.id ? "var(--text-primary)" : "#4a5568",
                 backgroundColor:
-                  activeTab === tab.id ? "#1a1f35" : "transparent",
+                  activeTab === tab.id ? "var(--bg-tertiary)" : "transparent",
               }}
             >
               {tab.label}
@@ -236,8 +272,8 @@ export const Dashboard: React.FC = () => {
       <div
         className="md:hidden flex items-center justify-around flex-shrink-0"
         style={{
-          backgroundColor: "#0d1220",
-          borderTop: "1px solid #1a1f35",
+          backgroundColor: "var(--bg-secondary)",
+          borderTop: "1px solid var(--bg-tertiary)",
           paddingBottom: "env(safe-area-inset-bottom, 0px)",
         }}
       >
@@ -247,7 +283,7 @@ export const Dashboard: React.FC = () => {
             onClick={() => handleTabSwitch(tab.id)}
             className="flex flex-col items-center py-2 px-2 min-w-[52px] transition-all"
             style={{
-              color: activeTab === tab.id ? "#e2e8f0" : "#4a5568",
+              color: activeTab === tab.id ? "var(--text-primary)" : "#4a5568",
             }}
           >
             <span className="text-base leading-none mb-0.5">{tab.icon}</span>
@@ -260,8 +296,8 @@ export const Dashboard: React.FC = () => {
       <div
         className="hidden md:flex items-center justify-between px-5 py-1.5 text-[10px] flex-shrink-0"
         style={{
-          backgroundColor: "#0d1220",
-          borderTop: "1px solid #1a1f35",
+          backgroundColor: "var(--bg-secondary)",
+          borderTop: "1px solid var(--bg-tertiary)",
           color: "#374151",
         }}
       >
@@ -270,7 +306,7 @@ export const Dashboard: React.FC = () => {
           <span className="flex items-center gap-1">
             <span
               className="w-1.5 h-1.5 rounded-full"
-              style={{ backgroundColor: "#22c55e" }}
+              style={{ backgroundColor: "var(--success)" }}
             />
             Connected
           </span>

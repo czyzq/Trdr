@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiUrl } from "../api";
+import { themes, ThemeName, getStoredTheme, setStoredTheme } from "../theme";
 
 interface Setting {
   key: string;
@@ -19,6 +20,14 @@ export const SettingsTab: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>({ key: "", value: 0, note: "" });
+  const [currentTheme, setCurrentTheme] = useState<ThemeName>(getStoredTheme());
+
+  const handleThemeChange = (theme: ThemeName) => {
+    setCurrentTheme(theme);
+    setStoredTheme(theme);
+    // Dispatch event so other components can update
+    window.dispatchEvent(new CustomEvent("themechange", { detail: theme }));
+  };
 
   const fetchSettings = async (): Promise<void> => {
     setLoading(true);
@@ -99,45 +108,72 @@ export const SettingsTab: React.FC = () => {
 
   return (
     <div
-      className="h-full flex flex-col p-4 md:p-6 bg-[#0b0f1a]"
-      style={{ color: "#e2e8f0" }}
+      className="h-full flex flex-col p-4 md:p-6 bg-[var(--bg-primary)]"
+      style={{ color: "var(--text-primary)" }}
     >
       <div className="flex items-center justify-between mb-4 md:mb-6">
-        <h2 className="text-lg md:text-xl font-bold uppercase tracking-wider text-[#e2e8f0]">
+        <h2 className="text-lg md:text-xl font-bold uppercase tracking-wider text-[var(--text-primary)]">
           Settings
         </h2>
         <div className="flex gap-2">
           <button
             onClick={() => openModal()}
-            className="px-3 py-1.5 text-xs bg-[#1a1f35]/50 hover:bg-[#22c55e]/70 rounded border border-[#2a3349]/50 text-[#e2e8f0] transition-all font-medium"
+            className="px-3 py-1.5 text-xs bg-[var(--bg-tertiary)]/50 hover:bg-[var(--success)]/70 rounded border border-[var(--border-light)]/50 text-[var(--text-primary)] transition-all font-medium"
           >
             Add New
           </button>
           <button
             onClick={refresh}
-            className="px-3 py-1.5 text-xs bg-[#1a1f35]/50 hover:bg-blue-500/70 rounded border border-[#2a3349]/50 text-[#e2e8f0] transition-all font-medium"
+            className="px-3 py-1.5 text-xs bg-[var(--bg-tertiary)]/50 hover:bg-blue-500/70 rounded border border-[var(--border-light)]/50 text-[var(--text-primary)] transition-all font-medium"
             disabled={loading}
           >
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>
       </div>
-      <div className="flex-1 overflow-auto border border-[#1a1f35]/50 rounded-lg bg-[#0d1220]/50">
+
+      {/* Theme Selector */}
+      <div className="mb-4 p-4 rounded-lg border" style={{ backgroundColor: "var(--bg-secondary)", borderColor: "var(--bg-tertiary)" }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Theme</h3>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">Choose your color scheme</p>
+          </div>
+          <div className="flex gap-2">
+            {(Object.keys(themes) as ThemeName[]).map((themeName) => (
+              <button
+                key={themeName}
+                onClick={() => handleThemeChange(themeName)}
+                className="px-3 py-1.5 text-xs rounded border transition-all font-medium"
+                style={{
+                  backgroundColor: currentTheme === themeName ? themes[themeName].colors.bgTertiary : "transparent",
+                  borderColor: currentTheme === themeName ? themes[themeName].colors.accent : "var(--border-light)",
+                  color: currentTheme === themeName ? themes[themeName].colors.textPrimary : "var(--text-muted)",
+                }}
+              >
+                {themes[themeName].displayName}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto border border-[var(--bg-tertiary)]/50 rounded-lg bg-[var(--bg-secondary)]/50">
         <div className="p-4">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ borderBottom: "1px solid #1a1f35" }}>
-                  <th className="py-3 text-left font-semibold text-[#64748b] pr-4 min-w-[120px]">
+                <tr style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
+                  <th className="py-3 text-left font-semibold text-[var(--text-muted)] pr-4 min-w-[120px]">
                     Parameter
                   </th>
-                  <th className="py-3 text-left font-semibold text-[#64748b] pr-4 min-w-[100px]">
+                  <th className="py-3 text-left font-semibold text-[var(--text-muted)] pr-4 min-w-[100px]">
                     Value
                   </th>
-                  <th className="py-3 text-left font-semibold text-[#64748b] pr-8 min-w-[150px]">
+                  <th className="py-3 text-left font-semibold text-[var(--text-muted)] pr-8 min-w-[150px]">
                     Note
                   </th>
-                  <th className="py-3 text-right font-semibold text-[#64748b] w-32">
+                  <th className="py-3 text-right font-semibold text-[var(--text-muted)] w-32">
                     Actions
                   </th>
                 </tr>
@@ -160,13 +196,13 @@ export const SettingsTab: React.FC = () => {
                       key={s.key}
                       style={{ borderBottom: "1px solid rgba(26,31,53,0.5)" }}
                     >
-                      <td className="py-3 font-mono text-[#e2e8f0] font-medium">
+                      <td className="py-3 font-mono text-[var(--text-primary)] font-medium">
                         {s.key}
                       </td>
-                      <td className="py-3 font-mono text-[#e2e8f0] bg-[#1a1f35]/30 px-2 py-1 rounded">
+                      <td className="py-3 font-mono text-[var(--text-primary)] bg-[var(--bg-tertiary)]/30 px-2 py-1 rounded">
                         {Number.isInteger(s.value) ? s.value : s.value.toFixed(2)}
                       </td>
-                      <td className="py-3 pr-8 text-[#9ca3af]">{s.note}</td>
+                      <td className="py-3 pr-8 text-[var(--text-secondary)]">{s.note}</td>
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-2">
                           <button
@@ -195,19 +231,19 @@ export const SettingsTab: React.FC = () => {
       {/* Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#0d1220] w-full max-w-md rounded-xl shadow-2xl border border-[#1a1f35]/50 max-h-[85vh] overflow-hidden">
-            <div className="p-6 border-b border-[#1a1f35]/50">
+          <div className="bg-[var(--bg-secondary)] w-full max-w-md rounded-xl shadow-2xl border border-[var(--bg-tertiary)]/50 max-h-[85vh] overflow-hidden">
+            <div className="p-6 border-b border-[var(--bg-tertiary)]/50">
               <div className="flex items-center justify-between">
                 <h3
                   className="text-lg font-bold tracking-wide"
-                  style={{ color: "#e2e8f0" }}
+                  style={{ color: "var(--text-primary)" }}
                 >
                   {editingKey ? `Edit ${form.key}` : "Add New Setting"}
                 </h3>
                 <button
                   onClick={closeModal}
-                  className="p-1.5 rounded-lg hover:bg-[#1a1f35] transition-all"
-                  style={{ color: "#64748b" }}
+                  className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] transition-all"
+                  style={{ color: "var(--text-muted)" }}
                 >
                   ×
                 </button>
@@ -217,7 +253,7 @@ export const SettingsTab: React.FC = () => {
               <div>
                 <label
                   className="block text-xs font-medium mb-2 uppercase tracking-wider"
-                  style={{ color: "#9ca3af" }}
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   Key
                 </label>
@@ -225,8 +261,8 @@ export const SettingsTab: React.FC = () => {
                   type="text"
                   value={form.key}
                   onChange={(e) => setForm({ ...form, key: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-[#1a1f35] border border-[#2a3349]/50 rounded-lg text-sm focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all"
-                  style={{ color: "#e2e8f0" }}
+                  className="w-full px-3 py-2.5 bg-[var(--bg-tertiary)] border border-[var(--border-light)]/50 rounded-lg text-sm focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all"
+                  style={{ color: "var(--text-primary)" }}
                   placeholder="e.g. max_risk_pct"
                   disabled={!!editingKey}
                 />
@@ -234,7 +270,7 @@ export const SettingsTab: React.FC = () => {
               <div>
                 <label
                   className="block text-xs font-medium mb-2 uppercase tracking-wider"
-                  style={{ color: "#9ca3af" }}
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   Value
                 </label>
@@ -245,15 +281,15 @@ export const SettingsTab: React.FC = () => {
                   onChange={(e) =>
                     setForm({ ...form, value: parseFloat(e.target.value) || 0 })
                   }
-                  className="w-full px-3 py-2.5 bg-[#1a1f35] border border-[#2a3349]/50 rounded-lg text-sm focus:border-green-500/50 focus:ring-1 focus:ring-green-500/20 transition-all"
-                  style={{ color: "#e2e8f0" }}
+                  className="w-full px-3 py-2.5 bg-[var(--bg-tertiary)] border border-[var(--border-light)]/50 rounded-lg text-sm focus:border-green-500/50 focus:ring-1 focus:ring-green-500/20 transition-all"
+                  style={{ color: "var(--text-primary)" }}
                   placeholder="e.g. 2.0"
                 />
               </div>
               <div>
                 <label
                   className="block text-xs font-medium mb-2 uppercase tracking-wider"
-                  style={{ color: "#9ca3af" }}
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   Note
                 </label>
@@ -261,8 +297,8 @@ export const SettingsTab: React.FC = () => {
                   rows={3}
                   value={form.note}
                   onChange={(e) => setForm({ ...form, note: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-[#1a1f35] border border-[#2a3349]/50 rounded-lg text-sm resize-vertical focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all"
-                  style={{ color: "#e2e8f0" }}
+                  className="w-full px-3 py-2.5 bg-[var(--bg-tertiary)] border border-[var(--border-light)]/50 rounded-lg text-sm resize-vertical focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all"
+                  style={{ color: "var(--text-primary)" }}
                   placeholder="Optional description..."
                 />
               </div>
@@ -276,7 +312,7 @@ export const SettingsTab: React.FC = () => {
                 </button>
                 <button
                   onClick={closeModal}
-                  className="flex-1 px-4 py-2.5 bg-[#1a1f35]/50 hover:bg-[#1a1f35] border border-[#2a3349]/50 text-[#9ca3af] hover:text-[#e2e8f0] font-semibold text-xs uppercase tracking-wider rounded-lg shadow-lg transition-all flex items-center justify-center h-11"
+                  className="flex-1 px-4 py-2.5 bg-[var(--bg-tertiary)]/50 hover:bg-[var(--bg-tertiary)] border border-[var(--border-light)]/50 text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-semibold text-xs uppercase tracking-wider rounded-lg shadow-lg transition-all flex items-center justify-center h-11"
                 >
                   Cancel
                 </button>

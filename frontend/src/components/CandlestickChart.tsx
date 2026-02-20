@@ -173,8 +173,8 @@ function calculateMACD(prices: number[], fast = 12, slow = 26, signal = 9) {
 // Trading sessions (UTC hours)
 const TRADING_SESSIONS = [
   { name: "Tokyo", start: 0, end: 9, color: "#f97316", abbr: "TKY" },
-  { name: "London", start: 7, end: 16, color: "#3b82f6", abbr: "LDN" },
-  { name: "NY", start: 13, end: 22, color: "#22c55e", abbr: "NY" },
+  { name: "London", start: 7, end: 16, color: "var(--accent)", abbr: "LDN" },
+  { name: "NY", start: 13, end: 22, color: "var(--success)", abbr: "NY" },
 ];
 
 function getSessionForHour(hour: number) {
@@ -226,7 +226,7 @@ function parseTimestamp(
 export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   symbol,
   data,
-  height = 300,
+  height = 220,
   showVolume = true,
   showRSI = true,
   resolution = "60",
@@ -291,28 +291,41 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const isDaily = resolution === "D";
 
-  // Validate data
-  const validData = useMemo(
-    () =>
-      (data || []).filter(
-        (d) =>
-          d &&
-          typeof d.open === "number" &&
-          typeof d.high === "number" &&
-          typeof d.low === "number" &&
-          typeof d.close === "number" &&
-          typeof d.volume === "number" &&
-          isFinite(d.open) &&
-          isFinite(d.close) &&
-          d.high >= d.low,
-      ),
-    [data],
-  );
+  // Validate data - keep all for indicators
+  const allValidData = useMemo(() => {
+    if (!data) return [];
+    return data.filter(
+      (d) =>
+        d &&
+        typeof d.open === "number" &&
+        typeof d.high === "number" &&
+        typeof d.low === "number" &&
+        typeof d.close === "number" &&
+        typeof d.volume === "number" &&
+        isFinite(d.open) &&
+        isFinite(d.close) &&
+        d.high >= d.low,
+    );
+  }, [data]);
 
-  // Compute all indicators on FULL data (including warmup candles)
+  // Find where BB starts (warmup period is 20)
+  const bbWarmup = useMemo(() => {
+    if (allValidData.length === 0) return 0;
+    const closes = allValidData.map((d) => d.close);
+    const bb = calculateBollingerBands(closes, 20, 2);
+    return bb.middle.findIndex((v: number | null) => v !== null);
+  }, [allValidData]);
+
+  // Display data starts where BB is valid
+  const validData = useMemo(() => {
+    if (bbWarmup <= 0) return allValidData;
+    return allValidData.slice(bbWarmup);
+  }, [allValidData, bbWarmup]);
+
+  // Compute all indicators on FULL data (including warmup for accurate BB)
   const indicators = useMemo(() => {
-    if (validData.length === 0) return null;
-    const closes = validData.map((d) => d.close);
+    if (allValidData.length === 0) return null;
+    const closes = allValidData.map((d) => d.close);
     return {
       rsi: calculateRSI(closes, 14),
       sma20: calculateSMA(closes, 20),
@@ -320,7 +333,17 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       bb: calculateBollingerBands(closes, 20, 2),
       macd: calculateMACD(closes),
     };
-  }, [validData]);
+  }, [allValidData]);
+
+  // Get BB values aligned with displayed candles (slice to match validData)
+  const displayBB = useMemo(() => {
+    if (!indicators?.bb || bbWarmup <= 0) return indicators?.bb;
+    return {
+      upper: indicators.bb.upper.slice(bbWarmup),
+      middle: indicators.bb.middle.slice(bbWarmup),
+      lower: indicators.bb.lower.slice(bbWarmup),
+    };
+  }, [indicators, bbWarmup]);
 
   // Compute session bands using timestamps (with date-awareness)
   const sessionBands = useMemo(() => {
@@ -394,10 +417,10 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   let maxPrice = Math.max(...validData.map((d) => d.high));
   let minPrice = Math.min(...validData.map((d) => d.low));
   if (overlays.bb) {
-    for (const v of indicators.bb.upper) {
+    for (const v of (displayBB?.upper || [])) {
       if (v !== null && v > maxPrice) maxPrice = v;
     }
-    for (const v of indicators.bb.lower) {
+    for (const v of (displayBB?.lower || [])) {
       if (v !== null && v < minPrice) minPrice = v;
     }
   }
@@ -563,7 +586,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       isBullish,
       bodyY: Math.min(openY, closeY),
       bodyH: Math.max(1, Math.abs(closeY - openY)),
-      color: isBullish ? "#22c55e" : "#ef4444",
+      color: isBullish ? "var(--success)" : "var(--danger)",
       volume: candle.volume,
       data: candle,
       rsi: rsiVal,
@@ -667,19 +690,19 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       <div className="flex flex-wrap items-center gap-1 sm:gap-3 mb-1 px-1">
         <span
           className="text-xs sm:text-sm font-bold"
-          style={{ color: "#e2e8f0" }}
+          style={{ color: "var(--text-primary)" }}
         >
           {symbol}
         </span>
         <span
           className="text-xs sm:text-sm font-bold"
-          style={{ color: priceChange >= 0 ? "#22c55e" : "#ef4444" }}
+          style={{ color: priceChange >= 0 ? "var(--success)" : "var(--danger)" }}
         >
           {currentPrice.toFixed(2)}
         </span>
         <span
           className="text-[9px] sm:text-[10px]"
-          style={{ color: priceChange >= 0 ? "#22c55e" : "#ef4444" }}
+          style={{ color: priceChange >= 0 ? "var(--success)" : "var(--danger)" }}
         >
           {priceChangeStr}
         </span>
@@ -725,16 +748,16 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   onClick={() => toggleOverlay(key)}
                   className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
                   style={{
-                    color: overlays[key] ? c : "#374151",
-                    backgroundColor: overlays[key] ? "#1a1f35" : "transparent",
-                    border: `1px solid ${overlays[key] ? c + "33" : "#1a1f35"}`,
+                    color: overlays[key] ? c : "var(--chart-text)",
+                    backgroundColor: overlays[key] ? "var(--bg-tertiary)" : "transparent",
+                    border: `1px solid ${overlays[key] ? c + "33" : "var(--bg-tertiary)"}`,
                   }}
                 >
                   {labels[key]}
                 </button>
                 {/* Tooltip */}
                 <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1.5 rounded text-[9px] w-40 z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-                  style={{ backgroundColor: "#1e293b", border: "1px solid #334155" }}
+                  style={{ backgroundColor: "var(--grid-line)", border: "1px solid #334155" }}
                 >
                   <div className="font-bold" style={{ color: c }}>{tip.title}</div>
                   <div style={{ color: "#94a3b8", lineHeight: "1.3" }}>{tip.desc}</div>
@@ -750,23 +773,23 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             onClick={() => setZoomLevel((prev) => Math.max(0.5, prev - 0.2))}
             className="px-2 py-0.5 text-[9px] font-bold rounded-sm"
             style={{
-              backgroundColor: "#1a1f35",
-              color: "#64748b",
+              backgroundColor: "var(--bg-tertiary)",
+              color: "var(--text-muted)",
               border: "1px solid #2d3748",
             }}
             title="Zoom Out"
           >
             −
           </button>
-          <span className="text-[9px] px-1" style={{ color: "#64748b" }}>
+          <span className="text-[9px] px-1" style={{ color: "var(--text-muted)" }}>
             {Math.round(zoomLevel * 100)}%
           </span>
           <button
             onClick={() => setZoomLevel((prev) => Math.min(3, prev + 0.2))}
             className="px-2 py-0.5 text-[9px] font-bold rounded-sm"
             style={{
-              backgroundColor: "#1a1f35",
-              color: "#64748b",
+              backgroundColor: "var(--bg-tertiary)",
+              color: "var(--text-muted)",
               border: "1px solid #2d3748",
             }}
             title="Zoom In"
@@ -780,8 +803,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             }}
             className="px-2 py-0.5 text-[9px] font-bold rounded-sm ml-1"
             style={{
-              backgroundColor: "#1a1f35",
-              color: "#64748b",
+              backgroundColor: "var(--bg-tertiary)",
+              color: "var(--text-muted)",
               border: "1px solid #2d3748",
             }}
             title="Reset Zoom"
@@ -794,7 +817,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         {hoveredCandle !== null && candlesticks[hoveredCandle] && (
           <div
             className="flex flex-wrap items-center gap-1 sm:gap-2 ml-auto text-[9px] sm:text-[10px]"
-            style={{ color: "#64748b" }}
+            style={{ color: "var(--text-muted)" }}
           >
             {(() => {
               const candle = candlesticks[hoveredCandle].data;
@@ -924,14 +947,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           )}
 
           {/* ── Price Chart Grid ── */}
-          <g stroke="#131825" strokeWidth="1">
+          <g stroke="var(--grid-line)" strokeWidth="1">
             {priceLevels.map((l, i) => (
               <line key={`g-${i}`} x1={0} y1={l.y} x2={usableWidth} y2={l.y} />
             ))}
           </g>
 
           {/* Price labels */}
-          <g fill="#374151" fontSize="10" fontFamily="monospace">
+          <g fill="var(--chart-text)" fontSize="10" fontFamily="monospace">
             {priceLevels.map((l, i) => (
               <text
                 key={`p-${i}`}
@@ -952,8 +975,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   const upperPts: string[] = [];
                   const lowerPts: string[] = [];
                   for (let i = 0; i < n; i++) {
-                    const u = indicators.bb.upper[i];
-                    const l = indicators.bb.lower[i];
+                    const u = (displayBB?.upper || [])[i];
+                    const l = (displayBB?.lower || [])[i];
                     if (u === null || l === null) continue;
                     const x = idxToX(i);
                     upperPts.push(`${x},${priceToY(u)}`);
@@ -966,7 +989,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 fillOpacity="0.06"
               />
               <polyline
-                points={toPolyline(indicators.bb.upper, priceToY)}
+                points={toPolyline((displayBB?.upper || []), priceToY)}
                 fill="none"
                 stroke="#a78bfa"
                 strokeWidth="0.8"
@@ -974,14 +997,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 opacity="0.6"
               />
               <polyline
-                points={toPolyline(indicators.bb.middle, priceToY)}
+                points={toPolyline((displayBB?.middle || []), priceToY)}
                 fill="none"
                 stroke="#a78bfa"
                 strokeWidth="0.6"
                 opacity="0.4"
               />
               <polyline
-                points={toPolyline(indicators.bb.lower, priceToY)}
+                points={toPolyline((displayBB?.lower || []), priceToY)}
                 fill="none"
                 stroke="#a78bfa"
                 strokeWidth="0.8"
@@ -1037,7 +1060,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             y1={priceToY(currentPrice)}
             x2={usableWidth}
             y2={priceToY(currentPrice)}
-            stroke={priceChange >= 0 ? "#22c55e" : "#ef4444"}
+            stroke={priceChange >= 0 ? "var(--success)" : "var(--danger)"}
             strokeWidth="0.5"
             strokeDasharray="3,3"
             opacity="0.6"
@@ -1045,7 +1068,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           <text
             x={usableWidth + 5}
             y={priceToY(currentPrice) + 3}
-            fill={priceChange >= 0 ? "#22c55e" : "#ef4444"}
+            fill={priceChange >= 0 ? "var(--success)" : "var(--danger)"}
             fontSize="10"
             fontFamily="monospace"
             fontWeight="bold"
@@ -1095,7 +1118,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               y1={0}
               x2={candlesticks[hoveredCandle].x}
               y2={totalH - 20}
-              stroke="#374151"
+              stroke="var(--chart-text)"
               strokeWidth="0.5"
               strokeDasharray="2,2"
             />
@@ -1107,7 +1130,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <text
                 x={5}
                 y={volumeTop + 10}
-                fill="#374151"
+                fill="var(--chart-text)"
                 fontSize="9"
                 fontFamily="monospace"
               >
@@ -1139,7 +1162,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 y={macdTop}
                 width={usableWidth}
                 height={macdH}
-                fill="#0d1220"
+                fill="var(--bg-secondary)"
                 fillOpacity="0.5"
               />
               <line
@@ -1147,7 +1170,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 y1={macdTop + macdH / 2}
                 x2={usableWidth}
                 y2={macdTop + macdH / 2}
-                stroke="#1a1f35"
+                stroke="var(--bg-tertiary)"
                 strokeWidth="0.5"
               />
               {validData.map((_, i) => {
@@ -1155,7 +1178,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 if (h === null) return null;
                 const x = idxToX(i);
                 const barH = Math.abs(h / (macdMax || 1)) * (macdH / 2 - 2);
-                const barColor = h >= 0 ? "#22c55e" : "#ef4444";
+                const barColor = h >= 0 ? "var(--success)" : "var(--danger)";
                 return (
                   <rect
                     key={`mh-${i}`}
@@ -1184,7 +1207,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <text
                 x={5}
                 y={macdTop + 10}
-                fill="#374151"
+                fill="var(--chart-text)"
                 fontSize="9"
                 fontFamily="monospace"
               >
@@ -1219,7 +1242,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 y={rsiTop}
                 width={usableWidth}
                 height={rsiH}
-                fill="#0d1220"
+                fill="var(--bg-secondary)"
                 fillOpacity="0.5"
               />
               <rect
@@ -1227,7 +1250,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 y={rsiTop}
                 width={usableWidth}
                 height={rsiH * 0.3}
-                fill="#ef4444"
+                fill="var(--danger)"
                 fillOpacity="0.05"
               />
               <rect
@@ -1235,7 +1258,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 y={rsiTop + rsiH * 0.7}
                 width={usableWidth}
                 height={rsiH * 0.3}
-                fill="#22c55e"
+                fill="var(--success)"
                 fillOpacity="0.05"
               />
               <line
@@ -1243,7 +1266,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 y1={rsiTop + rsiH * 0.3}
                 x2={usableWidth}
                 y2={rsiTop + rsiH * 0.3}
-                stroke="#1a1f35"
+                stroke="var(--bg-tertiary)"
                 strokeWidth="0.5"
                 strokeDasharray="2,2"
               />
@@ -1252,7 +1275,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 y1={rsiTop + rsiH * 0.5}
                 x2={usableWidth}
                 y2={rsiTop + rsiH * 0.5}
-                stroke="#1a1f35"
+                stroke="var(--bg-tertiary)"
                 strokeWidth="0.5"
                 strokeDasharray="4,4"
               />
@@ -1261,7 +1284,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 y1={rsiTop + rsiH * 0.7}
                 x2={usableWidth}
                 y2={rsiTop + rsiH * 0.7}
-                stroke="#1a1f35"
+                stroke="var(--bg-tertiary)"
                 strokeWidth="0.5"
                 strokeDasharray="2,2"
               />
@@ -1275,7 +1298,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <text
                 x={5}
                 y={rsiTop + 10}
-                fill="#374151"
+                fill="var(--chart-text)"
                 fontSize="9"
                 fontFamily="monospace"
               >
@@ -1284,7 +1307,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <text
                 x={usableWidth + 5}
                 y={rsiTop + rsiH * 0.3 + 3}
-                fill="#374151"
+                fill="var(--chart-text)"
                 fontSize="8"
                 fontFamily="monospace"
               >
@@ -1293,7 +1316,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <text
                 x={usableWidth + 5}
                 y={rsiTop + rsiH * 0.5 + 3}
-                fill="#374151"
+                fill="var(--chart-text)"
                 fontSize="8"
                 fontFamily="monospace"
               >
@@ -1302,7 +1325,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <text
                 x={usableWidth + 5}
                 y={rsiTop + rsiH * 0.7 + 3}
-                fill="#374151"
+                fill="var(--chart-text)"
                 fontSize="8"
                 fontFamily="monospace"
               >
@@ -1352,7 +1375,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             y1={totalH - xAxisH + 5}
             x2={usableWidth}
             y2={totalH - xAxisH + 5}
-            stroke="#1e293b"
+            stroke="var(--grid-line)"
             strokeWidth="1"
           />
 
@@ -1532,9 +1555,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             style={{
               right: tooltipPos.x,
               bottom: tooltipPos.y,
-              backgroundColor: "#0d1220",
-              border: "1px solid #1a1f35",
-              color: "#e2e8f0",
+              backgroundColor: "var(--bg-secondary)",
+              border: "1px solid var(--bg-tertiary)",
+              color: "var(--text-primary)",
               boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
               minWidth: "200px",
             }}
@@ -1549,7 +1572,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                       ? "rgba(34, 197, 94, 0.2)"
                       : "rgba(239, 68, 68, 0.2)",
                   color:
-                    hoveredTrade.direction === "buy" ? "#22c55e" : "#ef4444",
+                    hoveredTrade.direction === "buy" ? "var(--success)" : "var(--danger)",
                 }}
               >
                 {hoveredTrade.direction.toUpperCase()}
@@ -1563,7 +1586,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                         ? "rgba(34, 197, 94, 0.2)"
                         : "rgba(239, 68, 68, 0.2)",
                     color:
-                      hoveredTrade.result === "win" ? "#22c55e" : "#ef4444",
+                      hoveredTrade.result === "win" ? "var(--success)" : "var(--danger)",
                   }}
                 >
                   {hoveredTrade.result.toUpperCase()}
@@ -1573,14 +1596,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             <div className="space-y-0.5" style={{ color: "#94a3b8" }}>
               <div className="flex justify-between">
                 <span>Entry:</span>
-                <span style={{ color: "#e2e8f0" }}>
+                <span style={{ color: "var(--text-primary)" }}>
                   {hoveredTrade.entry_price.toFixed(2)}
                 </span>
               </div>
               {hoveredTrade.exit_price && (
                 <div className="flex justify-between">
                   <span>Exit:</span>
-                  <span style={{ color: "#e2e8f0" }}>
+                  <span style={{ color: "var(--text-primary)" }}>
                     {hoveredTrade.exit_price.toFixed(2)}
                   </span>
                 </div>
@@ -1590,7 +1613,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   <span>P&L:</span>
                   <span
                     style={{
-                      color: hoveredTrade.pnl_usd >= 0 ? "#22c55e" : "#ef4444",
+                      color: hoveredTrade.pnl_usd >= 0 ? "var(--success)" : "var(--danger)",
                     }}
                   >
                     {hoveredTrade.pnl_usd >= 0 ? "+" : ""}$
@@ -1603,7 +1626,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   {hoveredTrade.take_profit && (
                     <div className="flex justify-between">
                       <span>TP:</span>
-                      <span style={{ color: "#22c55e" }}>
+                      <span style={{ color: "var(--success)" }}>
                         {hoveredTrade.take_profit.toFixed(2)}
                       </span>
                     </div>
@@ -1611,7 +1634,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   {hoveredTrade.stop_loss && (
                     <div className="flex justify-between">
                       <span>SL:</span>
-                      <span style={{ color: "#ef4444" }}>
+                      <span style={{ color: "var(--danger)" }}>
                         {hoveredTrade.stop_loss.toFixed(2)}
                       </span>
                     </div>
@@ -1620,7 +1643,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               )}
               <div
                 className="flex justify-between text-[9px] mt-1 pt-1"
-                style={{ borderTop: "1px solid #1a1f35" }}
+                style={{ borderTop: "1px solid var(--bg-tertiary)" }}
               >
                 <span>Opened:</span>
                 <span>

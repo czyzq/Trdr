@@ -38,6 +38,7 @@ export const TradesTab: React.FC = () => {
     const saved = localStorage.getItem("cfd_tradesSection");
     return saved === "history" ? "history" : "open";
   });
+  const [minimized, setMinimized] = useState(false);
   const [stats, setStats] = useState({
     win_count: 0,
     loss_count: 0,
@@ -164,43 +165,43 @@ export const TradesTab: React.FC = () => {
       {/* Stats Bar */}
       <div
         className="flex flex-wrap items-center gap-2 md:gap-4 px-3 md:px-4 py-2 md:py-3 rounded-sm"
-        style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
+        style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--bg-tertiary)" }}
       >
         <StatPill
           label="Open"
           value={openPositions.length.toString()}
-          color="#3b82f6"
+          color="var(--accent)"
         />
         <StatPill
           label="Closed"
           value={(stats.win_count + stats.loss_count).toString()}
-          color="#64748b"
+          color="var(--text-muted)"
         />
         <StatPill
           label="Wins"
           value={stats.win_count.toString()}
-          color="#22c55e"
+          color="var(--success)"
         />
         <StatPill
           label="Losses"
           value={stats.loss_count.toString()}
-          color="#ef4444"
+          color="var(--danger)"
         />
         <StatPill
           label="WR"
           value={`${stats.win_rate}%`}
-          color={stats.win_rate >= 50 ? "#22c55e" : "#ef4444"}
+          color={stats.win_rate >= 50 ? "var(--success)" : "var(--danger)"}
         />
         <div className="flex items-center gap-2 ml-auto">
           <span
             className="text-[10px] uppercase tracking-wider hidden sm:inline"
-            style={{ color: "#4a5568" }}
+            style={{ color: "var(--text-muted)" }}
           >
             Total P&L:
           </span>
           <span
             className="text-xs md:text-sm font-bold"
-            style={{ color: stats.total_pnl_usd >= 0 ? "#22c55e" : "#ef4444" }}
+            style={{ color: stats.total_pnl_usd >= 0 ? "var(--success)" : "var(--danger)" }}
           >
             {stats.total_pnl_usd >= 0 ? "+" : ""}$
             {stats.total_pnl_usd.toFixed(2)} USD
@@ -209,42 +210,60 @@ export const TradesTab: React.FC = () => {
       </div>
 
       {/* Section Toggle */}
-      <div className="flex gap-1">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1">
+          <button
+            onClick={() => setActiveSection("open")}
+            className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider rounded-sm transition-all"
+            style={{
+              color: activeSection === "open" ? "var(--text-primary)" : "var(--text-muted)",
+              backgroundColor:
+                activeSection === "open" ? "var(--bg-tertiary)" : "transparent",
+            }}
+          >
+            Open ({openPositions.length})
+          </button>
+          <button
+            onClick={() => setActiveSection("history")}
+            className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider rounded-sm transition-all"
+            style={{
+              color: activeSection === "history" ? "var(--text-primary)" : "var(--text-muted)",
+              backgroundColor:
+                activeSection === "history" ? "var(--bg-tertiary)" : "transparent",
+            }}
+          >
+            History ({closedTrades.length})
+          </button>
+        </div>
         <button
-          onClick={() => setActiveSection("open")}
-          className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider rounded-sm transition-all"
+          onClick={() => setMinimized(!minimized)}
           style={{
-            color: activeSection === "open" ? "#e2e8f0" : "#4a5568",
-            backgroundColor:
-              activeSection === "open" ? "#1a1f35" : "transparent",
+            color: "var(--text-muted)",
+            transform: minimized ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s",
           }}
+          className="p-1"
+          title={minimized ? "Expand" : "Minimize"}
         >
-          Open ({openPositions.length})
-        </button>
-        <button
-          onClick={() => setActiveSection("history")}
-          className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider rounded-sm transition-all"
-          style={{
-            color: activeSection === "history" ? "#e2e8f0" : "#4a5568",
-            backgroundColor:
-              activeSection === "history" ? "#1a1f35" : "transparent",
-          }}
-        >
-          History ({closedTrades.length})
+          ▼
         </button>
       </div>
 
       {/* Content */}
       <div
         className="flex-1 rounded-sm overflow-hidden"
-        style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
+        style={{ 
+          backgroundColor: "var(--bg-secondary)", 
+          border: "1px solid var(--bg-tertiary)",
+          display: minimized ? "none" : "flex",
+        }}
       >
         {activeSection === "open" ? (
           <div className="h-full overflow-auto">
             {openPositions.length === 0 ? (
               <div
                 className="h-full flex items-center justify-center"
-                style={{ color: "#4a5568" }}
+                style={{ color: "var(--text-muted)" }}
               >
                 <div className="text-center">
                   <div className="text-xs uppercase tracking-widest mb-1">
@@ -261,15 +280,15 @@ export const TradesTab: React.FC = () => {
                 <div className="md:hidden p-2 space-y-2">
                   {openPositions.map((pos) => {
                     const pnlColor =
-                      pos.unrealized_pnl_usd >= 0 ? "#22c55e" : "#ef4444";
+                      pos.unrealized_pnl_usd >= 0 ? "var(--success)" : "var(--danger)";
                     const dirColor =
-                      pos.direction === "buy" ? "#22c55e" : "#ef4444";
+                      pos.direction === "buy" ? "var(--success)" : "var(--danger)";
                     return (
                       <div
                         key={pos.id}
                         className="rounded-sm p-3"
                         style={{
-                          backgroundColor: "#0b0f1a",
+                          backgroundColor: "var(--bg-primary)",
                           border: "1px solid #131825",
                         }}
                       >
@@ -277,7 +296,7 @@ export const TradesTab: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <span
                               className="font-bold text-xs"
-                              style={{ color: "#e2e8f0" }}
+                              style={{ color: "var(--text-primary)" }}
                             >
                               {pos.symbol}
                             </span>
@@ -292,7 +311,7 @@ export const TradesTab: React.FC = () => {
                             </span>
                             <span
                               className="text-[10px]"
-                              style={{ color: "#4a5568" }}
+                              style={{ color: "var(--text-muted)" }}
                             >
                               {pos.size}
                             </span>
@@ -307,33 +326,33 @@ export const TradesTab: React.FC = () => {
                         </div>
                         <div className="flex items-center justify-between text-[10px] mb-2">
                           <div>
-                            <span style={{ color: "#4a5568" }}>Entry: </span>
+                            <span style={{ color: "var(--text-muted)" }}>Entry: </span>
                             <span style={{ color: "#94a3b8" }}>
                               {formatPrice(pos.entry_price)}
                             </span>
                           </div>
                           <div>
-                            <span style={{ color: "#4a5568" }}>Now: </span>
-                            <span style={{ color: "#e2e8f0" }}>
+                            <span style={{ color: "var(--text-muted)" }}>Now: </span>
+                            <span style={{ color: "var(--text-primary)" }}>
                               {formatPrice(pos.current_price)}
                             </span>
                           </div>
                         </div>
                         <div className="flex items-center justify-between text-[10px] mb-2">
                           <div>
-                            <span style={{ color: "#4a5568" }}>TP: </span>
-                            <span style={{ color: "#22c55e" }}>
+                            <span style={{ color: "var(--text-muted)" }}>TP: </span>
+                            <span style={{ color: "var(--success)" }}>
                               {formatPrice(pos.take_profit)}
                             </span>
                           </div>
                           <div>
-                            <span style={{ color: "#4a5568" }}>SL: </span>
-                            <span style={{ color: "#ef4444" }}>
+                            <span style={{ color: "var(--text-muted)" }}>SL: </span>
+                            <span style={{ color: "var(--danger)" }}>
                               {formatPrice(pos.stop_loss)}
                             </span>
                           </div>
                           <div>
-                            <span style={{ color: "#4a5568" }}>
+                            <span style={{ color: "var(--text-muted)" }}>
                               {formatTime(pos.opened_at)}
                             </span>
                           </div>
@@ -344,7 +363,7 @@ export const TradesTab: React.FC = () => {
                           className="w-full py-1.5 text-[10px] font-bold rounded-sm transition-all"
                           style={{
                             backgroundColor: "rgba(239, 68, 68, 0.1)",
-                            color: "#ef4444",
+                            color: "var(--danger)",
                             border: "1px solid rgba(239, 68, 68, 0.3)",
                             opacity: closingId === pos.id ? 0.5 : 1,
                           }}
@@ -361,64 +380,64 @@ export const TradesTab: React.FC = () => {
                 {/* Desktop table */}
                 <table className="w-full text-[11px] hidden md:table">
                   <thead>
-                    <tr style={{ borderBottom: "1px solid #1a1f35" }}>
+                    <tr style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
                       <th
                         className="px-4 py-2.5 text-left font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Symbol
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Dir.
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Size
                       </th>
                       <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Entry
                       </th>
                       <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Current
                       </th>
                       <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         TP
                       </th>
                       <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         SL
                       </th>
                       <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         P&L (USD)
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Opened
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Action
                       </th>
@@ -427,9 +446,9 @@ export const TradesTab: React.FC = () => {
                   <tbody>
                     {openPositions.map((pos) => {
                       const pnlColor =
-                        pos.unrealized_pnl_usd >= 0 ? "#22c55e" : "#ef4444";
+                        pos.unrealized_pnl_usd >= 0 ? "var(--success)" : "var(--danger)";
                       const dirColor =
-                        pos.direction === "buy" ? "#22c55e" : "#ef4444";
+                        pos.direction === "buy" ? "var(--success)" : "var(--danger)";
                       return (
                         <tr
                           key={pos.id}
@@ -439,13 +458,13 @@ export const TradesTab: React.FC = () => {
                             <div>
                               <span
                                 className="font-bold text-xs"
-                                style={{ color: "#e2e8f0" }}
+                                style={{ color: "var(--text-primary)" }}
                               >
                                 {pos.symbol}
                               </span>
                               <span
                                 className="text-[9px] ml-1.5"
-                                style={{ color: "#4a5568" }}
+                                style={{ color: "var(--text-muted)" }}
                               >
                                 {pos.name}
                               </span>
@@ -476,19 +495,19 @@ export const TradesTab: React.FC = () => {
                           </td>
                           <td
                             className="px-3 py-2.5 text-right"
-                            style={{ color: "#e2e8f0" }}
+                            style={{ color: "var(--text-primary)" }}
                           >
                             {formatPrice(pos.current_price)}
                           </td>
                           <td
                             className="px-3 py-2.5 text-right"
-                            style={{ color: "#22c55e" }}
+                            style={{ color: "var(--success)" }}
                           >
                             {formatPrice(pos.take_profit)}
                           </td>
                           <td
                             className="px-3 py-2.5 text-right"
-                            style={{ color: "#ef4444" }}
+                            style={{ color: "var(--danger)" }}
                           >
                             {formatPrice(pos.stop_loss)}
                           </td>
@@ -501,7 +520,7 @@ export const TradesTab: React.FC = () => {
                           </td>
                           <td
                             className="px-3 py-2.5 text-center"
-                            style={{ color: "#4a5568" }}
+                            style={{ color: "var(--text-muted)" }}
                           >
                             {formatTime(pos.opened_at)}
                           </td>
@@ -512,7 +531,7 @@ export const TradesTab: React.FC = () => {
                               className="px-3 py-1 text-[10px] font-bold rounded-sm transition-all"
                               style={{
                                 backgroundColor: "rgba(239, 68, 68, 0.1)",
-                                color: "#ef4444",
+                                color: "var(--danger)",
                                 border: "1px solid rgba(239, 68, 68, 0.3)",
                                 opacity: closingId === pos.id ? 0.5 : 1,
                               }}
@@ -533,7 +552,7 @@ export const TradesTab: React.FC = () => {
             {closedTrades.length === 0 ? (
               <div
                 className="h-full flex items-center justify-center"
-                style={{ color: "#4a5568" }}
+                style={{ color: "var(--text-muted)" }}
               >
                 <div className="text-center">
                   <div className="text-xs uppercase tracking-widest mb-1">
@@ -549,15 +568,15 @@ export const TradesTab: React.FC = () => {
                 {/* Mobile cards */}
                 <div className="md:hidden p-2 space-y-2">
                   {closedTrades.map((trade) => {
-                    const pnlColor = trade.pnl_usd >= 0 ? "#22c55e" : "#ef4444";
+                    const pnlColor = trade.pnl_usd >= 0 ? "var(--success)" : "var(--danger)";
                     const dirColor =
-                      trade.direction === "buy" ? "#22c55e" : "#ef4444";
+                      trade.direction === "buy" ? "var(--success)" : "var(--danger)";
                     return (
                       <div
                         key={trade.id}
                         className="rounded-sm p-3"
                         style={{
-                          backgroundColor: "#0b0f1a",
+                          backgroundColor: "var(--bg-primary)",
                           border: "1px solid #131825",
                         }}
                       >
@@ -565,7 +584,7 @@ export const TradesTab: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <span
                               className="font-bold text-xs"
-                              style={{ color: "#e2e8f0" }}
+                              style={{ color: "var(--text-primary)" }}
                             >
                               {trade.symbol}
                             </span>
@@ -583,8 +602,8 @@ export const TradesTab: React.FC = () => {
                               style={{
                                 color:
                                   trade.result === "win"
-                                    ? "#22c55e"
-                                    : "#ef4444",
+                                    ? "var(--success)"
+                                    : "var(--danger)",
                                 backgroundColor:
                                   trade.result === "win"
                                     ? "rgba(34, 197, 94, 0.1)"
@@ -604,18 +623,18 @@ export const TradesTab: React.FC = () => {
                         </div>
                         <div className="flex items-center justify-between text-[10px]">
                           <div>
-                            <span style={{ color: "#4a5568" }}>Entry: </span>
+                            <span style={{ color: "var(--text-muted)" }}>Entry: </span>
                             <span style={{ color: "#94a3b8" }}>
                               {formatPrice(trade.entry_price)}
                             </span>
                           </div>
                           <div>
-                            <span style={{ color: "#4a5568" }}>Exit: </span>
+                            <span style={{ color: "var(--text-muted)" }}>Exit: </span>
                             <span style={{ color: "#94a3b8" }}>
                               {formatPrice(trade.exit_price)}
                             </span>
                           </div>
-                          <div style={{ color: "#4a5568" }}>
+                          <div style={{ color: "var(--text-muted)" }}>
                             {formatTime(trade.closed_at)}
                           </div>
                         </div>
@@ -627,46 +646,46 @@ export const TradesTab: React.FC = () => {
                 {/* Desktop table */}
                 <table className="w-full text-[11px] hidden md:table">
                   <thead>
-                    <tr style={{ borderBottom: "1px solid #1a1f35" }}>
+                    <tr style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
                       <th
                         className="px-4 py-2.5 text-left font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Symbol
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Dir.
                       </th>
                       <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Entry
                       </th>
                       <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Exit
                       </th>
                       <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         P&L (USD)
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Result
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
-                        style={{ color: "#4a5568" }}
+                        style={{ color: "var(--text-muted)" }}
                       >
                         Closed
                       </th>
@@ -675,9 +694,9 @@ export const TradesTab: React.FC = () => {
                   <tbody>
                     {closedTrades.map((trade) => {
                       const pnlColor =
-                        trade.pnl_usd >= 0 ? "#22c55e" : "#ef4444";
+                        trade.pnl_usd >= 0 ? "var(--success)" : "var(--danger)";
                       const dirColor =
-                        trade.direction === "buy" ? "#22c55e" : "#ef4444";
+                        trade.direction === "buy" ? "var(--success)" : "var(--danger)";
                       return (
                         <tr
                           key={trade.id}
@@ -686,7 +705,7 @@ export const TradesTab: React.FC = () => {
                           <td className="px-4 py-2.5">
                             <span
                               className="font-bold text-xs"
-                              style={{ color: "#e2e8f0" }}
+                              style={{ color: "var(--text-primary)" }}
                             >
                               {trade.symbol}
                             </span>
@@ -727,8 +746,8 @@ export const TradesTab: React.FC = () => {
                               style={{
                                 color:
                                   trade.result === "win"
-                                    ? "#22c55e"
-                                    : "#ef4444",
+                                    ? "var(--success)"
+                                    : "var(--danger)",
                                 backgroundColor:
                                   trade.result === "win"
                                     ? "rgba(34, 197, 94, 0.1)"
@@ -740,7 +759,7 @@ export const TradesTab: React.FC = () => {
                           </td>
                           <td
                             className="px-3 py-2.5 text-center"
-                            style={{ color: "#4a5568" }}
+                            style={{ color: "var(--text-muted)" }}
                           >
                             {formatTime(trade.closed_at)}
                           </td>
@@ -766,7 +785,7 @@ const StatPill: React.FC<{ label: string; value: string; color: string }> = ({
   <div className="flex items-center gap-1.5">
     <span
       className="text-[10px] uppercase tracking-wider"
-      style={{ color: "#4a5568" }}
+      style={{ color: "var(--text-muted)" }}
     >
       {label}:
     </span>
