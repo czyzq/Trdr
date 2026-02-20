@@ -10,6 +10,7 @@ Each strategy takes candles + indicators and returns (score, direction, componen
 from typing import Dict, List, Optional, Tuple, Any
 from models import Signal, SignalDirection, Component, ComponentType
 from indicators import TechnicalIndicators
+from indicator_classes import ALL_INDICATOR_IDS
 import database as db
 
 # ──────────────────────────────────────────────────────────────────────
@@ -23,8 +24,41 @@ def get_strategy(name: str) -> "BaseStrategy":
     return STRATEGIES.get(name, STRATEGIES["adaptive_regime"])
 
 
-def list_strategies() -> List[Dict[str, str]]:
-    return [{"id": k, "name": v.display_name, "description": v.description, "tooltip": getattr(v, "tooltip", "")} for k, v in STRATEGIES.items()]
+def list_strategies() -> List[Dict[str, Any]]:
+    """List all available strategies with their metadata"""
+    result = []
+    for k, v in STRATEGIES.items():
+        # Convert IndicatorConfig objects to dicts
+        indicators = []
+        for ind in v.default_indicators:
+            if isinstance(ind, IndicatorConfig):
+                indicators.append(ind.to_dict())
+            else:
+                indicators.append({"id": ind, "enabled": True, "settings": {}})
+        
+        result.append({
+            "id": v.id,
+            "name": v.display_name,
+            "description": v.description,
+            "tooltip": getattr(v, "tooltip", ""),
+            "default_indicators": indicators,
+        })
+    return result
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Indicator config structure
+# ──────────────────────────────────────────────────────────────────────
+
+class IndicatorConfig:
+    """Configuration for a single indicator in a strategy"""
+    def __init__(self, indicator_id: str, enabled: bool = True, settings: dict = None):
+        self.id = indicator_id
+        self.enabled = enabled
+        self.settings = settings or {}
+    
+    def to_dict(self) -> dict:
+        return {"id": self.id, "enabled": self.enabled, "settings": self.settings}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -35,6 +69,110 @@ class BaseStrategy:
     id: str = ""
     display_name: str = ""
     description: str = ""
+    # List of IndicatorConfig objects - which indicators this strategy uses
+    default_indicators: List[IndicatorConfig] = []
+
+    def get_enabled_indicators(self) -> List[str]:
+        """Return list of enabled indicator IDs"""
+        return [ind.id for ind in self.default_indicators if ind.enabled]
+    
+    def get_indicator_settings(self, indicator_id: str) -> dict:
+        """Get settings for a specific indicator"""
+        for ind in self.default_indicators:
+            if ind.id == indicator_id:
+                return ind.settings
+        return {}
+    
+    def to_config(self, used_indicators: List[str] = None) -> dict:
+        """Convert to config dict for API response"""
+        indicators = []
+        for ind in self.default_indicators:
+            enabled = used_indicators is None or ind.id in used_indicators
+            indicators.append({
+                "id": ind.id,
+                "enabled": enabled,
+                "settings": ind.settings,
+            })
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "default_indicators": indicators,
+        }
+    
+    def save_strategy(self, name_suffix: str = "") -> str:
+        """
+        Save this strategy configuration to database with custom name.
+        Returns the saved strategy ID.
+        
+        Args:
+            name_suffix: Custom suffix to add to strategy name (e.g., "_v1", "_custom")
+        
+        Returns:
+            Strategy ID (e.g., "adaptive_regime_custom1")
+        """
+        import database as db
+        
+        # Build strategy ID
+        strategy_id = f"{self.id}{name_suffix}" if name_suffix else self.id
+        
+        # Convert indicators to dict format
+        indicators_data = []
+        for ind in self.default_indicators:
+            if isinstance(ind, IndicatorConfig):
+                indicators_data.append(ind.to_dict())
+            else:
+                indicators_data.append({"id": ind, "enabled": True, "settings": {}})
+        
+        # Save to database
+        setting_key = f"STRATEGY_{strategy_id.upper()}"
+        setting_value = {
+            "id": strategy_id,
+            "base_strategy": self.id,
+            "display_name": f"{self.display_name}{name_suffix}",
+            "default_indicators": indicators_data,
+        }
+        
+        db.set_setting(setting_key, setting_value)
+        
+        # Also add to STRATEGIES registry
+        STRATEGIES[strategy_id] = self
+        
+        return strategy_id
+    
+    @staticmethod
+    def load_strategy(strategy_id: str) -> Optional["BaseStrategy"]:
+        """Load a saved strategy from database"""
+        import database as db
+        
+        setting_key = f"STRATEGY_{strategy_id.upper()}"
+        saved = db.get_setting(setting_key)
+        
+        if not saved:
+            return None
+        
+        # Load base strategy and apply saved config
+        base_id = saved.get("base_strategy", strategy_id)
+        base_strategy = STRATEGIES.get(base_id)
+        
+        if not base_strategy:
+            return None
+        
+        # Create new instance with saved indicators
+        new_strategy = type(f"Custom{strategy_id.title().replace('_', '')}", (BaseStrategy,), {
+            "id": strategy_id,
+            "display_name": saved.get("display_name", strategy_id),
+            "description": base_strategy.description,
+            "default_indicators": [IndicatorConfig(
+                ind["id"], 
+                enabled=ind.get("enabled", True), 
+                settings=ind.get("settings", {})
+            ) for ind in saved.get("default_indicators", [])],
+        })
+        
+        # Register it
+        STRATEGIES[strategy_id] = new_strategy
+        
+        return new_strategy()
 
     def score(
         self,
@@ -76,6 +214,17 @@ class AdaptiveRegimeStrategy(BaseStrategy):
 ✓ Markets showing clear directional movement
 ✓ You're comfortable with trend-following
 ✓ Higher volatility periods"""
+    
+    # Which indicators this strategy uses by default - with settings
+    default_indicators = [
+        IndicatorConfig("RSI", enabled=True, settings={"period": 14, "overbought": 70, "oversold": 30}),
+        IndicatorConfig("MACD", enabled=True, settings={"fast": 12, "slow": 26, "signal": 9}),
+        IndicatorConfig("BB", enabled=True, settings={"period": 20, "std": 2}),
+        IndicatorConfig("SMA", enabled=True, settings={"period": 20, "period2": 50}),
+        IndicatorConfig("ADX", enabled=True, settings={"period": 14}),
+        IndicatorConfig("STOCH", enabled=True, settings={"rsi_period": 14, "stoch_period": 14}),
+        IndicatorConfig("MOMENTUM", enabled=True, settings={"period": 10}),
+    ]
 
     def score(self, candles, indicators, symbol, instrument_info, current_price,
               htf_bias=0.0, news_score=0.0):
@@ -270,27 +419,29 @@ class AdaptiveRegimeStrategy(BaseStrategy):
         vix = indicators.get("vix") or indicators.get("_vix")
         vix_filter_active = False
         vix_component = None
+        # VIX filter disabled - high volatility doesn't mean bad trading opportunity
+        # TODO: Re-enable when per-symbol VIX is properly implemented
         if vix and isinstance(vix, dict):
             vix_value = vix.get("value", vix.get("VIX", 0))
-            if vix_value > 30:
-                # High volatility - reduce confidence, may skip
-                technical_score *= 0.3  # Strong dampening
-                vix_filter_active = True
-                vix_component = Component(
-                    type=ComponentType.TECHNICAL, name="VIX Filter",
-                    value=0.0,
-                    description=f"VIX {vix_value:.1f} > 30: HIGH VOLATILITY - signal dampened",
-                    confidence=0.9, indicators={"vix": vix_value, "action": "dampened"}
-                )
-            elif vix_value > 22:
-                technical_score *= 0.7
-                vix_filter_active = True
-                vix_component = Component(
-                    type=ComponentType.TECHNICAL, name="VIX Filter",
-                    value=0.0,
-                    description=f"VIX {vix_value:.1f} > 22: elevated volatility - mild dampening",
-                    confidence=0.7, indicators={"vix": vix_value, "action": "mild_dampen"}
-                )
+            # if vix_value > 30:
+            #     # High volatility - reduce confidence, may skip
+            #     technical_score *= 0.3  # Strong dampening
+            #     vix_filter_active = True
+            #     vix_component = Component(
+            #         type=ComponentType.TECHNICAL, name="VIX Filter",
+            #         value=0.0,
+            #         description=f"VIX {vix_value:.1f} > 30: HIGH VOLATILITY - signal dampened",
+            #         confidence=0.9, indicators={"vix": vix_value, "action": "dampened"}
+            #     )
+            # elif vix_value > 22:
+            #     technical_score *= 0.7
+            #     vix_filter_active = True
+            #     vix_component = Component(
+            #         type=ComponentType.TECHNICAL, name="VIX Filter",
+            #         value=0.0,
+            #         description=f"VIX {vix_value:.1f} > 22: elevated volatility - mild dampening",
+            #         confidence=0.7, indicators={"vix": vix_value, "action": "mild_dampen"}
+            #     )
         if vix_component:
             components.append(vix_component)
 
@@ -516,6 +667,14 @@ class MMSStrategy(BaseStrategy):
 ✓ Markets stuck in a range/channel
 ✓ You're patient (fewer signals, higher quality)
 ✓ Lower volatility, mean-reverting assets (GC=XAG=XAU)"""
+    
+    # MMS uses fewer indicators - mainly BB, RSI, STOCH
+    default_indicators = [
+        IndicatorConfig("RSI", enabled=True, settings={"period": 14, "overbought": 70, "oversold": 30}),
+        IndicatorConfig("BB", enabled=True, settings={"period": 20, "std": 2}),
+        IndicatorConfig("STOCH", enabled=True, settings={"rsi_period": 14, "stoch_period": 14}),
+        IndicatorConfig("SMA", enabled=True, settings={"period": 20, "period2": 50}),
+    ]
 
     def score(self, candles, indicators, symbol, instrument_info, current_price,
               htf_bias=0.0, news_score=0.0):

@@ -249,20 +249,6 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState(0);
 
-  // Log trades for debugging
-  useEffect(() => {
-    const symbolTrades = trades.filter((t) => t.symbol === symbol);
-    console.log(
-      `[CandlestickChart ${symbol}] Trades:`,
-      trades.length,
-      "For this symbol:",
-      symbolTrades.length,
-    );
-    symbolTrades.forEach((t) =>
-      console.log(`  - ${t.id}: ${t.direction} @ ${t.entry_price}`),
-    );
-  }, [trades, symbol]);
-
   // Handle wheel zoom
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -1386,61 +1372,55 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 .filter((t) => t.symbol === symbol)
                 .map((trade) => {
                   try {
-                    // Find candle index for entry
+                    // Parse trade timestamps
                     const entryDate = new Date(trade.opened_at.replace('Z', '+00:00'));
                     if (isNaN(entryDate.getTime())) return null;
-                    console.log(
-                      `[CandlestickChart ${symbol}] Looking for entry:`,
-                      trade.opened_at,
-                      "EntryDate:",
-                      entryDate.toISOString(),
-                    );
-                  
-                    console.log(
-                      `[CandlestickChart ${symbol}] validData length:`,
-                      validData.length,
-                    );
-                    console.log(
-                      `[CandlestickChart ${symbol}] First candle:`,
-                      validData[0]?.timestamp,
-                      "Last:",
-                      validData[validData.length - 1]?.timestamp,
-                    );
-                    const entryIdx = validData.findIndex((c, i) => {
-                      if (c.timestamp) {
-                        const candleDate = new Date((c.timestamp || "") + "Z");
-                        const match = candleDate.getTime() >= entryDate.getTime();
-                        if (i < 3)
-                          console.log(
-                            `  Candle ${i}:`,
-                            c.timestamp,
-                            candleDate.getTime(),
-                            ">=",
-                            entryDate.getTime(),
-                            "?",
-                            match,
-                          );
-                        return match;
-                      }
-                      return false;
-                    });
-                  
-                    console.log(
-                      `[CandlestickChart ${symbol}] entryIdx:`,
-                      entryIdx,
-                    );
-                    if (entryIdx === -1) return null;
+                    const exitDate = trade.closed_at 
+                      ? new Date(trade.closed_at.replace('Z', '+00:00'))
+                      : null;
 
-                    const x = idxToX(entryIdx);
+                    // Resolution in milliseconds
+                    const resolutionMs = resolution === 'D' ? 86400000 : parseInt(resolution) * 60000;
+
+                    // Helper: find candle that contains the trade time
+                    // Both trades and candles use UTC timestamps
+                    const findCandleIndex = (tradeTime: Date): number => {
+                      const tradeMs = tradeTime.getTime();
+                      
+                      for (let i = 0; i < validData.length; i++) {
+                        const c = validData[i];
+                        if (!c.timestamp) continue;
+                        // Both are UTC - parse as UTC
+                        const candleStart = new Date(c.timestamp + "Z").getTime();
+                        // Estimate candle end based on next candle or resolution
+                        const resolutionMs = resolution === 'D' ? 86400000 : parseInt(resolution) * 60000;
+                        const nextCandle = validData[i + 1];
+                        const candleEnd = nextCandle?.timestamp 
+                          ? new Date(nextCandle.timestamp + "Z").getTime()
+                          : candleStart + resolutionMs;
+                        
+                        if (tradeMs >= candleStart && tradeMs < candleEnd) {
+                          return i;
+                        }
+                      }
+                      // Fallback: find first candle after trade time
+                      return validData.findIndex(c => c.timestamp && new Date(c.timestamp + "Z").getTime() > tradeMs);
+                    };
+
+                    const entryIdx = findCandleIndex(entryDate);
+                    const exitIdx = exitDate ? findCandleIndex(exitDate) : -1;
+                    if (entryIdx === -1 || entryIdx >= validData.length) return null;
+
+                    const entryX = idxToX(entryIdx);
                     const entryY = priceToY(trade.entry_price);
                     const isBuy = trade.direction === "buy";
-                    const entryColor = isBuy ? "#91c8a5ff" : "#b07777ff";
+                    const entryColor = isBuy ? "#22c55e" : "#ef4444";
                   
-                    // Triangle marker for entry - smaller size
-                    const triangleSize = 3.5;
+                    // Triangle marker for entry
+                    const triangleSize = 4;
                     const trianglePoints = isBuy
-                      ? `${x},${entryY - triangleSize} ${x - triangleSize},${entryY + triangleSize} ${x + triangleSize},${entryY + triangleSize}`
-                      : `${x},${entryY + triangleSize} ${x - triangleSize},${entryY - triangleSize} ${x + triangleSize},${entryY - triangleSize}`;
+                      ? `${entryX},${entryY - triangleSize} ${entryX - triangleSize},${entryY + triangleSize} ${entryX + triangleSize},${entryY + triangleSize}`
+                      : `${entryX},${entryY + triangleSize} ${entryX - triangleSize},${entryY - triangleSize} ${entryX + triangleSize},${entryY - triangleSize}`;
                   
                     return (
                       <g key={`trade-${trade.id}`}>
@@ -1467,9 +1447,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                         />
                         {/* Entry price line */}
                         <line
-                          x1={x - candleWidth}
+                          x1={entryX - candleWidth}
                           y1={entryY}
-                          x2={x + candleWidth}
+                          x2={entryX + candleWidth}
                           y2={entryY}
                           stroke={entryColor}
                           strokeWidth="0.5"
@@ -1525,7 +1505,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                                 />
                                 {/* Trade line connecting entry to exit */}
                                 <line
-                                  x1={x}
+                                  x1={entryX}
                                   y1={entryY}
                                   x2={exitX}
                                   y2={exitY}
@@ -1563,6 +1543,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             }}
           >
             <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px]" style={{ color: "#94a3b8" }}>#{hoveredTrade.id}</span>
               <span className="font-bold">{hoveredTrade.symbol}</span>
               <span
                 className="px-1.5 py-0.5 rounded text-[9px] font-bold"

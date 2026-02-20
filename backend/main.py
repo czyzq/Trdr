@@ -3,7 +3,7 @@ CFD Trading Bot - FastAPI Backend
 Real-time signal generation using Finnhub data and technical indicators
 Simulated trading engine with USD currency
 """
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Query
 from contextlib import asynccontextmanager
@@ -35,7 +35,8 @@ from database import (
     async_load_candle_history, async_store_candles, async_load_candles, async_save_candles,
     async_load_signal_cache_db, async_save_signal_cache_db,
     async_save_event_log, async_load_event_log, async_count_closed_positions,
-    async_count_candles, async_get_candle_date_range
+    async_count_candles, async_get_candle_date_range,
+    get_setting
 )
 from broker_factory import create_broker, create_data_provider
 from settings import (
@@ -247,10 +248,21 @@ signal_history_cache = {}
 _strategy_selection: Dict[str, str] = {}
 
 def get_symbol_strategy(symbol: str) -> str:
-    return _strategy_selection.get(symbol, "adaptive_regime")
+    # First check in-memory, then DB
+    if symbol in _strategy_selection:
+        return _strategy_selection.get(symbol, "adaptive_regime")
+    # Check DB for per-symbol strategy
+    strategy_key = f"STRATEGY_{symbol}"
+    db_strategy = db.get_setting(strategy_key)
+    if db_strategy:
+        return db_strategy
+    return "adaptive_regime"
 
 def set_symbol_strategy(symbol: str, strategy_id: str):
     _strategy_selection[symbol] = strategy_id
+    # Also save to DB
+    strategy_key = f"STRATEGY_{symbol}"
+    db.set_setting(strategy_key, strategy_id, "user")
 
 def load_signal_cache():
     """Load signal history cache from DB, fallback to JSON file"""
@@ -876,6 +888,30 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 stop_loss=0.0, risk_reward_ratio=0.0,
             )
 
+        # Filter indicators based on per-symbol settings
+        enabled_key = f"INDICATORS_{symbol}"
+        enabled_indicators = db.get_setting(enabled_key)
+        if enabled_indicators:
+            # Map indicator names to their keys in the indicators dict
+            indicator_map = {
+                "RSI": ["rsi_14"],
+                "MACD": ["macd", "macd_signal", "macd_hist"],
+                "BB": ["bb_upper", "bb_lower", "bb_middle"],
+                "SMA": ["sma_20", "sma_50", "sma_200"],
+                "ADX": ["adx"],
+                "STOCH": ["stoch_k", "stoch_d"],
+                "MOMENTUM": ["momentum"],
+                "WILLIAMS_R": ["williams_r"],
+            }
+            # Filter indicators dict to only include enabled ones
+            filtered = {"_closes": indicators.get("_closes", [])}
+            for ind_name in enabled_indicators:
+                keys = indicator_map.get(ind_name, [])
+                for key in keys:
+                    if key in indicators:
+                        filtered[key] = indicators[key]
+            indicators = filtered
+
         indicators["_closes"] = [c["close"] for c in candles]
 
         # ── Multi-timeframe: fetch daily candles for higher-TF trend ──
@@ -1402,6 +1438,72 @@ async def set_trading_mode(broker: str = "simulation", autoTrade: bool = False):
         "autoTrade": autoTrade,
     }
 
+from fastapi import Query, Body
+
+# All available indicators
+ALL_INDICATORS = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM", "WILLIAMS_R"]
+
+@app.get("/api/settings/indicators/{symbol}")
+async def get_indicators_for_symbol(symbol: str):
+    """Get enabled indicators for a symbol."""
+    symbol = symbol.upper()
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown symbol: {symbol}"}
+    
+    # Get from DB or use defaults
+    key = f"INDICATORS_{symbol}"
+    indicators = db.get_setting(key)
+    if not indicators:
+        indicators = ALL_INDICATORS
+    
+    # Also get strategy for this symbol
+    strategy_key = f"STRATEGY_{symbol}"
+    strategy = db.get_setting(strategy_key, "mms")
+    
+    return {
+        "symbol": symbol,
+        "indicators": indicators,
+        "strategy": strategy,
+        "available_indicators": ALL_INDICATORS,
+    }
+
+@app.post("/api/settings/indicators/{symbol}")
+async def set_indicators_for_symbol(
+    symbol: str,
+    body: dict = Body(...),
+):
+    """Set enabled indicators for a symbol."""
+    symbol = symbol.upper()
+    if symbol not in INSTRUMENTS:
+        return {"error": f"Unknown symbol: {symbol}"}
+    
+    indicators = body.get("indicators", ALL_INDICATORS)
+    strategy = body.get("strategy", "mms")
+    
+    # Validate indicators
+    invalid = [i for i in indicators if i not in ALL_INDICATORS]
+    if invalid:
+        return {"error": f"Invalid indicators: {invalid}. Available: {ALL_INDICATORS}"}
+    
+    # Validate strategy
+    valid_strategies = [s["id"] for s in list_strategies()]
+    if strategy not in valid_strategies:
+        return {"error": f"Invalid strategy: {strategy}. Available: {valid_strategies}"}
+    
+    # Save to DB
+    key = f"INDICATORS_{symbol}"
+    db.set_setting(key, indicators, "user")
+    
+    strategy_key = f"STRATEGY_{symbol}"
+    db.set_setting(strategy_key, strategy, "user")
+    
+    log_event(f"[INDICATORS] {symbol}: indicators={indicators}, strategy={strategy}", "event")
+    return {
+        "symbol": symbol,
+        "indicators": indicators,
+        "strategy": strategy,
+    }
+
 @app.post("/api/settings")
 async def save_setting(key: str, value: float, note: str = ""):
     db.set_setting(key, value, "frontend")
@@ -1481,6 +1583,53 @@ async def set_strategy_for_symbol(symbol: str, strategy_id: str):
 async def get_all_strategy_selections():
     """Get strategy selection for all symbols."""
     return {sym: get_symbol_strategy(sym) for sym in INSTRUMENTS}
+
+
+@app.post("/api/strategies/save")
+async def save_strategy_config(
+    strategy_id: str = Body(..., description="Strategy ID to save (e.g., adaptive_regime_mytest)"),
+    name_suffix: str = Body("", description="Suffix to add (e.g., _v1)"),
+):
+    """Save a strategy configuration with custom name"""
+    from strategies import get_strategy, STRATEGIES
+    
+    # Get base strategy - check if strategy_id already exists
+    if strategy_id in STRATEGIES:
+        # It's an existing strategy, use it directly
+        base_id = strategy_id
+    else:
+        # Find base strategy by removing suffix
+        # Try to find a matching base strategy
+        base_id = None
+        for sid in STRATEGIES.keys():
+            if strategy_id.startswith(sid):
+                base_id = sid
+                break
+        
+        if not base_id:
+            # Try just removing _ suffix if nothing matched
+            parts = strategy_id.rsplit("_", 1)
+            if parts[0] in STRATEGIES:
+                base_id = parts[0]
+            else:
+                return {"error": f"Base strategy not found for: {strategy_id}"}
+    
+    strategy = get_strategy(base_id)
+    saved_id = strategy.save_strategy(name_suffix)
+    
+    return {"status": "saved", "strategy_id": saved_id}
+
+
+@app.get("/api/strategies/load/{strategy_id}")
+async def load_strategy_config(strategy_id: str):
+    """Load a saved strategy from database"""
+    from strategies import BaseStrategy
+    
+    strategy = BaseStrategy.load_strategy(strategy_id)
+    if not strategy:
+        return {"error": f"Strategy not found: {strategy_id}"}
+    
+    return {"status": "loaded", "strategy_id": strategy_id}
 
 # =====================
 # SIMULATED TRADING API
@@ -2160,6 +2309,312 @@ async def get_candle_history(
         "resolution": resolution,
         "count": len(candles),
         "candles": candles,
+    }
+
+
+@app.get("/api/backtest")
+async def run_backtest(
+    symbol: str = Query(..., description="Symbol to backtest"),
+    resolution: str = Query("5", description="Resolution: 1, 5, 15, 30, 60, D"),
+    days: int = Query(14, description="Number of days to backtest"),
+    min_score: float = Query(0.15, description="Minimum score threshold"),
+    initial_balance: float = Query(3000.0, description="Initial balance"),
+    strategy: Optional[str] = Query(None, description="Strategy ID (adaptive_regime, mms)"),
+    indicators: Optional[str] = Query(None, description="Comma-separated indicators (RSI,MACD,BB,SMA,ADX,STOCH,MOMENTUM)"),
+):
+    """
+    Run backtest on historical data.
+    Returns all trades and performance metrics.
+    
+    If strategy/indicators not provided, uses per-symbol defaults from DB.
+    """
+    import time
+    from database import get_db
+    
+    start_time = time.time()
+    
+    # Get candles from DB
+    symbol_key = symbol.upper()
+    if symbol_key not in INSTRUMENTS:
+        return {"error": f"Unknown symbol: {symbol}"}
+    
+    # Validate strategy if provided
+    if strategy:
+        from strategies import STRATEGIES
+        if strategy not in STRATEGIES:
+            return {"error": f"Unknown strategy: {strategy}. Available: {list(STRATEGIES.keys())}"}
+        strategy_id = strategy
+    else:
+        strategy_id = get_symbol_strategy(symbol_key)
+    
+    strategy = get_strategy(strategy_id)
+    instrument_info = INSTRUMENTS.get(symbol_key, {})
+    
+    # Parse indicators if provided
+    if indicators:
+        enabled_indicators = [ind.strip().upper() for ind in indicators.split(",")]
+    else:
+        enabled_key = f"INDICATORS_{symbol_key}"
+        enabled_indicators = get_setting(enabled_key)
+    
+    # Get candles from DB
+    end_dt = datetime.utcnow()
+    start_dt = end_dt - timedelta(days=days)
+    
+    db = get_db()
+    cursor = db.candles.find({
+        "symbol": symbol_key,
+        "resolution": resolution,
+        "timestamp": {"$gte": start_dt.isoformat()}
+    }).sort("timestamp", 1)
+    
+    candles = list(cursor)
+    if not candles:
+        return {"error": f"No candles found for {symbol_key} {resolution}"}
+    
+    if len(candles) < 50:
+        return {"error": f"Not enough candles: {len(candles)}"}
+    
+    print(f"[BACKTEST] Processing {len(candles)} candles for {symbol_key} {resolution}")
+    
+    candles = [{
+        "timestamp": c.get("timestamp"),
+        "open": c.get("open"),
+        "high": c.get("high"),
+        "low": c.get("low"),
+        "close": c.get("close"),
+        "volume": c.get("volume"),
+    } for c in candles]
+    
+    # Run backtest
+    balance = initial_balance
+    peak_balance = initial_balance
+    trades = []
+    open_trade = None
+    
+    # Calculate indicators and signals for each candle
+    for i in range(50, len(candles)):  # Need 50 candles for warmup
+        candle_window = candles[max(0, i-50):i]
+        current_candle = candles[i]
+        
+        if len(candle_window) < 50:
+            continue
+            
+        # Calculate indicators
+        try:
+            indicators = TechnicalIndicators.calculate_all(candle_window, period=14)
+            current_price = current_candle.get("close", 0)
+            if current_price <= 0:
+                continue
+        except Exception:
+            continue
+        
+        # Use actual strategy to generate signal
+        try:
+            result = strategy.score(
+                candle_window, indicators, symbol_key, instrument_info, current_price
+            )
+            score = result.get("score", 0)
+            direction = result.get("direction")
+            tp = result.get("take_profit")
+            sl = result.get("stop_loss")
+        except Exception as e:
+            print(f"[BACKTEST] Error at candle {i}: {e}")
+            continue
+        
+        # Debug: log score and direction every 50 candles
+        if i % 50 == 0:
+            print(f"[BACKTEST] candle {i}: score={score}, direction={direction}")
+        
+        # Use score to determine direction (more flexible than strategy's direction)
+        direction_str = None
+        if score >= min_score:
+            direction_str = "buy"
+        elif score <= -min_score:
+            direction_str = "sell"
+        
+        # Check if score meets threshold and we don't have open trade
+        if direction_str and open_trade is None:
+            # Open trade
+            price = current_price
+            risk_amount = balance * 0.01
+            size = risk_amount / price
+            
+            open_trade = {
+                "id": str(uuid.uuid4())[:8],
+                "symbol": symbol_key,
+                "direction": direction_str,
+                "entry_price": price,
+                "size": size,
+                "opened_at": current_candle.get("timestamp", ""),
+                "balance_at_entry": balance,
+                "tp": tp,
+                "sl": sl,
+            }
+        
+        # Check close conditions
+        if open_trade:
+            price = current_candle.get("close", 0)
+            entry = open_trade["entry_price"]
+            direction = open_trade["direction"]
+            
+            # Use TP/SL from strategy or default
+            tp_price = open_trade.get("tp") or entry * 1.02
+            sl_price = open_trade.get("sl") or entry * 0.99
+            
+            closed = False
+            pnl = 0
+            
+            if direction == "buy":
+                if price >= tp_price:  # TP
+                    pnl = (price - entry) * open_trade["size"]
+                    closed = True
+                elif price <= sl_price:  # SL
+                    pnl = (price - entry) * open_trade["size"]
+                    closed = True
+            else:  # sell
+                if price <= tp_price:  # TP
+                    pnl = (entry - price) * open_trade["size"]
+                    closed = True
+                elif price >= sl_price:  # SL
+                    pnl = (entry - price) * open_trade["size"]
+                    closed = True
+            
+            if closed:
+                balance += pnl
+                peak_balance = max(peak_balance, balance)
+                
+                trade_result = {
+                    **open_trade,
+                    "exit_price": price,
+                    "closed_at": current_candle.get("timestamp", ""),
+                    "pnl_usd": pnl,
+                    "result": "win" if pnl > 0 else "loss",
+                }
+                trades.append(trade_result)
+                open_trade = None
+    
+    # Calculate metrics
+    winning_trades = [t for t in trades if t["pnl_usd"] > 0]
+    losing_trades = [t for t in trades if t["pnl_usd"] <= 0]
+    win_rate = len(winning_trades) / len(trades) if trades else 0
+    
+    # Max drawdown
+    max_dd = 0
+    running_balance = initial_balance
+    for t in trades:
+        running_balance += t["pnl_usd"]
+        dd = (peak_balance - running_balance) / peak_balance
+        max_dd = max(max_dd, dd)
+    
+    duration = time.time() - start_time
+    
+    return {
+        "symbol": symbol_key,
+        "resolution": resolution,
+        "config": strategy.to_config(enabled_indicators),
+        "period": {
+            "from": candles[0].get("timestamp", "")[:10],
+            "to": candles[-1].get("timestamp", "")[:10],
+        },
+        "trades_count": len(trades),
+        "trades": trades[:50],  # Return first 50 trades
+        "metrics": {
+            "initial_balance": initial_balance,
+            "final_balance": balance,
+            "total_pnl": balance - initial_balance,
+            "win_rate": round(win_rate * 100, 1),
+            "max_drawdown_pct": round(max_dd * 100, 1),
+            "winning_trades": len(winning_trades),
+            "losing_trades": len(losing_trades),
+            "duration_seconds": round(duration, 2),
+        },
+    }
+
+
+@app.get("/api/backtest/optimize")
+async def optimize_backtest(
+    symbol: str = Query(..., description="Symbol to backtest"),
+    resolution: str = Query("60", description="Resolution: 1, 5, 15, 30, 60, D"),
+    days: int = Query(14, description="Number of days to backtest"),
+    min_score: float = Query(0.1, description="Minimum score threshold"),
+    initial_balance: float = Query(3000.0, description="Initial balance"),
+    strategies: Optional[str] = Query(None, description="Comma-separated strategies (default: all)"),
+    indicators: Optional[str] = Query(None, description="Comma-separated indicators (default: all)"),
+):
+    """
+    Run multiple backtests to find the best strategy/indicator combination.
+    Returns ranked results from best to worst.
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    
+    # Get available strategies
+    from strategies import STRATEGIES
+    all_strategies = [s.strip() for s in strategies.split(",")] if strategies else list(STRATEGIES.keys())
+    
+    # Get available indicators
+    ALL_INDICATORS = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM"]
+    all_indicators = [ind.strip().upper() for ind in indicators.split(",")] if indicators else ALL_INDICATORS
+    
+    # Generate combinations
+    combinations = []
+    for strat in all_strategies:
+        # Single indicators
+        for ind in all_indicators:
+            combinations.append({"strategy": strat, "indicators": [ind]})
+        # Pairs of indicators
+        for i, ind1 in enumerate(all_indicators):
+            for ind2 in all_indicators[i+1:]:
+                combinations.append({"strategy": strat, "indicators": [ind1, ind2]})
+        # All indicators
+        if len(all_indicators) > 2:
+            combinations.append({"strategy": strat, "indicators": all_indicators})
+    
+    print(f"[OPTIMIZE] Testing {len(combinations)} combinations...")
+    
+    # Run backtests
+    results = []
+    for i, combo in enumerate(combinations):
+        strat = combo["strategy"]
+        inds = combo["indicators"]
+        ind_str = ",".join(inds)
+        
+        # Build URL
+        url = f"/api/backtest?symbol={symbol}&resolution={resolution}&days={days}&min_score={min_score}&initial_balance={initial_balance}&strategy={strat}&indicators={ind_str}"
+        
+        # Call ourselves (synchronous for simplicity)
+        import requests
+        try:
+            resp = requests.get(f"http://localhost:8000{url}", timeout=120)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "error" not in data and data.get("trades_count", 0) > 0:
+                    results.append({
+                        "strategy": strat,
+                        "indicators": inds,
+                        "trades_count": data["trades_count"],
+                        "total_pnl": data["metrics"]["total_pnl"],
+                        "win_rate": data["metrics"]["win_rate"],
+                        "max_drawdown_pct": data["metrics"]["max_drawdown_pct"],
+                        "score": data["metrics"]["total_pnl"] - (data["metrics"]["max_drawdown_pct"] * 10),  # Simple scoring
+                    })
+        except Exception as e:
+            print(f"[OPTIMIZE] Error testing {strat}/{ind_str}: {e}")
+        
+        if (i + 1) % 5 == 0:
+            print(f"[OPTIMIZE] Progress: {i+1}/{len(combinations)}")
+    
+    # Sort by score (PnL - drawdown penalty)
+    results.sort(key=lambda x: x["score"], reverse=True)
+    
+    return {
+        "symbol": symbol,
+        "period_days": days,
+        "total_combinations": len(combinations),
+        "tested": len(results),
+        "best": results[0] if results else None,
+        "results": results[:20],  # Top 20
     }
 
 
