@@ -19,9 +19,10 @@ SYMBOL MAPPING (our symbols → IBKR contracts):
 
 STATUS: STUB – replace TODOs with real ib_insync calls.
 """
+
 import os
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from broker import Broker, DataProvider
 
@@ -51,6 +52,7 @@ class IBKRDataProvider(DataProvider):
     def _connect(self):
         try:
             from ib_insync import IB
+
             self.ib = IB()
             self.ib.connect(IBKR_HOST, IBKR_PORT, clientId=IBKR_CLIENT_ID)
             print(f"[IBKR] Connected to {IBKR_HOST}:{IBKR_PORT}")
@@ -61,7 +63,8 @@ class IBKRDataProvider(DataProvider):
 
     def _get_contract(self, symbol: str):
         """Build an IBKR contract object for our symbol."""
-        from ib_insync import Contract, Forex, Stock, Future, Crypto
+        from ib_insync import Contract, Crypto, Forex, Future, Stock
+
         spec = IBKR_CONTRACTS.get(symbol)
         if not spec:
             return None
@@ -122,9 +125,7 @@ class IBKRDataProvider(DataProvider):
             print(f"[IBKR] Quote error for {symbol}: {e}")
             return None
 
-    def get_candles(
-        self, symbol: str, resolution: str = "60", count: int = 100
-    ) -> Optional[List[Dict[str, Any]]]:
+    def get_candles(self, symbol: str, resolution: str = "60", count: int = 100) -> Optional[List[Dict[str, Any]]]:
         if not self.ib or not self.ib.isConnected():
             return None
         try:
@@ -134,16 +135,23 @@ class IBKRDataProvider(DataProvider):
 
             # Map resolution to IBKR bar size
             bar_map = {
-                "1": "1 min", "5": "5 mins", "15": "15 mins",
-                "30": "30 mins", "60": "1 hour", "D": "1 day",
+                "1": "1 min",
+                "5": "5 mins",
+                "15": "15 mins",
+                "30": "30 mins",
+                "60": "1 hour",
+                "D": "1 day",
             }
             bar_size = bar_map.get(resolution, "1 hour")
 
             # Duration string (how far back)
             dur_map = {
-                "1": f"{count * 60} S", "5": f"{count * 5 * 60} S",
-                "15": f"{count * 15 * 60} S", "30": f"{count * 30 * 60} S",
-                "60": f"{count} D", "D": f"{count} D",
+                "1": f"{count * 60} S",
+                "5": f"{count * 5 * 60} S",
+                "15": f"{count * 15 * 60} S",
+                "30": f"{count * 30 * 60} S",
+                "60": f"{count} D",
+                "D": f"{count} D",
             }
             duration = dur_map.get(resolution, f"{count} D")
 
@@ -158,14 +166,16 @@ class IBKRDataProvider(DataProvider):
 
             candles = []
             for bar in bars:
-                candles.append({
-                    "timestamp": bar.date.isoformat() if hasattr(bar.date, "isoformat") else str(bar.date),
-                    "open": float(bar.open),
-                    "high": float(bar.high),
-                    "low": float(bar.low),
-                    "close": float(bar.close),
-                    "volume": int(bar.volume),
-                })
+                candles.append(
+                    {
+                        "timestamp": bar.date.isoformat() if hasattr(bar.date, "isoformat") else str(bar.date),
+                        "open": float(bar.open),
+                        "high": float(bar.high),
+                        "low": float(bar.low),
+                        "close": float(bar.close),
+                        "volume": int(bar.volume),
+                    }
+                )
             return candles if candles else None
 
         except Exception as e:
@@ -218,7 +228,8 @@ class IBKRBroker(Broker):
         if not self.ib or not self.ib.isConnected():
             return {"error": "Not connected to IBKR"}
         try:
-            from ib_insync import MarketOrder, LimitOrder, StopOrder, BracketOrder
+            from ib_insync import BracketOrder, LimitOrder, MarketOrder, StopOrder
+
             contract = self.data._get_contract(symbol)
             if not contract:
                 return {"error": f"Unknown IBKR contract for {symbol}"}
@@ -277,6 +288,7 @@ class IBKRBroker(Broker):
                 # Match by order ID or contract
                 if str(pos.contract.conId) == position_id:
                     from ib_insync import MarketOrder
+
                     action = "SELL" if pos.position > 0 else "BUY"
                     order = MarketOrder(action, abs(pos.position))
                     trade = self.ib.placeOrder(pos.contract, order)
@@ -293,16 +305,18 @@ class IBKRBroker(Broker):
             result = []
             for pos in positions:
                 if pos.position != 0:
-                    result.append({
-                        "id": str(pos.contract.conId),
-                        "symbol": pos.contract.symbol,
-                        "direction": "buy" if pos.position > 0 else "sell",
-                        "size": abs(pos.position),
-                        "entry_price": pos.avgCost,
-                        "current_price": pos.avgCost,  # Updated by update_prices
-                        "unrealized_pnl_usd": 0,
-                        "status": "open",
-                    })
+                    result.append(
+                        {
+                            "id": str(pos.contract.conId),
+                            "symbol": pos.contract.symbol,
+                            "direction": "buy" if pos.position > 0 else "sell",
+                            "size": abs(pos.position),
+                            "entry_price": pos.avgCost,
+                            "current_price": pos.avgCost,  # Updated by update_prices
+                            "unrealized_pnl_usd": 0,
+                            "status": "open",
+                        }
+                    )
             return result
         except Exception:
             return []

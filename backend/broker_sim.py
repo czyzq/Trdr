@@ -2,17 +2,18 @@
 Simulated broker for paper trading - ASYNC version.
 Implements Broker + DataProvider interfaces using async Alpha Vantage + Yahoo Finance.
 """
-import uuid
+
 import asyncio
+import uuid
 from datetime import datetime
-from timezone import now_warsaw
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 import database as db
-from database import async_save_trade, async_save_account, async_save_quote
-from broker import Broker, DataProvider
 from alpha_vantage import get_async_client
+from broker import Broker, DataProvider
+from database import async_save_account, async_save_quote, async_save_trade
 from historical_data import fetch_yahoo_historical
+from timezone import now_warsaw
 
 INITIAL_BALANCE_USD = 3000.0
 
@@ -26,10 +27,14 @@ INSTRUMENTS = {
 
 class AsyncSimulatedDataProvider:
     """Async data provider with multiple sources."""
-    
+
     _YAHOO_INTERVAL = {
-        "1": "1m", "5": "5m", "15": "15m", "30": "30m",
-        "60": "1h", "D": "1d",
+        "1": "1m",
+        "5": "5m",
+        "15": "15m",
+        "30": "30m",
+        "60": "1h",
+        "D": "1d",
     }
 
     def __init__(self):
@@ -39,21 +44,19 @@ class AsyncSimulatedDataProvider:
         """Get quote - tries Alpha Vantage async (except BTC), then Yahoo, then DB."""
         # Skip Alpha Vantage for BTC - it returns ETF ticker "BTC" not Bitcoin
         if symbol != "BTC":
-                    # 1. Alpha Vantage (async)
-                    try:
-                        q = await asyncio.wait_for(self._alpha.get_quote(symbol), timeout=5.0)
-                        if q and q.get("price"):
-                            await async_save_quote(symbol, q)
-                            return q
-                    except Exception:
-                        pass
-                    
+            # 1. Alpha Vantage (async)
+            try:
+                q = await asyncio.wait_for(self._alpha.get_quote(symbol), timeout=5.0)
+                if q and q.get("price"):
+                    await async_save_quote(symbol, q)
+                    return q
+            except Exception:
+                pass
+
         # 2. Yahoo Finance (sync - runs in thread)
         try:
             yahoo_interval = self._YAHOO_INTERVAL.get("60", "1h")
-            candles = await asyncio.to_thread(
-                fetch_yahoo_historical, symbol, period_days=2, interval=yahoo_interval
-            )
+            candles = await asyncio.to_thread(fetch_yahoo_historical, symbol, period_days=2, interval=yahoo_interval)
             if candles and len(candles) > 0:
                 last = candles[-1]
                 q = {
@@ -70,7 +73,7 @@ class AsyncSimulatedDataProvider:
                 return q
         except Exception:
             pass
-        
+
         # 3. DB cache
         cached = db.load_quote(symbol)
         if cached and cached.get("quote"):
@@ -86,17 +89,14 @@ class AsyncSimulatedDataProvider:
 
         # Skip Alpha Vantage for BTC - it returns ETF ticker "BTC" not Bitcoin
         if symbol != "BTC":
-                    # 1. Alpha Vantage (async)
-                    try:
-                        candles = await asyncio.wait_for(
-                            self._alpha.get_candles(symbol, resolution, count), 
-                            timeout=10.0
-                        )
-                        if candles and len(candles) > 0:
-                            source = "alpha_vantage"
-                    except Exception:
-                        candles = None
-            
+            # 1. Alpha Vantage (async)
+            try:
+                candles = await asyncio.wait_for(self._alpha.get_candles(symbol, resolution, count), timeout=10.0)
+                if candles and len(candles) > 0:
+                    source = "alpha_vantage"
+            except Exception:
+                candles = None
+
         # 2. Yahoo Finance (in thread)
         if not candles:
             try:
@@ -138,9 +138,7 @@ class AsyncSimulatedDataProvider:
 
         return candles
 
-    async def _try_aggregate(
-        self, symbol: str, target_resolution: str, count: int
-    ) -> Optional[List[Dict[str, Any]]]:
+    async def _try_aggregate(self, symbol: str, target_resolution: str, count: int) -> Optional[List[Dict[str, Any]]]:
         """Try to build candles from smaller intervals."""
         source_candidates = {
             "5": ["1"],
@@ -179,7 +177,10 @@ class AsyncSimulatedBroker(Broker):
         return self.closed_positions[:limit]
 
     async def open_position(
-        self, symbol: str, direction: str, size: float,
+        self,
+        symbol: str,
+        direction: str,
+        size: float,
         take_profit: Optional[float] = None,
         stop_loss: Optional[float] = None,
         entry_price: Optional[float] = None,
@@ -188,7 +189,10 @@ class AsyncSimulatedBroker(Broker):
         return await self._async_open_position(symbol, direction, size, take_profit, stop_loss, entry_price)
 
     async def _async_open_position(
-        self, symbol: str, direction: str, size: float,
+        self,
+        symbol: str,
+        direction: str,
+        size: float,
         take_profit: Optional[float] = None,
         stop_loss: Optional[float] = None,
         entry_price: Optional[float] = None,
@@ -314,9 +318,7 @@ class AsyncSimulatedBroker(Broker):
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(
-                    self._async_update_prices(), loop
-                )
+                future = asyncio.run_coroutine_threadsafe(self._async_update_prices(), loop)
                 return future.result(timeout=30)
             else:
                 return loop.run_until_complete(self._async_update_prices())
@@ -328,10 +330,10 @@ class AsyncSimulatedBroker(Broker):
         """Async price update with auto-close - always gets fresh prices for real-time P&L."""
         auto_closed = []
         to_close = []
-        
+
         for pos in self.open_positions:
             symbol = pos["symbol"]
-            
+
             # Always get fresh price from candles for real-time P&L updates
             price = None
             try:
@@ -340,7 +342,7 @@ class AsyncSimulatedBroker(Broker):
                     price = candles[-1]["close"]
             except Exception:
                 pass
-            
+
             # Fallback to quote if candles unavailable
             if price is None:
                 quote = await self._data_provider.get_quote(symbol)
@@ -367,7 +369,7 @@ class AsyncSimulatedBroker(Broker):
 
             tp = pos.get("take_profit")
             sl = pos.get("stop_loss")
-            
+
             # Validate SL/TP are set correctly for direction (sanity check)
             entry = pos["entry_price"]
             if pos["direction"] == "buy":
@@ -378,7 +380,7 @@ class AsyncSimulatedBroker(Broker):
                 if sl and sl >= entry:
                     print(f"[WARN] BUY position {pos['id']} has SL ({sl}) >= entry ({entry}), fixing...")
                     sl = entry - abs(sl - entry)  # Mirror below entry
-                    
+
                 if tp and price >= tp:
                     to_close.append((pos["id"], price, "TP"))  # Use actual market price
                 elif sl and price <= sl:
@@ -391,7 +393,7 @@ class AsyncSimulatedBroker(Broker):
                 if sl and sl <= entry:
                     print(f"[WARN] SELL position {pos['id']} has SL ({sl}) <= entry ({entry}), fixing...")
                     sl = entry + abs(sl - entry)  # Mirror above entry
-                    
+
                 if tp and price <= tp:
                     to_close.append((pos["id"], price, "TP"))  # Use actual market price
                 elif sl and price >= sl:
@@ -415,7 +417,7 @@ class AsyncSimulatedBroker(Broker):
                     price = candles[-1]["close"]
             except Exception:
                 pass
-            
+
             # Fallback to quote
             if price is None:
                 quote = await self._data_provider.get_quote(symbol)
@@ -452,19 +454,21 @@ class AsyncSimulatedBroker(Broker):
         """Reset account."""
         self.open_positions.clear()
         self.closed_positions.clear()
-        self.account.update({
-            "balance_usd": INITIAL_BALANCE_USD,
-            "equity_usd": INITIAL_BALANCE_USD,
-            "positions": 0,
-            "open_trades": 0,
-            "closed_trades": 0,
-            "total_pnl_usd": 0.0,
-            "win_count": 0,
-            "loss_count": 0,
-            "win_rate": 0.0,
-            "used_margin": 0.0,
-            "available_usd": INITIAL_BALANCE_USD,
-        })
+        self.account.update(
+            {
+                "balance_usd": INITIAL_BALANCE_USD,
+                "equity_usd": INITIAL_BALANCE_USD,
+                "positions": 0,
+                "open_trades": 0,
+                "closed_trades": 0,
+                "total_pnl_usd": 0.0,
+                "win_count": 0,
+                "loss_count": 0,
+                "win_rate": 0.0,
+                "used_margin": 0.0,
+                "available_usd": INITIAL_BALANCE_USD,
+            }
+        )
         db.delete_all_trades()
         db.save_account(self.account)
         return {"status": "reset", "account": self.account}
@@ -473,10 +477,12 @@ class AsyncSimulatedBroker(Broker):
 # Legacy SimulatedDataProvider for compatibility
 class SimulatedDataProvider(AsyncSimulatedDataProvider):
     """Legacy sync wrapper."""
+
     pass
 
 
-# Legacy SimulatedBroker for compatibility  
+# Legacy SimulatedBroker for compatibility
 class SimulatedBroker(AsyncSimulatedBroker):
     """Legacy sync wrapper."""
+
     pass

@@ -18,25 +18,24 @@ import io
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 import httpx
 
-
 # Yahoo Finance symbol mapping — uses futures/forex for accurate CFD prices
 YAHOO_SYMBOL_MAP = {
-    "XAU": "GC=F",      # COMEX Gold Futures (trades near gold spot ~$2000+)
-    "XAG": "SI=F",      # COMEX Silver Futures (trades near silver spot ~$25+)
-    "US100": "NQ=F",    # E-mini Nasdaq-100 Futures (tracks index ~$20000+)
-    "BTC": "BTC-USD",   # Bitcoin in USD
+    "XAU": "GC=F",  # COMEX Gold Futures (trades near gold spot ~$2000+)
+    "XAG": "SI=F",  # COMEX Silver Futures (trades near silver spot ~$25+)
+    "US100": "NQ=F",  # E-mini Nasdaq-100 Futures (tracks index ~$20000+)
+    "BTC": "BTC-USD",  # Bitcoin in USD
 }
 
 # Price multipliers: futures trade at actual commodity/index prices, no scaling needed
 PRICE_MULTIPLIERS = {
-    "XAU": 1.0,     # GC=F trades at gold spot price directly
-    "XAG": 1.0,     # SI=F trades at silver spot price directly
-    "US100": 1.0,   # NQ=F trades at Nasdaq-100 index level directly
-    "BTC": 1.0,     # BTC-USD is the actual price
+    "XAU": 1.0,  # GC=F trades at gold spot price directly
+    "XAG": 1.0,  # SI=F trades at silver spot price directly
+    "US100": 1.0,  # NQ=F trades at Nasdaq-100 index level directly
+    "BTC": 1.0,  # BTC-USD is the actual price
 }
 
 
@@ -104,15 +103,17 @@ def fetch_yahoo_historical(
                 if any(x is None for x in (o, h, l, c)):
                     continue
                 dt = datetime.utcfromtimestamp(ts)
-                candles.append({
-                    "timestamp": dt.isoformat(),
-                    "time": dt.strftime("%m/%d") if interval.endswith("d") else dt.strftime("%H:%M"),
-                    "open": round(o * multiplier, 2),
-                    "high": round(h * multiplier, 2),
-                    "low": round(l * multiplier, 2),
-                    "close": round(c * multiplier, 2),
-                    "volume": int(v or 0),
-                })
+                candles.append(
+                    {
+                        "timestamp": dt.isoformat(),
+                        "time": dt.strftime("%m/%d") if interval.endswith("d") else dt.strftime("%H:%M"),
+                        "open": round(o * multiplier, 2),
+                        "high": round(h * multiplier, 2),
+                        "low": round(l * multiplier, 2),
+                        "close": round(c * multiplier, 2),
+                        "volume": int(v or 0),
+                    }
+                )
             except (IndexError, TypeError):
                 continue
 
@@ -141,15 +142,17 @@ def fetch_yahoo_historical(
                 if row.get("Close") in (None, "", "null"):
                     continue
                 dt = datetime.strptime(row["Date"], "%Y-%m-%d")
-                candles.append({
-                    "timestamp": dt.isoformat(),
-                    "time": dt.strftime("%m/%d"),
-                    "open": round(float(row["Open"]) * multiplier, 2),
-                    "high": round(float(row["High"]) * multiplier, 2),
-                    "low": round(float(row["Low"]) * multiplier, 2),
-                    "close": round(float(row["Close"]) * multiplier, 2),
-                    "volume": int(float(row["Volume"])),
-                })
+                candles.append(
+                    {
+                        "timestamp": dt.isoformat(),
+                        "time": dt.strftime("%m/%d"),
+                        "open": round(float(row["Open"]) * multiplier, 2),
+                        "high": round(float(row["High"]) * multiplier, 2),
+                        "low": round(float(row["Low"]) * multiplier, 2),
+                        "close": round(float(row["Close"]) * multiplier, 2),
+                        "volume": int(float(row["Volume"])),
+                    }
+                )
             except (ValueError, KeyError):
                 continue
 
@@ -189,15 +192,17 @@ def load_csv_candles(filepath: str, multiplier: float = 1.0) -> Optional[List[Di
                 else:
                     continue
 
-                candles.append({
-                    "timestamp": dt.isoformat(),
-                    "time": dt.strftime("%m/%d") if dt.hour == 0 else dt.strftime("%H:%M"),
-                    "open": round(float(row["Open"]) * multiplier, 2),
-                    "high": round(float(row["High"]) * multiplier, 2),
-                    "low": round(float(row["Low"]) * multiplier, 2),
-                    "close": round(float(row["Close"]) * multiplier, 2),
-                    "volume": int(float(row.get("Volume", 0))),
-                })
+                candles.append(
+                    {
+                        "timestamp": dt.isoformat(),
+                        "time": dt.strftime("%m/%d") if dt.hour == 0 else dt.strftime("%H:%M"),
+                        "open": round(float(row["Open"]) * multiplier, 2),
+                        "high": round(float(row["High"]) * multiplier, 2),
+                        "low": round(float(row["Low"]) * multiplier, 2),
+                        "close": round(float(row["Close"]) * multiplier, 2),
+                        "volume": int(float(row.get("Volume", 0))),
+                    }
+                )
             except (ValueError, KeyError):
                 continue
 
@@ -215,6 +220,7 @@ def fetch_alpha_vantage_historical(
     """
     try:
         from alpha_vantage import get_client
+
         client = get_client()
         candles = client.get_candles(symbol, resolution="D", count=count)
         if candles:
@@ -225,15 +231,17 @@ def fetch_alpha_vantage_historical(
                     dt = datetime.fromisoformat(ts.replace("Z", "+00:00")) if ts else datetime.now()
                 except ValueError:
                     dt = datetime.now()
-                result.append({
-                    "timestamp": dt.isoformat(),
-                    "time": dt.strftime("%m/%d"),
-                    "open": round(c["open"], 2),
-                    "high": round(c["high"], 2),
-                    "low": round(c["low"], 2),
-                    "close": round(c["close"], 2),
-                    "volume": c.get("volume", 0),
-                })
+                result.append(
+                    {
+                        "timestamp": dt.isoformat(),
+                        "time": dt.strftime("%m/%d"),
+                        "open": round(c["open"], 2),
+                        "high": round(c["high"], 2),
+                        "low": round(c["low"], 2),
+                        "close": round(c["close"], 2),
+                        "volume": c.get("volume", 0),
+                    }
+                )
             return result if result else None
     except Exception as e:
         print(f"[HistoricalData] Alpha Vantage failed for {symbol}: {e}")
@@ -250,11 +258,14 @@ def fetch_from_db_cache(
     """
     try:
         import database as db
+
         cached = db.load_candles(symbol, resolution)
         if cached and cached.get("candles"):
             candles = cached["candles"]
-            print(f"[HistoricalData] Loaded {len(candles)} cached candles from DB "
-                  f"(source: {cached.get('source', '?')}, fetched: {cached.get('fetched_at', '?')})")
+            print(
+                f"[HistoricalData] Loaded {len(candles)} cached candles from DB "
+                f"(source: {cached.get('source', '?')}, fetched: {cached.get('fetched_at', '?')})"
+            )
             return candles
     except Exception as e:
         print(f"[HistoricalData] DB cache load failed for {symbol}: {e}")
@@ -278,6 +289,7 @@ def generate_sample_data(
                     number of trading days.
     """
     import random
+
     rng = random.Random(42 + hash(symbol))
 
     candles = []
@@ -291,22 +303,24 @@ def generate_sample_data(
                 continue
 
             change_pct = rng.gauss(0.0002, 0.012)
-            price *= (1 + change_pct)
+            price *= 1 + change_pct
             price = max(price * 0.5, price)
 
             open_price = price * (1 + rng.uniform(-0.003, 0.003))
             high = max(open_price, price) * (1 + rng.uniform(0.001, 0.008))
             low = min(open_price, price) * (1 - rng.uniform(0.001, 0.008))
 
-            candles.append({
-                "timestamp": dt.isoformat(),
-                "time": dt.strftime("%m/%d"),
-                "open": round(open_price, 2),
-                "high": round(high, 2),
-                "low": round(low, 2),
-                "close": round(price, 2),
-                "volume": rng.randint(50000, 200000),
-            })
+            candles.append(
+                {
+                    "timestamp": dt.isoformat(),
+                    "time": dt.strftime("%m/%d"),
+                    "open": round(open_price, 2),
+                    "high": round(high, 2),
+                    "low": round(low, 2),
+                    "close": round(price, 2),
+                    "volume": rng.randint(50000, 200000),
+                }
+            )
     else:
         # Intraday candles
         interval_minutes = int(resolution)
@@ -321,7 +335,11 @@ def generate_sample_data(
 
         # Volatility scales down with shorter intervals
         vol_scale = {
-            "1": 0.001, "5": 0.002, "15": 0.003, "30": 0.004, "60": 0.006,
+            "1": 0.001,
+            "5": 0.002,
+            "15": 0.003,
+            "30": 0.004,
+            "60": 0.006,
         }.get(resolution, 0.003)
 
         for d in range(days):
@@ -329,32 +347,124 @@ def generate_sample_data(
             if symbol in ("US100", "XAU", "XAG") and dt_day.weekday() >= 5:
                 continue
 
-            current_dt = dt_day.replace(
-                hour=market_open_h, minute=market_open_m, second=0
-            )
-            close_dt = dt_day.replace(
-                hour=market_close_h, minute=market_close_m, second=0
-            )
+            current_dt = dt_day.replace(hour=market_open_h, minute=market_open_m, second=0)
+            close_dt = dt_day.replace(hour=market_close_h, minute=market_close_m, second=0)
 
             while current_dt < close_dt:
                 change_pct = rng.gauss(0.00005, vol_scale)
-                price *= (1 + change_pct)
+                price *= 1 + change_pct
                 price = max(base_price * 0.5, price)
 
                 open_price = price * (1 + rng.uniform(-vol_scale * 0.3, vol_scale * 0.3))
                 high = max(open_price, price) * (1 + rng.uniform(0.0005, vol_scale))
                 low = min(open_price, price) * (1 - rng.uniform(0.0005, vol_scale))
 
-                candles.append({
-                    "timestamp": current_dt.isoformat(),
-                    "time": current_dt.strftime("%H:%M"),
-                    "open": round(open_price, 2),
-                    "high": round(high, 2),
-                    "low": round(low, 2),
-                    "close": round(price, 2),
-                    "volume": rng.randint(10000, 80000),
-                })
+                candles.append(
+                    {
+                        "timestamp": current_dt.isoformat(),
+                        "time": current_dt.strftime("%H:%M"),
+                        "open": round(open_price, 2),
+                        "high": round(high, 2),
+                        "low": round(low, 2),
+                        "close": round(price, 2),
+                        "volume": rng.randint(10000, 80000),
+                    }
+                )
 
                 current_dt += timedelta(minutes=interval_minutes)
 
     return candles
+
+
+# ──────────────────────────────────────────────────────────────────────
+# VIX Fetcher (v2)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def get_volatility_index(symbol: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch volatility index for given symbol.
+
+    Symbol mappings:
+    - XAU, Gold -> ^GVZ (Gold Volatility)
+    - US100, NQ, Nasdaq -> ^VXN (Nasdaq Volatility)
+    - SPX, S&P500 -> ^VIX (S&P 500 Volatility)
+    - XAG, Silver -> use Gold volatility as proxy
+    - BTC -> use S&P 500 VIX as proxy (no dedicated BTC VIX)
+    - Default -> ^VIX
+    """
+    import httpx
+
+    # Map symbols to volatility indices
+    vix_map = {
+        "XAU": ("^GVZ", "Gold Volatility (GVZ)"),
+        "GOLD": ("^GVZ", "Gold Volatility (GVZ)"),
+        "GC": ("^GVZ", "Gold Volatility (GVZ)"),
+        "XAG": ("^GVZ", "Silver Volatility (proxy: Gold)"),
+        "SILVER": ("^GVZ", "Silver Volatility (proxy: Gold)"),
+        "SI": ("^GVZ", "Silver Volatility (proxy: Gold)"),
+        "US100": ("^VXN", "Nasdaq Volatility (VXN)"),
+        "NQ": ("^VXN", "Nasdaq Volatility (VXN)"),
+        "NASDAQ": ("^VXN", "Nasdaq Volatility (VXN)"),
+        "SPX": ("^VIX", "S&P 500 Volatility (VIX)"),
+        "SPY": ("^VIX", "S&P 500 Volatility (VIX)"),
+        "BTC": ("^VIX", "Crypto Volatility (proxy: VIX)"),
+        "BTCUSD": ("^VIX", "Crypto Volatility (proxy: VIX)"),
+    }
+
+    # Get volatility symbol
+    vix_symbol, vix_name = vix_map.get(symbol.upper(), ("^VIX", "S&P 500 Volatility (VIX)"))
+
+    # Get last 2 days to get latest value
+    end_ts = int(time.time())
+    start_ts = end_ts - (3 * 86400)  # 3 days back
+
+    chart_url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{vix_symbol}"
+        f"?period1={start_ts}&period2={end_ts}&interval=1d"
+    )
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    }
+
+    try:
+        with httpx.Client(follow_redirects=True) as client:
+            resp = client.get(chart_url, headers=headers, timeout=15)
+            resp.raise_for_status()
+
+        data = resp.json()
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            return None
+
+        timestamps = result[0].get("timestamp", [])
+        quote = result[0].get("indicators", {}).get("quote", [{}])[0]
+        closes = quote.get("close", [])
+
+        if not closes or closes[-1] is None:
+            return None
+
+        current_vix = closes[-1]
+        previous_vix = closes[-2] if len(closes) > 1 and closes[-2] is not None else current_vix
+        change_pct = ((current_vix - previous_vix) / previous_vix * 100) if previous_vix else 0
+
+        return {
+            "value": round(current_vix, 2),
+            "timestamp": timestamps[-1] if timestamps else int(time.time()),
+            "change_pct": round(change_pct, 2),
+            "symbol": vix_symbol,
+            "name": vix_name,
+        }
+
+    except Exception as e:
+        print(f"[VIX] Error fetching {vix_symbol}: {e}")
+        return None
+
+
+def get_vix() -> Optional[Dict[str, Any]]:
+    """
+    Fetch current VIX value from Yahoo Finance (S&P 500 Volatility).
+    Legacy function - use get_volatility_index() for instrument-specific VIX.
+    """
+    return get_volatility_index("SPX")

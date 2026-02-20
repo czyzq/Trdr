@@ -27,8 +27,8 @@ from typing import Dict, List, Optional, Tuple
 
 from indicators import TechnicalIndicators
 
-
 # ── Signal scoring — extracted from main.py to run standalone ──
+
 
 def calculate_signal_score(indicators: dict) -> Tuple[float, str]:
     """
@@ -168,6 +168,7 @@ def get_direction(score: float, min_score: float = 0.15) -> str:
 
 # ── Trade simulation ──
 
+
 @dataclass
 class BacktestTrade:
     entry_idx: int
@@ -177,9 +178,9 @@ class BacktestTrade:
     stop_loss: float
     take_profit: float
     score: float
-    initial_sl: float = 0.0       # Original SL before trailing
-    atr_at_entry: float = 0.0     # ATR at entry for trailing distance
-    best_price: float = 0.0       # Best price seen (for trailing)
+    initial_sl: float = 0.0  # Original SL before trailing
+    atr_at_entry: float = 0.0  # ATR at entry for trailing distance
+    best_price: float = 0.0  # Best price seen (for trailing)
     trailing_active: bool = False  # Whether trailing stop is active
     exit_idx: Optional[int] = None
     exit_price: Optional[float] = None
@@ -218,14 +219,10 @@ MAX_HOLD_CANDLES = 20
 # min_agreement: how many indicators must agree to enter
 # asset_class: "commodity" gets trend-alignment filter
 INSTRUMENT_CONFIG = {
-    "XAU":  {"min_score": 0.30, "min_agreement": 3, "asset_class": "commodity",
-             "leverage": 20, "trailing_stop": True},
-    "XAG":  {"min_score": 0.28, "min_agreement": 3, "asset_class": "commodity",
-             "leverage": 20, "trailing_stop": True},
-    "US100": {"min_score": 0.20, "min_agreement": 2, "asset_class": "equity",
-              "leverage": 20, "trailing_stop": True},
-    "BTC":  {"min_score": 0.20, "min_agreement": 2, "asset_class": "crypto",
-             "leverage": 5, "trailing_stop": True},
+    "XAU": {"min_score": 0.30, "min_agreement": 3, "asset_class": "commodity", "leverage": 20, "trailing_stop": True},
+    "XAG": {"min_score": 0.28, "min_agreement": 3, "asset_class": "commodity", "leverage": 20, "trailing_stop": True},
+    "US100": {"min_score": 0.20, "min_agreement": 2, "asset_class": "equity", "leverage": 20, "trailing_stop": True},
+    "BTC": {"min_score": 0.20, "min_agreement": 2, "asset_class": "crypto", "leverage": 5, "trailing_stop": True},
 }
 
 
@@ -275,7 +272,7 @@ def run_backtest(
 
     for i in range(LOOKBACK, len(candles)):
         # Trailing window for indicator computation
-        window = candles[i - LOOKBACK: i + 1]
+        window = candles[i - LOOKBACK : i + 1]
         current = candles[i]
         current_price = current["close"]
         current_high = current["high"]
@@ -472,8 +469,10 @@ def run_backtest(
         open_trades.append(trade)
 
         if verbose:
-            print(f"  [{current.get('time', i)}] {trade_dir} @ {current_price:.2f} "
-                  f"(score={score:.3f}, SL={stop_loss:.2f}, TP={take_profit:.2f})")
+            print(
+                f"  [{current.get('time', i)}] {trade_dir} @ {current_price:.2f} "
+                f"(score={score:.3f}, SL={stop_loss:.2f}, TP={take_profit:.2f})"
+            )
 
     # Force-close any remaining open trades at last candle price
     last_price = candles[-1]["close"]
@@ -503,7 +502,7 @@ def run_backtest(
 
     gross_profit = sum(t.pnl_pct for t in winning)
     gross_loss = abs(sum(t.pnl_pct for t in losing))
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf') if gross_profit > 0 else 0
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf") if gross_profit > 0 else 0
 
     total_return = ((balance - initial_balance) / initial_balance) * 100
 
@@ -512,8 +511,8 @@ def run_backtest(
         returns = [t.pnl_pct for t in trades]
         mean_r = sum(returns) / len(returns)
         var_r = sum((r - mean_r) ** 2 for r in returns) / len(returns)
-        std_r = var_r ** 0.5
-        sharpe = (mean_r / std_r) * (252 ** 0.5) if std_r > 0 else 0
+        std_r = var_r**0.5
+        sharpe = (mean_r / std_r) * (252**0.5) if std_r > 0 else 0
     else:
         sharpe = 0
 
@@ -619,6 +618,7 @@ def aggregate_to_daily(candles: List[Dict]) -> List[Dict]:
     are consistent with the intraday price path.
     """
     from collections import OrderedDict
+
     days: OrderedDict = OrderedDict()
 
     for c in candles:
@@ -654,6 +654,7 @@ def aggregate_to_daily(candles: List[Dict]) -> List[Dict]:
 
 # ── CLI entrypoint ──
 
+
 def main():
     parser = argparse.ArgumentParser(description="Backtest the CFD trading bot signal strategy")
     parser.add_argument("--symbol", default="XAU", help="Instrument symbol (XAU, XAG, US100, BTC)")
@@ -667,8 +668,11 @@ def main():
     args = parser.parse_args()
 
     from historical_data import (
-        fetch_yahoo_historical, fetch_alpha_vantage_historical,
-        fetch_from_db_cache, load_csv_candles, generate_sample_data,
+        fetch_alpha_vantage_historical,
+        fetch_from_db_cache,
+        fetch_yahoo_historical,
+        generate_sample_data,
+        load_csv_candles,
     )
 
     symbols = ["XAU", "XAG", "US100", "BTC"] if args.all else [args.symbol]
@@ -684,6 +688,7 @@ def main():
         # Priority: CSV > Yahoo > Alpha Vantage (real data only)
         if args.csv:
             from historical_data import PRICE_MULTIPLIERS
+
             mult = PRICE_MULTIPLIERS.get(symbol, 1.0)
             candles = load_csv_candles(args.csv, multiplier=mult)
             if candles:
@@ -691,13 +696,19 @@ def main():
 
         # Map resolution for Yahoo Finance intervals
         yahoo_interval_map = {
-            "D": "1d", "60": "60m", "30": "30m", "15": "15m", "5": "5m", "1": "2m",
+            "D": "1d",
+            "60": "60m",
+            "30": "30m",
+            "15": "15m",
+            "5": "5m",
+            "1": "2m",
         }
         yahoo_interval = yahoo_interval_map.get(args.resolution, "1d")
 
         if candles is None and not args.sample:
             # Try DB candle history first (accumulated from previous fetches)
             import database as _db
+
             history = _db.load_candle_history(symbol, args.resolution)
             if history and len(history) >= 50:
                 candles = history
@@ -705,8 +716,11 @@ def main():
             else:
                 # Try aggregation from smaller stored intervals
                 source_candidates = {
-                    "5": ["1"], "15": ["5", "1"], "30": ["15", "5", "1"],
-                    "60": ["30", "15", "5", "1"], "240": ["60", "30"],
+                    "5": ["1"],
+                    "15": ["5", "1"],
+                    "30": ["15", "5", "1"],
+                    "60": ["30", "15", "5", "1"],
+                    "240": ["60", "30"],
                     "D": ["60", "30", "15"],
                 }
                 for src_res in source_candidates.get(args.resolution, []):
@@ -714,7 +728,9 @@ def main():
                     if stored and len(stored) >= 10:
                         candles = _db.aggregate_candles(stored, args.resolution)
                         if candles and len(candles) >= 50:
-                            print(f"  Aggregated {len(candles)} {args.resolution} candles from {len(stored)} stored {src_res}m candles")
+                            print(
+                                f"  Aggregated {len(candles)} {args.resolution} candles from {len(stored)} stored {src_res}m candles"
+                            )
                             break
                         candles = None
 
@@ -743,7 +759,8 @@ def main():
             base_prices = {"XAU": 2000.0, "XAG": 23.0, "US100": 17500.0, "BTC": 95000.0}
             sample_days = max(args.days, 300) if args.resolution == "D" else max(args.days, 30)
             candles = generate_sample_data(
-                symbol, days=sample_days,
+                symbol,
+                days=sample_days,
                 base_price=base_prices.get(symbol, 1000),
                 resolution=args.resolution,
             )
@@ -788,8 +805,10 @@ def main():
         print(f"  {'Symbol':<8} {'Trades':>7} {'WinRate':>8} {'Return':>9} {'MaxDD':>8} {'PF':>6} {'Sharpe':>7}")
         print("  " + "-" * 56)
         for r in all_results:
-            print(f"  {r.symbol:<8} {r.total_trades:>7} {r.win_rate:>7.1f}% {r.total_return_pct:>+8.2f}% "
-                  f"{r.max_drawdown_pct:>7.2f}% {r.profit_factor:>5.2f} {r.sharpe_approx:>6.2f}")
+            print(
+                f"  {r.symbol:<8} {r.total_trades:>7} {r.win_rate:>7.1f}% {r.total_return_pct:>+8.2f}% "
+                f"{r.max_drawdown_pct:>7.2f}% {r.profit_factor:>5.2f} {r.sharpe_approx:>6.2f}"
+            )
         print()
 
 

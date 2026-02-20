@@ -43,23 +43,23 @@ export const ConsoleTab: React.FC<ConsoleTabProps> = ({
     <div
       className="h-full border rounded-sm font-mono text-xs flex flex-col"
       style={{
-        backgroundColor: "#0a0e27",
-        borderColor: "#00ff41",
+        backgroundColor: "var(--bg-secondary)",
+        borderColor: "var(--border)",
         minHeight: "0",
       }}
     >
       {/* Header */}
       <div
         className="px-4 py-2 border-b flex items-center justify-between flex-shrink-0"
-        style={{ borderColor: "#00ff41" }}
+        style={{ borderColor: "var(--border)" }}
       >
         <span
           className="uppercase tracking-widest font-bold text-xs"
-          style={{ color: "#00ff41" }}
+          style={{ color: "var(--accent)" }}
         >
           Console
         </span>
-        <span style={{ color: "#666" }} className="text-[9px]">
+        <span style={{ color: "var(--text-muted)" }} className="text-[9px]">
           {displayedLogs.length} entries
         </span>
       </div>
@@ -74,7 +74,7 @@ export const ConsoleTab: React.FC<ConsoleTabProps> = ({
       >
         {displayedLogs.map((log, index) => (
           <div key={`${log.id}-${index}`} className="font-mono text-xs">
-            <span style={{ color: "#666" }}>[{log.timestamp}]</span>{" "}
+            <span style={{ color: "var(--text-muted)" }}>[{log.timestamp}]</span>{" "}
             <span style={{ color: getLogColor(log.type) }}>{log.message}</span>
           </div>
         ))}
@@ -84,7 +84,7 @@ export const ConsoleTab: React.FC<ConsoleTabProps> = ({
       {/* Bottom border accent */}
       <div
         className="h-px"
-        style={{ backgroundColor: "#00ff41", opacity: 0.3 }}
+        style={{ backgroundColor: "var(--accent)", opacity: 0.3 }}
       />
     </div>
   );

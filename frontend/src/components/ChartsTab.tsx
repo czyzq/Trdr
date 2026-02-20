@@ -18,6 +18,11 @@ interface ChartResponse {
   count: number;
   source: string;
   fetched_at?: string;
+  vix?: {
+    value: number;
+    name: string;
+    change_pct: number;
+  };
 }
 
 interface Trade {
@@ -56,6 +61,32 @@ export const ChartsTab: React.FC = () => {
   const [selectedResolution, setSelectedResolution] = useState(() => {
     return localStorage.getItem("cfd_chartsResolution") || "60";
   });
+  const [indicatorSettingsOpen, setIndicatorSettingsOpen] = useState<string | null>(null);
+  const [indicatorSettings, setIndicatorSettings] = useState<Record<string, { indicators: string[], strategy: string, available_indicators: string[] }>>({});
+
+  // Fetch indicator settings when modal opens
+  useEffect(() => {
+    if (indicatorSettingsOpen) {
+      fetch(`/cfd/api/settings/indicators/${indicatorSettingsOpen}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.error) {
+            setIndicatorSettings(prev => ({ ...prev, [indicatorSettingsOpen]: data }));
+          }
+        });
+    }
+  }, [indicatorSettingsOpen]);
+
+  // Save indicator settings
+  const saveIndicatorSettings = async (symbol: string, indicators: string[], strategy: string) => {
+    await fetch(`/cfd/api/settings/indicators/${symbol}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ indicators, strategy })
+    });
+    setIndicatorSettings(prev => ({ ...prev, [symbol]: { indicators, strategy, available_indicators: prev[symbol]?.available_indicators || [] } }));
+    setIndicatorSettingsOpen(null);
+  };
 
   useEffect(() => {
     localStorage.setItem("cfd_chartsResolution", selectedResolution);
@@ -183,6 +214,14 @@ export const ChartsTab: React.FC = () => {
               {res.label}
             </button>
           ))}
+          <button
+            onClick={() => setIndicatorSettingsOpen(instruments[0]?.symbol || "XAU")}
+            className="px-2 py-1 text-[10px] font-medium rounded-sm transition-all hover:bg-[var(--bg-tertiary)]"
+            style={{ color: "var(--text-muted)" }}
+            title="Indicator Settings"
+          >
+            Settings
+          </button>
         </div>
       </div>
 
@@ -217,6 +256,27 @@ export const ChartsTab: React.FC = () => {
                   <span className="text-[10px]" style={{ color: "#4a5568" }}>
                     {instrument.name}
                   </span>
+                  {/* VIX Display */}
+                  {chartData?.vix && (
+                    <span
+                      className="text-[10px] ml-2 px-1.5 py-0.5 rounded"
+                      style={{
+                        backgroundColor: "var(--bg-tertiary)",
+                        color: chartData.vix.change_pct > 0 ? "var(--danger)" : "var(--success)",
+                      }}
+                    >
+                      VIX: {chartData.vix.value.toFixed(1)} ({chartData.vix.change_pct > 0 ? "+" : ""}{chartData.vix.change_pct.toFixed(1)}%)
+                    </span>
+                  )}
+                  {/* Settings Icon */}
+                  <button
+                    className="ml-2 p-1 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                    style={{ color: "var(--text-muted)" }}
+                    onClick={() => setIndicatorSettingsOpen(instrument.symbol)}
+                    title="Indicator Settings"
+                  >
+                    ⚙️
+                  </button>
                   {/* Trade markers legend */}
                   {trades.some((t) => t.symbol === instrument.symbol) && (
                     <div
@@ -298,6 +358,80 @@ export const ChartsTab: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Indicator Settings Modal */}
+      {indicatorSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setIndicatorSettingsOpen(null)}>
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-4 w-80 max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-sm" style={{ color: "var(--text-primary)" }}>
+                ⚙️ {indicatorSettingsOpen} Settings
+              </h3>
+              <button onClick={() => setIndicatorSettingsOpen(null)} className="text-lg" style={{ color: "var(--text-muted)" }}>×</button>
+            </div>
+            
+            {indicatorSettings[indicatorSettingsOpen] ? (
+              <>
+                <div className="mb-4">
+                  <div className="text-[10px] uppercase mb-2" style={{ color: "var(--text-muted)" }}>Strategy</div>
+                  <select
+                    className="w-full p-2 rounded text-xs"
+                    style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+                    value={indicatorSettings[indicatorSettingsOpen].strategy}
+                    onChange={(e) => {
+                      const newSettings = { ...indicatorSettings[indicatorSettingsOpen], strategy: e.target.value };
+                      setIndicatorSettings(prev => ({ ...prev, [indicatorSettingsOpen]: newSettings }));
+                    }}
+                  >
+                    <option value="mms">MMS (Mean Reversion)</option>
+                    <option value="adaptive_regime">Adaptive Regime</option>
+                  </select>
+                </div>
+                
+                <div className="mb-4">
+                  <div className="text-[10px] uppercase mb-2" style={{ color: "var(--text-muted)" }}>Indicators</div>
+                  <div className="space-y-1">
+                    {(indicatorSettings[indicatorSettingsOpen].available_indicators || []).map((ind: string) => (
+                      <label key={ind} className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={indicatorSettings[indicatorSettingsOpen].indicators.includes(ind)}
+                          onChange={(e) => {
+                            const current = indicatorSettings[indicatorSettingsOpen].indicators;
+                            const newIndicators = e.target.checked
+                              ? [...current, ind]
+                              : current.filter((i: string) => i !== ind);
+                            setIndicatorSettings(prev => ({
+                              ...prev,
+                              [indicatorSettingsOpen]: { ...prev[indicatorSettingsOpen], indicators: newIndicators }
+                            }));
+                          }}
+                          style={{ accentColor: "var(--primary)" }}
+                        />
+                        <span style={{ color: "var(--text-primary)" }}>{ind}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                
+                <button
+                  className="w-full py-2 rounded text-xs font-bold"
+                  style={{ backgroundColor: "var(--primary)", color: "white" }}
+                  onClick={() => saveIndicatorSettings(
+                    indicatorSettingsOpen,
+                    indicatorSettings[indicatorSettingsOpen].indicators,
+                    indicatorSettings[indicatorSettingsOpen].strategy
+                  )}
+                >
+                  Save
+                </button>
+              </>
+            ) : (
+              <div className="text-center py-4" style={{ color: "var(--text-muted)" }}>Loading...</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
