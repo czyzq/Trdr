@@ -93,6 +93,7 @@ class BaseStrategy:
     def to_config(self, used_indicators: List[str] = None) -> dict:
         """Convert to config dict for API response"""
         indicators = []
+        used = used_indicators if used_indicators else [ind.id for ind in self.default_indicators]
         for ind in self.default_indicators:
             enabled = used_indicators is None or ind.id in used_indicators
             indicators.append(
@@ -105,6 +106,7 @@ class BaseStrategy:
         return {
             "id": self.id,
             "display_name": self.display_name,
+            "used_indicators": used,
             "default_indicators": indicators,
         }
 

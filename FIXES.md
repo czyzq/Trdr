@@ -81,6 +81,10 @@
 **Test:** `curl "http://localhost:8000/api/backtest?symbol=XAU&resolution=60&days=30&min_score=0.1"`
 
 **TODO:**
-- [ ] Equity curve chart w UI
+- [x] Equity curve chart w UI
+- [x] Compare - uruchom kilka konfiguracji obok siebie (via Optimize)
+- [x] Optimize - automatyczne przetestowanie kombinacji i wybór najlepszej
+- [x] Adjust settings - edycja ustawień wskaźników (period, overbought, etc.)
+- [x] Save strategy - zapisz nową strategię z własną nazwą
 - [ ] Speed control (x1, x5, x10...)
 - [ ] Real-time updates podczas backtestu

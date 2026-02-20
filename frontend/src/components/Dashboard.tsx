@@ -1,4 +1,33 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+
+// Helper to poll optimization results (works even when tab changes)
+const pollOptimization = async (jobId: string, onProgress: (data: any) => void, onComplete: () => void) => {
+  console.log("[POLL] Starting poll for job:", jobId);
+  while (true) {  // No timeout - run until completed
+    try {
+      const resultRes = await fetch(`/api/backtest/optimize/${jobId}`);
+      const resultData = await resultRes.json();
+      console.log("[POLL] Status:", resultData.status, "Best:", resultData.best);
+      
+      if (resultData.status === "completed" || resultData.status === "cancelled") {
+        onProgress(resultData);
+        onComplete();
+        return;
+      } else if (resultData.status === "failed") {
+        console.log("[POLL] Failed");
+        onComplete();
+        return;
+      } else if (resultData.status === "running") {
+        // Show partial results while running
+        onProgress({ optimize: { best: resultData.best, results: resultData.results || [], status: "running" }});
+      }
+    } catch (e) {
+      console.error("[POLL] Error:", e);
+    }
+    await new Promise(r => setTimeout(r, 2000));  // Poll every 2 seconds
+  }
+};
+
 import { Sidebar } from "./Sidebar";
 import { SignalsGrid } from "./SignalsGrid";
 import { ConsoleTab } from "./ConsoleTab";
@@ -39,6 +68,7 @@ export const Dashboard: React.FC = () => {
   const [backtestRunning, setBacktestRunning] = useState(false);
   const [backtestResults, setBacktestResults] = useState<any>(null);
   const [strategies, setStrategies] = useState<any[]>([]);
+  const [optimizeJobId, setOptimizeJobId] = useState<string | null>(null);
 
   // Load trading mode and strategies from API on mount
   useEffect(() => {
@@ -315,14 +345,32 @@ export const Dashboard: React.FC = () => {
                     className="p-2 rounded text-sm"
                     style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
                     onChange={(e) => {
-                      // Auto-select default indicators when strategy changes
+                      // Auto-select default indicators AND settings when strategy changes
                       const selectedStrat = strategies.find(s => s.id === e.target.value);
                       if (selectedStrat) {
                         const defaultInds = selectedStrat.default_indicators || [];
                         const allInds = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM"];
                         allInds.forEach(ind => {
                           const cb = document.getElementById(`backtest-ind-${ind}`) as HTMLInputElement;
-                          if (cb) cb.checked = defaultInds.includes(ind);
+                          const details = document.getElementById(`settings-${ind}`);
+                          if (cb) {
+                            // Check if this indicator is enabled in the strategy
+                            const isEnabled = defaultInds.some((d: any) => d.id === ind && d.enabled);
+                            cb.checked = isEnabled;
+                            // Show/hide settings based on enabled
+                            if (details) details.style.display = isEnabled ? "block" : "none";
+                          }
+                          // Load default settings from strategy
+                          const stratInd = defaultInds.find((d: any) => d.id === ind);
+                          if (stratInd && stratInd.settings) {
+                            const s = stratInd.settings;
+                            // Set each setting
+                            Object.entries(s).forEach(([key, val]) => {
+                              const inputId = `set-${ind.toLowerCase()}-${key}`;
+                              const input = document.getElementById(inputId) as HTMLInputElement;
+                              if (input) input.value = String(val);
+                            });
+                          }
                         });
                       }
                     }}
@@ -338,10 +386,69 @@ export const Dashboard: React.FC = () => {
                   <div className="flex flex-wrap gap-2 text-xs">
                     {["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM"].map(ind => (
                       <label key={ind} className="flex items-center gap-1 cursor-pointer">
-                        <input type="checkbox" id={`backtest-ind-${ind}`} defaultChecked className="cursor-pointer" />
+                        <input type="checkbox" id={`backtest-ind-${ind}`} defaultChecked className="cursor-pointer" onChange={(e) => {
+                          // Toggle settings visibility
+                          const details = document.getElementById(`settings-${ind}`);
+                          if (details) {
+                            if (e.target.checked) details.style.display = "block";
+                            else details.style.display = "none";
+                          }
+                        }} />
                         <span style={{ color: "var(--text-primary)" }}>{ind}</span>
                       </label>
                     ))}
+                  </div>
+                  {/* Indicator Settings - collapsible per indicator */}
+                  <div className="mt-2 space-y-1">
+                    <details id="settings-RSI" className="text-xs">
+                      <summary className="cursor-pointer" style={{ color: "var(--text-muted)" }}>RSI ⚙</summary>
+                      <div className="grid grid-cols-3 gap-1 mt-1 p-1 rounded" style={{ backgroundColor: "var(--bg-secondary)" }}>
+                        <div><label className="text-xs">Period</label><input id="set-rsi-period" type="number" defaultValue="14" className="w-full p-1 rounded" /></div>
+                        <div><label className="text-xs">Over</label><input id="set-rsi-over" type="number" defaultValue="70" className="w-full p-1 rounded" /></div>
+                        <div><label className="text-xs">Under</label><input id="set-rsi-under" type="number" defaultValue="30" className="w-full p-1 rounded" /></div>
+                      </div>
+                    </details>
+                    <details id="settings-MACD" className="text-xs">
+                      <summary className="cursor-pointer" style={{ color: "var(--text-muted)" }}>MACD ⚙</summary>
+                      <div className="grid grid-cols-3 gap-1 mt-1 p-1 rounded" style={{ backgroundColor: "var(--bg-secondary)" }}>
+                        <div><label className="text-xs">Fast</label><input id="set-macd-fast" type="number" defaultValue="12" className="w-full p-1 rounded" /></div>
+                        <div><label className="text-xs">Slow</label><input id="set-macd-slow" type="number" defaultValue="26" className="w-full p-1 rounded" /></div>
+                        <div><label className="text-xs">Signal</label><input id="set-macd-signal" type="number" defaultValue="9" className="w-full p-1 rounded" /></div>
+                      </div>
+                    </details>
+                    <details id="settings-BB" className="text-xs">
+                      <summary className="cursor-pointer" style={{ color: "var(--text-muted)" }}>BB ⚙</summary>
+                      <div className="grid grid-cols-2 gap-1 mt-1 p-1 rounded" style={{ backgroundColor: "var(--bg-secondary)" }}>
+                        <div><label className="text-xs">Period</label><input id="set-bb-period" type="number" defaultValue="20" className="w-full p-1 rounded" /></div>
+                        <div><label className="text-xs">Std</label><input id="set-bb-std" type="number" defaultValue="2" step="0.1" className="w-full p-1 rounded" /></div>
+                      </div>
+                    </details>
+                    <details id="settings-SMA" className="text-xs">
+                      <summary className="cursor-pointer" style={{ color: "var(--text-muted)" }}>SMA ⚙</summary>
+                      <div className="grid grid-cols-2 gap-1 mt-1 p-1 rounded" style={{ backgroundColor: "var(--bg-secondary)" }}>
+                        <div><label className="text-xs">Period</label><input id="set-sma-period" type="number" defaultValue="20" className="w-full p-1 rounded" /></div>
+                        <div><label className="text-xs">Period2</label><input id="set-sma-period2" type="number" defaultValue="50" className="w-full p-1 rounded" /></div>
+                      </div>
+                    </details>
+                    <details id="settings-ADX" className="text-xs">
+                      <summary className="cursor-pointer" style={{ color: "var(--text-muted)" }}>ADX ⚙</summary>
+                      <div className="mt-1 p-1 rounded" style={{ backgroundColor: "var(--bg-secondary)" }}>
+                        <div><label className="text-xs">Period</label><input id="set-adx-period" type="number" defaultValue="14" className="w-full p-1 rounded" /></div>
+                      </div>
+                    </details>
+                    <details id="settings-STOCH" className="text-xs">
+                      <summary className="cursor-pointer" style={{ color: "var(--text-muted)" }}>STOCH ⚙</summary>
+                      <div className="grid grid-cols-2 gap-1 mt-1 p-1 rounded" style={{ backgroundColor: "var(--bg-secondary)" }}>
+                        <div><label className="text-xs">RSI Period</label><input id="set-stoch-rsi" type="number" defaultValue="14" className="w-full p-1 rounded" /></div>
+                        <div><label className="text-xs">K Period</label><input id="set-stoch-k" type="number" defaultValue="14" className="w-full p-1 rounded" /></div>
+                      </div>
+                    </details>
+                    <details id="settings-MOMENTUM" className="text-xs">
+                      <summary className="cursor-pointer" style={{ color: "var(--text-muted)" }}>MOMENTUM ⚙</summary>
+                      <div className="mt-1 p-1 rounded" style={{ backgroundColor: "var(--bg-secondary)" }}>
+                        <div><label className="text-xs">Period</label><input id="set-momentum-period" type="number" defaultValue="10" className="w-full p-1 rounded" /></div>
+                      </div>
+                    </details>
                   </div>
                 </div>
                 <div>
@@ -373,7 +480,7 @@ export const Dashboard: React.FC = () => {
                     id="backtest-min-score"
                     type="number"
                     step="0.05"
-                    defaultValue="0.1"
+                    defaultValue="0.05"
                     className="p-2 rounded text-sm w-20"
                     style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
                   />
@@ -391,9 +498,58 @@ export const Dashboard: React.FC = () => {
                       const days = (document.getElementById("backtest-days") as HTMLInputElement).value;
                       const minScore = (document.getElementById("backtest-min-score") as HTMLInputElement).value;
                       
+                      // Get indicator settings (only for enabled indicators)
+                      const settings: Record<string, any> = {};
+                      
+                      // RSI
+                      const rsiPeriod = (document.getElementById("set-rsi-period") as HTMLInputElement)?.value;
+                      const rsiOver = (document.getElementById("set-rsi-over") as HTMLInputElement)?.value;
+                      const rsiUnder = (document.getElementById("set-rsi-under") as HTMLInputElement)?.value;
+                      if (rsiPeriod && rsiPeriod !== "14") settings.rsi_period = rsiPeriod;
+                      if (rsiOver && rsiOver !== "70") settings.rsi_overbought = rsiOver;
+                      if (rsiUnder && rsiUnder !== "30") settings.rsi_oversold = rsiUnder;
+                      
+                      // MACD
+                      const macdFast = (document.getElementById("set-macd-fast") as HTMLInputElement)?.value;
+                      const macdSlow = (document.getElementById("set-macd-slow") as HTMLInputElement)?.value;
+                      const macdSignal = (document.getElementById("set-macd-signal") as HTMLInputElement)?.value;
+                      if (macdFast && macdFast !== "12") settings.macd_fast = macdFast;
+                      if (macdSlow && macdSlow !== "26") settings.macd_slow = macdSlow;
+                      if (macdSignal && macdSignal !== "9") settings.macd_signal = macdSignal;
+                      
+                      // BB
+                      const bbPeriod = (document.getElementById("set-bb-period") as HTMLInputElement)?.value;
+                      const bbStd = (document.getElementById("set-bb-std") as HTMLInputElement)?.value;
+                      if (bbPeriod && bbPeriod !== "20") settings.bb_period = bbPeriod;
+                      if (bbStd && bbStd !== "2") settings.bb_std = bbStd;
+                      
+                      // SMA
+                      const smaPeriod = (document.getElementById("set-sma-period") as HTMLInputElement)?.value;
+                      const smaPeriod2 = (document.getElementById("set-sma-period2") as HTMLInputElement)?.value;
+                      if (smaPeriod && smaPeriod !== "20") settings.sma_period = smaPeriod;
+                      if (smaPeriod2 && smaPeriod2 !== "50") settings.sma_period2 = smaPeriod2;
+                      
+                      // ADX
+                      const adxPeriod = (document.getElementById("set-adx-period") as HTMLInputElement)?.value;
+                      if (adxPeriod && adxPeriod !== "14") settings.adx_period = adxPeriod;
+                      
+                      // STOCH
+                      const stochRsi = (document.getElementById("set-stoch-rsi") as HTMLInputElement)?.value;
+                      const stochK = (document.getElementById("set-stoch-k") as HTMLInputElement)?.value;
+                      if (stochRsi && stochRsi !== "14") settings.stoch_rsi_period = stochRsi;
+                      if (stochK && stochK !== "14") settings.stoch_k_period = stochK;
+                      
+                      // MOMENTUM
+                      const momentumPeriod = (document.getElementById("set-momentum-period") as HTMLInputElement)?.value;
+                      if (momentumPeriod && momentumPeriod !== "10") settings.momentum_period = momentumPeriod;
+                      
                       let url = `/api/backtest?symbol=${symbol}&resolution=${resolution}&days=${days}&min_score=${minScore}`;
                       if (strategy) url += `&strategy=${strategy}`;
                       if (indicators) url += `&indicators=${indicators}`;
+                      
+                      // Add settings to URL
+                      const settingsStr = Object.entries(settings).map(([k, v]) => `${k}=${v}`).join(",");
+                      if (settingsStr) url += `&settings=${settingsStr}`;
                       
                       setBacktestRunning(true);
                       try {
@@ -406,9 +562,9 @@ export const Dashboard: React.FC = () => {
                       setBacktestRunning(false);
                     }}
                     className="px-4 py-2 rounded text-sm font-bold"
-                    style={{ backgroundColor: "var(--primary)", color: "white" }}
+                    style={{ backgroundColor: "var(--primary)", color: "white", border: "2px solid var(--primary)" }}
                   >
-                    {backtestRunning ? "Running..." : "Run"}
+                    {backtestRunning ? "⏳ Running..." : "▶ Run"}
                   </button>
                   <button
                     onClick={async () => {
@@ -421,16 +577,68 @@ export const Dashboard: React.FC = () => {
                       try {
                         const res = await fetch(`/api/backtest/optimize?symbol=${symbol}&resolution=${resolution}&days=${days}&min_score=${minScore}`);
                         const data = await res.json();
-                        setBacktestResults({ optimize: data });
+                        
+                        if (data.job_id) {
+                          setOptimizeJobId(data.job_id);
+                          // Poll in background - allows tab switching
+                          pollOptimization(
+                            data.job_id,
+                            (result) => setBacktestResults(result),
+                            () => {
+                              setBacktestRunning(false);
+                              setOptimizeJobId(null);
+                            }
+                          );
+                        }
                       } catch (e) {
                         console.error(e);
+                        setBacktestRunning(false);
                       }
-                      setBacktestRunning(false);
                     }}
                     className="px-4 py-2 rounded text-sm font-bold"
-                    style={{ backgroundColor: "var(--accent)", color: "white" }}
+                    style={{ backgroundColor: "#f59e0b", color: "black", border: "2px solid #f59e0b" }}
                   >
-                    {backtestRunning ? "Optimizing..." : "Optimize"}
+                    {optimizeJobId ? "⚡ Running..." : "⚡ Optimize"}
+                  </button>
+                  {optimizeJobId && (
+                    <button
+                      onClick={async () => {
+                        // Cancel by calling a cancel endpoint or just ignore results
+                        try {
+                          await fetch(`/api/backtest/optimize/${optimizeJobId}/cancel`, { method: "POST" });
+                        } catch (e) {}
+                        setOptimizeJobId(null);
+                        setBacktestRunning(false);
+                      }}
+                      className="px-4 py-2 rounded text-sm font-bold"
+                      style={{ backgroundColor: "#ef4444", color: "white", border: "2px solid #ef4444" }}
+                    >
+                      ⏹ Stop
+                    </button>
+                  )}
+                  <button
+                    onClick={async () => {
+                      const strategy = (document.getElementById("backtest-strategy") as HTMLSelectElement).value || "adaptive_regime";
+                      const nameSuffix = prompt("Enter name suffix for this strategy (e.g., _v1, _test):");
+                      if (!nameSuffix) return;
+                      
+                      try {
+                        const res = await fetch("/api/strategies/save", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ strategy_id: strategy, name_suffix: nameSuffix }),
+                        });
+                        const data = await res.json();
+                        alert(`Strategy saved: ${data.strategy_id}`);
+                      } catch (e) {
+                        console.error(e);
+                        alert("Failed to save strategy");
+                      }
+                    }}
+                    className="px-4 py-2 rounded text-sm font-bold"
+                    style={{ backgroundColor: "#10b981", color: "white", border: "2px solid #10b981" }}
+                  >
+                    💾 Save
                   </button>
                 </div>
               </div>

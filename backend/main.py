@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 import uvicorn
 from database import async_sync_account_from_closed_trades
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, Query
+from fastapi import Body, FastAPI, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from timezone import WARSAW_TZ, now_warsaw
 
@@ -2541,6 +2541,9 @@ async def run_backtest(
     indicators: Optional[str] = Query(
         None, description="Comma-separated indicators (RSI,MACD,BB,SMA,ADX,STOCH,MOMENTUM)"
     ),
+    settings: Optional[str] = Query(
+        None, description="Settings (e.g., rsi_period=14,macd_fast=12)"
+    ),
 ):
     """
     Run backtest on historical data.
@@ -2572,12 +2575,57 @@ async def run_backtest(
     strategy = get_strategy(strategy_id)
     instrument_info = INSTRUMENTS.get(symbol_key, {})
 
+    # Parse custom settings if provided (e.g., "rsi_period=14,macd_fast=12")
+    custom_settings = {}
+    if settings:
+        try:
+            for pair in settings.split(","):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    custom_settings[k.strip()] = v.strip()
+        except Exception:
+            pass  # Ignore invalid settings
+
+    # Apply custom settings to strategy
+    if custom_settings:
+        for ind in strategy.default_indicators:
+            if hasattr(ind, "settings") and ind.settings:
+                for key in list(ind.settings.keys()):
+                    # Map frontend keys to settings keys
+                    mapping = {
+                        "rsi_period": "period",
+                        "rsi_overbought": "overbought",
+                        "rsi_oversold": "oversold",
+                        "macd_fast": "fast",
+                        "macd_slow": "slow",
+                        "macd_signal": "signal",
+                        "bb_period": "period",
+                        "bb_std": "std",
+                    }
+                    frontend_key = f"{ind.id.lower()}_{key}"
+                    if frontend_key in custom_settings:
+                        try:
+                            val = custom_settings[frontend_key]
+                            # Try to convert to int/float
+                            if "." in val:
+                                ind.settings[key] = float(val)
+                            else:
+                                ind.settings[key] = int(val)
+                        except Exception:
+                            pass
+
     # Parse indicators if provided
     if indicators:
         enabled_indicators = [ind.strip().upper() for ind in indicators.split(",")]
     else:
+        # Try to get from DB, otherwise use strategy defaults
         enabled_key = f"INDICATORS_{symbol_key}"
-        enabled_indicators = get_setting(enabled_key)
+        db_indicators = get_setting(enabled_key)
+        if db_indicators:
+            enabled_indicators = db_indicators
+        else:
+            # Use all indicators from strategy
+            enabled_indicators = strategy.get_enabled_indicators()
 
     # Get candles from DB
     end_dt = datetime.utcnow()
@@ -2754,82 +2802,223 @@ async def run_backtest(
 
 
 @app.get("/api/backtest/optimize")
-async def optimize_backtest(
+async def start_optimize(
     symbol: str = Query(..., description="Symbol to backtest"),
     resolution: str = Query("60", description="Resolution: 1, 5, 15, 30, 60, D"),
-    days: int = Query(14, description="Number of days to backtest"),
-    min_score: float = Query(0.1, description="Minimum score threshold"),
+    days: int = Query(7, description="Number of days to backtest (keep small)"),
+    min_score: float = Query(0.05, description="Minimum score threshold"),
     initial_balance: float = Query(3000.0, description="Initial balance"),
-    strategies: Optional[str] = Query(None, description="Comma-separated strategies (default: all)"),
-    indicators: Optional[str] = Query(None, description="Comma-separated indicators (default: all)"),
+    background_tasks: BackgroundTasks = None,
 ):
     """
-    Run multiple backtests to find the best strategy/indicator combination.
-    Returns ranked results from best to worst.
+    Start optimization in background. Returns job_id immediately.
+    Use /api/backtest/optimize/{job_id} to get results.
     """
-    import time
-    from concurrent.futures import ThreadPoolExecutor
+    import uuid
+    from database import get_db
+    
+    job_id = str(uuid.uuid4())[:8]
+    
+    # Store initial status in DB
+    db = get_db()
+    db.optimize_jobs.insert_one({
+        "_id": job_id,
+        "status": "running",
+        "symbol": symbol,
+        "started_at": datetime.utcnow().isoformat(),
+    })
+    
+    # Run in background
+    background_tasks.add_task(
+        run_optimization, job_id, symbol, resolution, days, min_score, initial_balance
+    )
+    
+    return {
+        "job_id": job_id,
+        "status": "started",
+        "message": "Optimization started in background. Poll /api/backtest/optimize/{job_id} for results."
+    }
+
+
+def run_optimization(job_id: str, symbol: str, resolution: str, days: int, min_score: float, initial_balance: float):
+    """Run optimization in background and save results to DB"""
+    import subprocess
+    import json
+    from database import get_db
+    from strategies import STRATEGIES
+    
+    print(f"[OPTIMIZE] Starting job {job_id} for {symbol}")
+    db = get_db()
+    
+    try:
+        # Get available indicators - limit to first 3
+        ALL_INDICATORS = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM"]
+        
+        # Get all strategies
+        all_strategies = list(STRATEGIES.keys())
+        
+        # Generate combinations - more indicators for better results
+        combinations = []
+        for strat in all_strategies:
+            # Single indicators
+            for ind in ALL_INDICATORS:
+                combinations.append({"strategy": strat, "indicators": [ind]})
+            # Pairs of indicators
+            for i, ind1 in enumerate(ALL_INDICATORS):
+                for ind2 in ALL_INDICATORS[i+1:]:
+                    if len(combinations) < 30:  # Limit to 30
+                        combinations.append({"strategy": strat, "indicators": [ind1, ind2]})
+        
+        results = []
+        for combo in combinations:
+            # Check if cancelled
+            job = db.optimize_jobs.find_one({"_id": job_id})
+            if job and job.get("status") == "cancelled":
+                break
+            
+            strat = combo["strategy"]
+            inds = combo["indicators"]
+            ind_str = ",".join(inds)
+            
+            try:
+                # Call backtest endpoint using subprocess
+                url = f"http://localhost:9000/api/backtest?symbol={symbol}&resolution={resolution}&days={days}&min_score={min_score}&initial_balance={initial_balance}&strategy={strat}&indicators={ind_str}"
+                result = subprocess.run(["curl", "-s", url], capture_output=True, timeout=60)
+                if result.returncode == 0:
+                    try:
+                        data = json.loads(result.stdout)
+                        if "error" not in data and data.get("trades_count", 0) > 0:
+                            result = {
+                                "strategy": strat,
+                                "indicators": inds,
+                                "trades_count": data["trades_count"],
+                                "total_pnl": data["metrics"]["total_pnl"],
+                                "win_rate": data["metrics"]["win_rate"],
+                                "max_drawdown_pct": data["metrics"]["max_drawdown_pct"],
+                                "score": data["metrics"]["total_pnl"] - (data["metrics"]["max_drawdown_pct"] * 10),
+                            }
+                            results.append(result)
+                        
+                        # Save partial results to DB for live updates
+                        sorted_partial = sorted(results, key=lambda x: x["score"], reverse=True)
+                        db.optimize_jobs.update_one(
+                            {"_id": job_id},
+                            {"$set": {
+                                "results": sorted_partial[:10],
+                                "best": sorted_partial[0] if sorted_partial else None,
+                            }}
+                        )
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[OPTIMIZE] Error: {e}")
+                pass
+        
+        # Sort results
+        results.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Save to DB
+        db.optimize_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {
+                "status": "completed",
+                "results": results[:10],
+                "best": results[0] if results else None,
+                "completed_at": datetime.utcnow().isoformat(),
+            }}
+        )
+    except Exception as e:
+        db.optimize_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"status": "failed", "error": str(e)}}
+        )
+
+
+@app.get("/api/backtest/optimize/{job_id}")
+async def get_optimize_results(job_id: str):
+    """Get optimization results by job_id"""
+    from database import get_db
+    db = get_db()
+    job = db.optimize_jobs.find_one({"_id": job_id})
+    
+    if not job:
+        return {"error": "Job not found"}
+    
+    return {
+        "job_id": job_id,
+        "status": job.get("status"),
+        "best": job.get("best"),
+        "results": job.get("results", []),
+    }
+
+
+@app.post("/api/backtest/optimize/{job_id}/cancel")
+async def cancel_optimize(job_id: str):
+    """Cancel a running optimization job"""
+    from database import get_db
+    db = get_db()
+    db.optimize_jobs.update_one(
+        {"_id": job_id},
+        {"$set": {"status": "cancelled"}}
+    )
+    return {"status": "cancelled"}
 
     # Get available strategies
     from strategies import STRATEGIES
 
     all_strategies = [s.strip() for s in strategies.split(",")] if strategies else list(STRATEGIES.keys())
 
-    # Get available indicators
+    # Get available indicators - limit to first 3 for speed
     ALL_INDICATORS = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM"]
-    all_indicators = [ind.strip().upper() for ind in indicators.split(",")] if indicators else ALL_INDICATORS
+    all_indicators = [ind.strip().upper() for ind in indicators.split(",")] if indicators else ALL_INDICATORS[:3]  # Limit to 3 for speed
 
-    # Generate combinations
+    # Generate combinations - limit count
     combinations = []
     for strat in all_strategies:
-        # Single indicators
+        # Single indicators only (for speed)
         for ind in all_indicators:
             combinations.append({"strategy": strat, "indicators": [ind]})
-        # Pairs of indicators
-        for i, ind1 in enumerate(all_indicators):
-            for ind2 in all_indicators[i + 1 :]:
-                combinations.append({"strategy": strat, "indicators": [ind1, ind2]})
-        # All indicators
-        if len(all_indicators) > 2:
-            combinations.append({"strategy": strat, "indicators": all_indicators})
 
-    print(f"[OPTIMIZE] Testing {len(combinations)} combinations...")
+    print(f"[OPTIMIZE] Testing {len(combinations)} combinations (parallel)...")
 
-    # Run backtests
-    results = []
-    for i, combo in enumerate(combinations):
+    # Run backtests in parallel
+    import requests
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def run_single_combo(combo):
         strat = combo["strategy"]
         inds = combo["indicators"]
         ind_str = ",".join(inds)
-
-        # Build URL
-        url = f"/api/backtest?symbol={symbol}&resolution={resolution}&days={days}&min_score={min_score}&initial_balance={initial_balance}&strategy={strat}&indicators={ind_str}"
-
-        # Call ourselves (synchronous for simplicity)
-        import requests
-
+        # Build URL inside function
+        combo_url = f"http://127.0.0.1:8002/api/backtest?symbol={symbol}&resolution={resolution}&days={days}&min_score={min_score}&initial_balance={initial_balance}&strategy={strat}&indicators={ind_str}"
         try:
-            resp = requests.get(f"http://localhost:8000{url}", timeout=120)
+            resp = requests.get(combo_url, timeout=30)
             if resp.status_code == 200:
                 data = resp.json()
                 if "error" not in data and data.get("trades_count", 0) > 0:
-                    results.append(
-                        {
-                            "strategy": strat,
-                            "indicators": inds,
-                            "trades_count": data["trades_count"],
-                            "total_pnl": data["metrics"]["total_pnl"],
-                            "win_rate": data["metrics"]["win_rate"],
-                            "max_drawdown_pct": data["metrics"]["max_drawdown_pct"],
-                            "score": data["metrics"]["total_pnl"]
-                            - (data["metrics"]["max_drawdown_pct"] * 10),  # Simple scoring
-                        }
-                    )
+                    return {
+                        "strategy": strat,
+                        "indicators": inds,
+                        "trades_count": data["trades_count"],
+                        "total_pnl": data["metrics"]["total_pnl"],
+                        "win_rate": data["metrics"]["win_rate"],
+                        "max_drawdown_pct": data["metrics"]["max_drawdown_pct"],
+                        "score": data["metrics"]["total_pnl"] - (data["metrics"]["max_drawdown_pct"] * 10),
+                    }
         except Exception as e:
-            print(f"[OPTIMIZE] Error testing {strat}/{ind_str}: {e}")
+            pass
+        return None
 
-        if (i + 1) % 5 == 0:
-            print(f"[OPTIMIZE] Progress: {i+1}/{len(combinations)}")
+    # Run in parallel
+    results = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(run_single_combo, combo): combo for combo in combinations}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                results.append(result)
+
+    print(f"[OPTIMIZE] Completed {len(results)} tests")
 
     # Sort by score (PnL - drawdown penalty)
     results.sort(key=lambda x: x["score"], reverse=True)
