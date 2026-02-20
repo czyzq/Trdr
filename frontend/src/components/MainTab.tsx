@@ -69,6 +69,44 @@ export const MainTab: React.FC<MainTabProps> = ({
   });
   const [loading, setLoading] = useState(false);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [positions, setPositions] = useState<any[]>([]);
+  const [signals, setSignals] = useState<any[]>([]);
+  
+  // Last refresh timestamps for sections
+  const [lastRefresh, setLastRefresh] = useState({
+    chart: Date.now(),
+    positions: Date.now(),
+    signals: Date.now(),
+  });
+
+  // Helper to format age string
+  const formatAge = (timestamp: number): string => {
+    const ageMs = Date.now() - timestamp;
+    if (ageMs < 60000) return `${Math.floor(ageMs / 1000)}s`;
+    if (ageMs < 3600000) return `${Math.floor(ageMs / 60000)}m`;
+    return `${Math.floor(ageMs / 3600000)}h`;
+  };
+
+  // Get status color based on freshness - different thresholds per section
+  const getStatusColor = (timestamp: number, section: "chart" | "positions" | "signals"): string => {
+    const ageMs = Date.now() - timestamp;
+    if (section === "chart") {
+      // Charts: green < 5min, yellow < 7.5min, red > 7.5min
+      if (ageMs < 300000) return "#22c55e";
+      if (ageMs < 450000) return "#eab308";
+      return "#ef4444";
+    } else if (section === "positions") {
+      // Positions: green < 5s, yellow < 10s, red > 10s (refreshes every 1s)
+      if (ageMs < 5000) return "#22c55e";
+      if (ageMs < 10000) return "#eab308";
+      return "#ef4444";
+    } else {
+      // Signals: green < 15s, yellow < 30s, red > 30s (refreshes every 10s)
+      if (ageMs < 15000) return "#22c55e";
+      if (ageMs < 30000) return "#eab308";
+      return "#ef4444";
+    }
+  };
 
   // Collapsible sections state - mutual exclusion: only one can be expanded
   const [expandedSection, setExpandedSection] = useState<
@@ -136,6 +174,7 @@ export const MainTab: React.FC<MainTabProps> = ({
           );
           if (validData.length > 0) {
             setChartData({ ...data, data: validData });
+            setLastRefresh(r => ({ ...r, chart: Date.now() }));
           } else {
             setChartData({ error: "Invalid data format" });
           }
@@ -162,6 +201,7 @@ export const MainTab: React.FC<MainTabProps> = ({
       if (openRes.ok) {
         const openData = await openRes.json();
         if (openData.positions) {
+          setPositions(openData.positions);
           allTrades.push(
             ...openData.positions.map((p: any) => ({
               ...p,
@@ -275,17 +315,15 @@ export const MainTab: React.FC<MainTabProps> = ({
                     <div
                       className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                       style={{
-                        backgroundColor: isStale ? "#ef4444" : "#22c55e",
+                        backgroundColor: getStatusColor(lastRefresh.chart, "chart"),
                       }}
-                      title={
-                        isStale ? "Data is stale (>5 min old)" : "Data is fresh"
-                      }
+                      title={`Updated ${formatAge(lastRefresh.chart)} ago`}
                     />
                     <span
                       className="text-[9px] px-1 py-0.5 rounded-sm"
                       style={{
                         backgroundColor: "#1a1f35",
-                        color: isStale ? "#ef4444" : "#64748b",
+                        color: getStatusColor(lastRefresh.chart, "chart"),
                       }}
                     >
                       {isLive
@@ -397,7 +435,7 @@ export const MainTab: React.FC<MainTabProps> = ({
       </div>
 
       {/* Open Positions Section - always visible but compact */}
-      <OpenPositionsSummary />
+      <OpenPositionsSummary lastRefresh={lastRefresh.positions} />
 
       {/* Signals Section - collapsible */}
       <div
@@ -416,10 +454,18 @@ export const MainTab: React.FC<MainTabProps> = ({
           }}
         >
           <span
-            className="text-[11px] font-medium uppercase tracking-wider"
+            className="text-[11px] font-medium uppercase tracking-wider flex items-center gap-2"
             style={{ color: "#64748b" }}
           >
             Trading Signals
+            <span 
+              className="w-1.5 h-1.5 rounded-full" 
+              style={{ backgroundColor: getStatusColor(lastRefresh.signals, "signals") }}
+              title={`Updated ${formatAge(lastRefresh.signals)} ago`}
+            />
+            <span className="text-[9px] ml-1" style={{ color: getStatusColor(lastRefresh.signals, "signals") }}>
+              {formatAge(lastRefresh.signals)}
+            </span>
           </span>
           <span
             style={{
@@ -437,7 +483,16 @@ export const MainTab: React.FC<MainTabProps> = ({
 
         {/* Collapsible Content */}
         {expandedSection === "signals" && (
-          <SignalsGrid onSignalClick={handleSignalClick} />
+          <SignalsGrid 
+            onSignalClick={handleSignalClick} 
+            onRefresh={() => {
+              setLastRefresh(r => ({ ...r, signals: Date.now() }));
+              // Fetch signals to update state
+              fetch(apiUrl("signals")).then(r => r.json()).then(d => {
+                if (d.signals) setSignals(d.signals);
+              }).catch(() => {});
+            }}
+          />
         )}
       </div>
     </div>

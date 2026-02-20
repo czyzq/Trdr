@@ -184,18 +184,33 @@ function getSessionForHour(hour: number) {
   });
 }
 
+/** Convert UTC timestamp to Warsaw time string (HH:MM) */
+function toWarsawTime(timestamp: string | undefined): string {
+  if (!timestamp) return "";
+  const tsUtc = timestamp.endsWith("Z") ? timestamp : timestamp + "Z";
+  const dt = new Date(tsUtc);
+  if (isNaN(dt.getTime())) return "";
+  // Convert to Warsaw timezone
+  const warsaw = new Date(dt.toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
+  return `${warsaw.getHours().toString().padStart(2, "0")}:${warsaw.getMinutes().toString().padStart(2, "0")}`;
+}
+
 /** Parse an ISO timestamp or HH:MM time string into { hour, date } */
 function parseTimestamp(
   candle: CandleData,
 ): { hour: number; dateStr: string } | null {
+  // Ensure UTC parsing - add Z if not present
+  const ts = candle.timestamp || "";
+  const tsUtc = ts.endsWith("Z") ? ts : ts + "Z";
+  
   // Prefer ISO timestamp
-  if (candle.timestamp) {
+  if (tsUtc) {
     try {
-      const dt = new Date(candle.timestamp);
+      const dt = new Date(tsUtc);
       if (!isNaN(dt.getTime())) {
         return {
           hour: dt.getUTCHours(),
-          dateStr: candle.timestamp.split("T")[0] || "",
+          dateStr: ts.split("T")[0] || "",
         };
       }
     } catch {
@@ -489,24 +504,28 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const step = Math.max(1, Math.floor(n / maxLabels));
   let prevLabelDate = "";
   for (let i = 0; i < n; i += step) {
-    let label = validData[i].time;
+    // Convert UTC time to Warsaw for display
+    let label = toWarsawTime(validData[i].timestamp) || validData[i].time;
     let isMajor = false;
     // For daily charts prefer MM/DD, for intraday prefer HH:MM with date at day boundaries
     if (validData[i].timestamp) {
       try {
-        const dt = new Date(validData[i].timestamp!);
+        const ts = validData[i].timestamp!;
+        const tsUtc = ts.endsWith("Z") ? ts : ts + "Z";
+        const dt = new Date(tsUtc);
+        const warsawDt = new Date(dt.toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
         const currentDate = validData[i].timestamp!.split("T")[0];
         if (!isNaN(dt.getTime())) {
           if (isDaily) {
-            label = `${(dt.getUTCMonth() + 1).toString().padStart(2, "0")}/${dt.getUTCDate().toString().padStart(2, "0")}`;
+            label = `${(warsawDt.getMonth() + 1).toString().padStart(2, "0")}/${warsawDt.getDate().toString().padStart(2, "0")}`;
             isMajor = true;
           } else {
-            const timeStr = `${dt.getUTCHours().toString().padStart(2, "0")}:${dt.getUTCMinutes().toString().padStart(2, "0")}`;
+            const timeStr = `${warsawDt.getHours().toString().padStart(2, "0")}:${warsawDt.getMinutes().toString().padStart(2, "0")}`;
             // Show full date+time at day boundaries or every 6 hours
             const isDayBoundary = currentDate !== prevLabelDate;
-            const isMajorHour = dt.getUTCHours() % 6 === 0;
+            const isMajorHour = warsawDt.getHours() % 6 === 0;
             if (isDayBoundary || isMajorHour) {
-              label = `${dt.getUTCDate()}/${dt.getUTCMonth() + 1} ${timeStr}`;
+              label = `${warsawDt.getDate()}/${warsawDt.getMonth() + 1} ${timeStr}`;
               isMajor = true;
             } else {
               label = timeStr;
@@ -680,20 +699,47 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               macd: "MACD",
               sessions: "SESS",
             };
+            const tooltips: Record<string, { title: string; desc: string }> = {
+              bb: {
+                title: "Bollinger Bands",
+                desc: "Price envelope (20 SMA ± 2 std dev). Lower band = potential buy, upper band = potential sell. Width shows volatility.",
+              },
+              sma: {
+                title: "SMA (20/50)",
+                desc: "Simple Moving Averages. SMA20 above SMA50 = bullish (buy). SMA20 below SMA50 = bearish (sell).",
+              },
+              macd: {
+                title: "MACD",
+                desc: "EMA 12-26 difference. Line above 0 = bullish. Cross above 0 = buy, cross below 0 = sell.",
+              },
+              sessions: {
+                title: "Trading Sessions",
+                desc: "Shows market sessions: Sydney (22:00-07:00), Tokyo (00:00-09:00), London (08:00-17:00), New York (13:00-22:00) Warsaw time.",
+              },
+            };
             const c = colors[key];
+            const tip = tooltips[key];
             return (
-              <button
-                key={key}
-                onClick={() => toggleOverlay(key)}
-                className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
-                style={{
-                  color: overlays[key] ? c : "#374151",
-                  backgroundColor: overlays[key] ? "#1a1f35" : "transparent",
-                  border: `1px solid ${overlays[key] ? c + "33" : "#1a1f35"}`,
-                }}
-              >
-                {labels[key]}
-              </button>
+              <div key={key} className="relative group">
+                <button
+                  onClick={() => toggleOverlay(key)}
+                  className="px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium rounded-sm transition-all"
+                  style={{
+                    color: overlays[key] ? c : "#374151",
+                    backgroundColor: overlays[key] ? "#1a1f35" : "transparent",
+                    border: `1px solid ${overlays[key] ? c + "33" : "#1a1f35"}`,
+                  }}
+                >
+                  {labels[key]}
+                </button>
+                {/* Tooltip */}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1.5 rounded text-[9px] w-40 z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+                  style={{ backgroundColor: "#1e293b", border: "1px solid #334155" }}
+                >
+                  <div className="font-bold" style={{ color: c }}>{tip.title}</div>
+                  <div style={{ color: "#94a3b8", lineHeight: "1.3" }}>{tip.desc}</div>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -755,23 +801,23 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               let dateStr = "";
               if (candle.timestamp) {
                 try {
-                  const dt = new Date(candle.timestamp);
+                  const ts = candle.timestamp;
+                  const tsUtc = ts.endsWith("Z") ? ts : ts + "Z";
+                  const dt = new Date(tsUtc);
                   if (!isNaN(dt.getTime())) {
-                    const day = dt.getUTCDate().toString().padStart(2, "0");
-                    const month = (dt.getUTCMonth() + 1)
-                      .toString()
-                      .padStart(2, "0");
-                    const hours = dt.getUTCHours().toString().padStart(2, "0");
-                    const minutes = dt
-                      .getUTCMinutes()
-                      .toString()
-                      .padStart(2, "0");
+                    // Convert to Warsaw timezone for display
+                    const warsawTime = new Date(dt.toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
+                    const day = warsawTime.getDate().toString().padStart(2, "0");
+                    const month = (warsawTime.getMonth() + 1).toString().padStart(2, "0");
+                    const hours = warsawTime.getHours().toString().padStart(2, "0");
+                    const minutes = warsawTime.getMinutes().toString().padStart(2, "0");
                     dateStr = `${day}/${month} ${hours}:${minutes}`;
                   }
                 } catch {}
               }
               if (!dateStr && candle.time) {
-                dateStr = candle.time;
+                // Convert UTC time to Warsaw for display
+                dateStr = toWarsawTime(candle.timestamp) || candle.time;
               }
               return (
                 <span style={{ color: "#94a3b8", fontWeight: "bold" }}>
@@ -1318,7 +1364,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 .map((trade) => {
                   try {
                     // Find candle index for entry
-                    const entryDate = new Date(trade.opened_at + "Z"); // Ensure UTC parsing
+                    const entryDate = new Date(trade.opened_at.replace('Z', '+00:00'));
                     if (isNaN(entryDate.getTime())) return null;
                     console.log(
                       `[CandlestickChart ${symbol}] Looking for entry:`,
@@ -1339,7 +1385,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                     );
                     const entryIdx = validData.findIndex((c, i) => {
                       if (c.timestamp) {
-                        const candleDate = new Date(c.timestamp);
+                        const candleDate = new Date((c.timestamp || "") + "Z");
                         const match = candleDate.getTime() >= entryDate.getTime();
                         if (i < 3)
                           console.log(
@@ -1412,10 +1458,10 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                         {trade.closed_at &&
                           trade.exit_price &&
                           (() => {
-                            const exitDate = new Date(trade.closed_at);
+                            const exitDate = new Date(trade.closed_at.replace('Z', '+00:00'));
                             const exitIdx = validData.findIndex((c, i) => {
                               if (c.timestamp && i > entryIdx) {
-                                const candleDate = new Date(c.timestamp);
+                                const candleDate = new Date((c.timestamp || "") + "Z");
                                 return candleDate.getTime() >= exitDate.getTime();
                               }
                               return false;
@@ -1578,20 +1624,22 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               >
                 <span>Opened:</span>
                 <span>
-                  {new Date(hoveredTrade.opened_at).toLocaleTimeString(
-                    "en-GB",
-                    { hour: "2-digit", minute: "2-digit" },
-                  )}
+                  {(() => {
+                    const d = new Date(hoveredTrade.opened_at.replace('Z', '+00:00'));
+                    const wd = new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' }));
+                    return wd.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: 'Europe/Warsaw' });
+                  })()}
                 </span>
               </div>
               {hoveredTrade.closed_at && (
                 <div className="flex justify-between text-[9px]">
                   <span>Closed:</span>
                   <span>
-                    {new Date(hoveredTrade.closed_at).toLocaleTimeString(
-                      "en-GB",
-                      { hour: "2-digit", minute: "2-digit" },
-                    )}
+                    {(() => {
+                      const d = new Date(hoveredTrade.closed_at.replace('Z', '+00:00'));
+                      const wd = new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' }));
+                      return wd.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: 'Europe/Warsaw' });
+                    })()}
                   </span>
                 </div>
               )}

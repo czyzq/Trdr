@@ -35,6 +35,8 @@ interface OpenPositionsSummaryProps {
   onClosePosition?: (id: string) => void;
   onSelectPosition?: (position: Position | null) => void;
   selectedPositionId?: string | null;
+  lastRefresh?: number | null;
+  onRefresh?: () => void;
 }
 
 const formatDuration = (openedAt: string): string => {
@@ -49,10 +51,30 @@ const formatDuration = (openedAt: string): string => {
   return `${minutes}m`;
 };
 
+// Get status color: green < 5s, yellow < 10s, red > 10s
+const getStatusColor = (timestamp: number | null | undefined): string => {
+  if (!timestamp) return "#ef4444";
+  const ageMs = Date.now() - timestamp;
+  if (ageMs < 5000) return "#22c55e";
+  if (ageMs < 10000) return "#eab308";
+  return "#ef4444";
+};
+
+const formatAge = (timestamp: number | null | undefined): string => {
+  if (!timestamp) return "";
+  const ageMs = Date.now() - timestamp;
+  if (ageMs < 60000) return `${Math.floor(ageMs / 1000)}s`;
+  return `${Math.floor(ageMs / 60000)}m`;
+};
+
 const formatTime = (openedAt: string): string => {
-  return new Date(openedAt).toLocaleTimeString("en-GB", {
+  // Parse as UTC and convert to Warsaw time
+  const date = new Date(openedAt.replace('Z', '+00:00'));
+  const warsawDate = new Date(date.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' }));
+  return warsawDate.toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: 'Europe/Warsaw',
   });
 };
 
@@ -60,9 +82,39 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
   onClosePosition,
   onSelectPosition,
   selectedPositionId,
+  lastRefresh: externalLastRefresh,
 }) => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(false);
+  // Use external lastRefresh if provided, otherwise use internal
+  const [internalLastFetched, setInternalLastFetched] = useState<number>(Date.now());
+  const lastFetched = internalLastFetched;
+  
+  // Track previous P&L for flash animation
+  const [flashingPositions, setFlashingPositions] = useState<Set<string>>(new Set());
+  const prevPnLRef = useRef<Record<string, number>>({});
+  
+  // Update flashing positions when P&L changes
+  useEffect(() => {
+    const newFlashing = new Set<string>();
+    const newPrevPnL: Record<string, number> = {};
+    
+    positions.forEach(pos => {
+      const prevPnl = prevPnLRef.current[pos.id];
+      if (prevPnl !== undefined && prevPnl !== pos.unrealized_pnl_usd) {
+        newFlashing.add(pos.id);
+      }
+      newPrevPnL[pos.id] = pos.unrealized_pnl_usd;
+    });
+    
+    prevPnLRef.current = newPrevPnL;
+    
+    if (newFlashing.size > 0) {
+      setFlashingPositions(newFlashing);
+      setTimeout(() => setFlashingPositions(new Set()), 500);
+    }
+  }, [positions]);
+  
   const [editingPosition, setEditingPosition] = useState<string | null>(null);
   const [editSl, setEditSl] = useState<number>(0);
   const [editTp, setEditTp] = useState<number>(0);
@@ -81,10 +133,13 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
 
   const fetchPositions = async () => {
     try {
-      const res = await fetch(apiUrl("trades/open"));
+      // Add timestamp to prevent caching
+      const res = await fetch(apiUrl("trades/open") + "?t=" + Date.now());
       if (res.ok) {
         const data = await res.json();
         setPositions(data.positions || []);
+        // Always update internal timestamp
+        setInternalLastFetched(Date.now());
       }
     } catch (error) {
       console.error("Failed to fetch positions:", error);
@@ -93,18 +148,30 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
 
   useEffect(() => {
     fetchPositions();
-    const interval = setInterval(fetchPositions, 5000);
+    const interval = setInterval(fetchPositions, 1000); // Refresh every 1 second for real-time P&L
     return () => clearInterval(interval);
   }, []);
 
   const handleClose = async (id: string) => {
     setLoading(true);
+    // Optimistic update - remove immediately from UI
+    setPositions(prev => prev.filter(p => p.id !== id));
     try {
-      await fetch(apiUrl(`trade/close/${id}`), { method: "POST" });
-      await fetchPositions();
+      const res = await fetch(apiUrl(`trade/close/${id}`), { method: "POST", cache: "no-store" });
+      const data = await res.json();
+      
+      if (res.ok) {
+        setTimeout(() => fetchPositions(), 200);
+      } else if (data.error && data.error.includes("not found")) {
+        // Already closed - just remove from UI, no need to revert
+        console.log("Position already closed");
+      } else {
+        fetchPositions();
+      }
       onClosePosition?.(id);
     } catch (error) {
       console.error("Failed to close position:", error);
+      fetchPositions();
     } finally {
       setLoading(false);
     }
@@ -243,12 +310,22 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
           >
             Open Positions
           </span>
-          <span
-            className="text-[10px] px-2 py-0.5 rounded-sm"
-            style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
-          >
-            0
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span 
+              className="w-1.5 h-1.5 rounded-full" 
+              style={{ backgroundColor: getStatusColor(lastFetched) }}
+              title={`Updated ${formatAge(lastFetched)} ago`}
+            />
+            <span
+              className="text-[10px] px-2 py-0.5 rounded-sm"
+              style={{ backgroundColor: "#1a1f35", color: "#64748b" }}
+            >
+              0
+            </span>
+            <span className="text-[9px]" style={{ color: getStatusColor(lastFetched) }}>
+              {formatAge(lastFetched)}
+            </span>
+          </div>
         </div>
         <div className="text-[10px] mt-2" style={{ color: "#4a5568" }}>
           No open positions
@@ -271,37 +348,33 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
       className="rounded-sm overflow-hidden"
       style={{ backgroundColor: "#0d1220", border: "1px solid #1a1f35" }}
     >
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-3 py-2"
-        style={{ borderBottom: "1px solid #1a1f35" }}
-      >
+      {/* Header - ALL IN ONE LINE */}
+      <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid #1a1f35" }}>
+        {/* Left: Title + Count + Status */}
         <div className="flex items-center gap-2">
-          <span
-            className="text-[11px] font-medium uppercase tracking-wider"
-            style={{ color: "#64748b" }}
-          >
+          <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
             Open Positions
           </span>
-          <span
-            className="text-[10px] px-2 py-0.5 rounded-sm"
-            style={{ backgroundColor: "#1a1f35", color: "#e2e8f0" }}
-          >
+          <span className="text-[10px] px-2 py-0.5 rounded-sm" style={{ backgroundColor: "#1a1f35", color: "#e2e8f0" }}>
             {positions.length}
           </span>
+          <span 
+            className="w-1.5 h-1.5 rounded-full" 
+            style={{ backgroundColor: getStatusColor(lastFetched) }}
+            title={`Updated ${formatAge(lastFetched)} ago`}
+          />
+          <span className="text-[9px]" style={{ color: getStatusColor(lastFetched) }}>
+            {formatAge(lastFetched)}
+          </span>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="text-[10px]">
-            <span style={{ color: "#4a5568" }}>Margin: </span>
-            <span style={{ color: "#e2e8f0" }}>${totalMargin.toFixed(2)}</span>
+        
+        {/* Right: Margin + P&L */}
+        {positions.length > 0 && (
+          <div className="flex items-center gap-3 text-[10px]">
+            <span><span style={{ color: "#4a5568" }}>Margin: </span><span style={{ color: "#e2e8f0" }}>${totalMargin.toFixed(2)}</span></span>
+            <span><span style={{ color: "#4a5568" }}>P&L: </span><span style={{ color: totalPnl >= 0 ? "#22c55e" : "#ef4444" }}>{totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}</span></span>
           </div>
-          <div className="text-[10px]">
-            <span style={{ color: "#4a5568" }}>P&L: </span>
-            <span style={{ color: totalPnl >= 0 ? "#22c55e" : "#ef4444" }}>
-              {totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}
-            </span>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Positions List */}
@@ -355,7 +428,14 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
 
                 {/* P&L */}
                 <div className="flex items-center gap-2">
-                  <div className="text-right">
+                  <div 
+                    className={`text-right transition-all duration-300 ${flashingPositions.has(pos.id) ? 'scale-110 brightness-150' : ''}`}
+                    style={{
+                      backgroundColor: flashingPositions.has(pos.id) ? `${pnlColor}30` : 'transparent',
+                      borderRadius: '4px',
+                      padding: flashingPositions.has(pos.id) ? '4px 8px' : '0',
+                    }}
+                  >
                     <div
                       className="text-xs font-bold"
                       style={{ color: pnlColor }}

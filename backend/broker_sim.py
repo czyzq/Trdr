@@ -325,15 +325,17 @@ class AsyncSimulatedBroker(Broker):
             return []
 
     async def _async_update_prices(self) -> List[Dict[str, Any]]:
-        """Async price update with auto-close - uses candle data for consistency with chart."""
+        """Async price update with auto-close - always gets fresh prices for real-time P&L."""
         auto_closed = []
         to_close = []
+        
         for pos in self.open_positions:
             symbol = pos["symbol"]
-            # Try candles first (same source as chart) for price consistency
+            
+            # Always get fresh price from candles for real-time P&L updates
             price = None
             try:
-                candles = await self._data_provider.get_candles(symbol, "60", 5)
+                candles = await self._data_provider.get_candles(symbol, "60", 1)
                 if candles and len(candles) > 0:
                     price = candles[-1]["close"]
             except Exception:

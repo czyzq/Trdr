@@ -1,6 +1,101 @@
 import React, { useState, useEffect } from "react";
 import { apiUrl } from "../api";
 
+// Trading Sessions - major market hours in UTC
+interface TradingSession {
+  name: string;
+  city: string;
+  openHour: number;
+  closeHour: number;
+}
+
+const SESSIONS: TradingSession[] = [
+  { name: "Sydney", city: "Sydney", openHour: 22, closeHour: 7 },    // 22:00-07:00 UTC
+  { name: "Tokyo", city: "Tokyo", openHour: 0, closeHour: 9 },      // 00:00-09:00 UTC  
+  { name: "London", city: "London", openHour: 7, closeHour: 16 },   // 07:00-16:00 UTC
+  { name: "New York", city: "NewYork", openHour: 14.5, closeHour: 23 }, // 14:30-23:00 UTC
+];
+
+function isSessionOpen(session: TradingSession): boolean {
+  const now = new Date();
+  const utcHour = now.getUTCHours() + now.getUTCMinutes() / 60;
+  
+  // Handle sessions that span midnight
+  if (session.openHour > session.closeHour) {
+    return utcHour >= session.openHour || utcHour < session.closeHour;
+  }
+  return utcHour >= session.openHour && utcHour < session.closeHour;
+}
+
+function getSessionStatus(session: TradingSession): { open: boolean; status: string } {
+  const now = new Date();
+  const utcHour = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const open = isSessionOpen(session);
+  
+  if (open) {
+    // Calculate time until close
+    let hoursLeft = session.closeHour - utcHour;
+    if (hoursLeft < 0) hoursLeft += 24;
+    if (hoursLeft >= 0) {
+      const h = Math.floor(hoursLeft);
+      const m = Math.floor((hoursLeft - h) * 60);
+      return { open: true, status: `OTWARTY ${h}h ${m}m` };
+    }
+  } else {
+    // Calculate time until open
+    let hoursUntil = session.openHour - utcHour;
+    if (hoursUntil < 0) hoursUntil += 24;
+    const h = Math.floor(hoursUntil);
+    const m = Math.floor((hoursUntil - h) * 60);
+    return { open: false, status: `za ${h}h ${m}m` };
+  }
+  return { open, status: open ? "OTWARTY" : "ZAMKNIĘTY" };
+}
+
+const MarketStatus: React.FC = () => {
+  const [time, setTime] = useState({ utc: "", warsaw: "" });
+  
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setTime({
+        utc: now.toLocaleTimeString("en-GB", { timeZone: "UTC", hour: "2-digit", minute: "2-digit" }),
+        warsaw: now.toLocaleTimeString("en-GB", { timeZone: "Europe/Warsaw", hour: "2-digit", minute: "2-digit" }),
+      });
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="p-2 rounded-sm" style={{ backgroundColor: "#0b0f1a" }}>
+      <div className="text-[10px] mb-2" style={{ color: "#6b7280" }}>
+        SESJE • {time.warsaw} ({time.utc} UTC)
+      </div>
+      <div className="space-y-1">
+        {SESSIONS.map((s) => {
+          const { open, status } = getSessionStatus(s);
+          return (
+            <div key={s.name} className="flex items-center justify-between text-[10px]">
+              <div className="flex items-center gap-1.5">
+                <div
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ backgroundColor: open ? "#22c55e" : "#ef4444" }}
+                />
+                <span style={{ color: "#e5e7eb" }}>{s.name}</span>
+              </div>
+              <span style={{ color: open ? "#22c55e" : "#9ca3af" }}>
+                {status}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 interface SidebarProps {
   accountData?: any;
 }
@@ -199,7 +294,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
         </div>
       </div> */}
 
-      {/* Scanner Status */}
+      {/* Market Status - replaces Scanner/Last scan */}
+      <div className="p-3" style={{ borderBottom: "1px solid #1a1f35" }}>
+        <MarketStatus />
+      </div>
+
+      {/* Scanner Status - replaced by MarketStatus */}
+      {/*
       <div className="p-4" style={{ borderBottom: "1px solid #1a1f35" }}>
         <div className="flex items-center justify-between mb-2">
           <div
@@ -218,10 +319,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData }) => {
             </span>
           </div>
         </div>
-        <div className="text-[10px]" style={{ color: "#374151" }}>
-          Last scan: {lastScan}
-        </div>
       </div>
+      */}
 
       {/* Reset Button */}
       <div className="p-4 mt-auto">

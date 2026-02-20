@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../api";
 
 interface NewsArticle {
@@ -29,26 +29,26 @@ export const NewsTab: React.FC = () => {
   const [newsData, setNewsData] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const fetchNews = async () => {
-      setLoading(true);
-      try {
-        const response = await fetch(apiUrl("news/all"));
-        if (response.ok) {
-          const data: NewsResponse = await response.json();
-          setNewsData(data.news);
-        }
-      } catch (error) {
-        console.error("Failed to fetch news:", error);
-      } finally {
-        setLoading(false);
+  const fetchNews = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(apiUrl("news/all"));
+      if (response.ok) {
+        const data: NewsResponse = await response.json();
+        setNewsData(data.news);
       }
-    };
+    } catch (error) {
+      console.error("Failed to fetch news:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
+  useEffect(() => {
     fetchNews();
     const interval = setInterval(fetchNews, 10800000); // 3h
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchNews]);
 
   const getDirColor = (direction: string) => {
     if (direction === "buy") return "#22c55e";

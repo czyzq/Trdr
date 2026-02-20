@@ -55,8 +55,10 @@ export const TradesTab: React.FC = () => {
     const cacheKeyHist = 'tradesHistory';
     const cacheTimeKey = 'tradesTime';
     const cacheTime = localStorage.getItem(cacheTimeKey);
-    // Is forcerefresh true or cache is less than 5 seconds old? If so, use cache
-    if (cacheTime && Date.now() - parseInt(cacheTime) < 5000 && !forceRefresh) {
+    // Always skip cache if forceRefresh is true
+    if (forceRefresh) {
+      // Skip cache, fetch fresh data
+    } else if (cacheTime && Date.now() - parseInt(cacheTime) < 5000) {
       const cachedOpen = localStorage.getItem(cacheKeyOpen);
       const cachedHist = localStorage.getItem(cacheKeyHist);
       if (cachedOpen && cachedHist) {
@@ -74,9 +76,10 @@ export const TradesTab: React.FC = () => {
     }
 
     try {
+      // Add timestamp to prevent caching
       const [openRes, histRes] = await Promise.all([
-        fetch(apiUrl("trades/open")),
-        fetch(apiUrl("trades/history")),
+        fetch(apiUrl("trades/open") + "?t=" + Date.now(), { cache: "no-store" }),
+        fetch(apiUrl("trades/history") + "?t=" + Date.now(), { cache: "no-store" }),
       ]);
       if (openRes.ok) {
         const data = await openRes.json();
@@ -108,18 +111,30 @@ export const TradesTab: React.FC = () => {
 
   const closeTrade = async (positionId: string) => {
     setClosingId(positionId);
+    // Optimistic update - remove immediately from UI
+    setOpenPositions(prev => prev.filter(p => p.id !== positionId));
     try {
       const response = await fetch(apiUrl(`trade/close/${positionId}`), {
         method: "POST",
+        cache: "no-store",
       });
+      const data = await response.json();
+      
       if (response.ok) {
         localStorage.removeItem('tradesOpen');
         localStorage.removeItem('tradesHistory');
         localStorage.removeItem('tradesTime');
+        setTimeout(() => fetchData(true), 200);
+      } else if (data.error && data.error.includes("not found")) {
+        // Position already closed (probably by TP/SL) - just remove from UI
+        console.log("Position already closed, removing from list");
+      } else {
+        // Other error - revert
         fetchData(true);
       }
     } catch (error) {
       console.error("Failed to close trade:", error);
+      fetchData(true);
     } finally {
       setClosingId(null);
     }
@@ -132,11 +147,15 @@ export const TradesTab: React.FC = () => {
   };
 
   const formatTime = (dateStr: string): string => {
-    const date = new Date(dateStr);
-    return date.toLocaleTimeString("en-GB", {
+    // Parse as UTC and convert to Warsaw time
+    const date = new Date(dateStr.replace('Z', '+00:00'));
+    // Warsaw is UTC+1 (or UTC+2 during DST)
+    const warsawDate = new Date(date.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' }));
+    return warsawDate.toLocaleTimeString("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
+      timeZone: 'Europe/Warsaw',
     });
   };
 

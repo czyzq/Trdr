@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { apiUrl } from "../api";
 
 interface Signal {
@@ -21,6 +21,7 @@ interface Signal {
 interface SignalsGridProps {
   signals?: Signal[];
   onSignalClick?: (signal: Signal) => void;
+  onRefresh?: () => void;
 }
 
 // All known instruments — rows always appear even without signal data
@@ -98,20 +99,48 @@ interface TradeModalState {
   takeProfit: number;
   suggestedSize: number;
   selectedSize: number;
+  leverage: number;
   loading: boolean;
   displayTakeProfit: string;
   displayStopLoss: string;
   displaySelectedSize: string;
+  signalComponents?: { name: string; description: string; value: number }[];
 }
 
 export const SignalsGrid: React.FC<SignalsGridProps> = ({
   signals: externalSignals,
   onSignalClick,
+  onRefresh,
 }) => {
   const [signals, setSignals] = useState<Signal[]>(defaultSignals);
   const [loading, setLoading] = useState(false);
   const [tradingSymbol, setTradingSymbol] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Track previous scores for flash animation
+  const [flashingSignals, setFlashingSignals] = useState<Set<string>>(new Set());
+  const prevScoreRef = useRef<Record<string, number>>({});
+  
+  // Update flashing signals when score changes
+  useEffect(() => {
+    const newFlashing = new Set<string>();
+    const newPrevScore: Record<string, number> = {};
+    
+    signals.forEach(sig => {
+      const prevScore = prevScoreRef.current[sig.symbol];
+      if (prevScore !== undefined && prevScore !== sig.score) {
+        newFlashing.add(sig.symbol);
+      }
+      newPrevScore[sig.symbol] = sig.score;
+    });
+    
+    prevScoreRef.current = newPrevScore;
+    
+    if (newFlashing.size > 0) {
+      setFlashingSignals(newFlashing);
+      setTimeout(() => setFlashingSignals(new Set()), 500);
+    }
+  }, [signals]);
 
   const [tradeModal, setTradeModal] = useState<TradeModalState>({
     isOpen: false,
@@ -122,10 +151,12 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
     takeProfit: 0,
     suggestedSize: 0.01,
     selectedSize: 0.01,
+    leverage: 20,
     loading: false,
     displayTakeProfit: "",
     displayStopLoss: "",
     displaySelectedSize: "",
+    signalComponents: [],
   });
 
   const [hoveredIndicator, setHoveredIndicator] = useState<string | null>(null);
@@ -134,18 +165,50 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
     y: number;
   }>({ x: 0, y: 0 });
 
-  const indicatorTooltips: Record<string, string> = {
-    RSI: "RSI mierzy overbought/oversold (14-period); &lt;#60;30 buy, &gt;#62;70 sell.",
-    MACD: "Histogram momentum (EMA12-26); &gt;#62;0 bullish, cross up buy.",
-    "SMA Cross": "SMA20&gt;#62;SMA50 uptrend buy bias.",
-    BB: "Price near lower band buy (mean-reversion).",
-    ADX: "&gt;#62;25 trending (trade momentum), &lt;#60;20 ranging (mean-rev).",
-    StochRSI: "StochRSI &lt;#60;0.2 oversold→buy, &gt;#62;0.8 overbought→sell.",
-    Volume:
-      "Volume confirms price moves; high volume on breakout = strong signal.",
-    Momentum: "Momentum &gt;#62;0 uptrend buy; divergence warns reversal.",
-    Candlestick:
-      "Patterns: hammer/engulfing bullish reversal buy; shooting star sell caution.",
+  const indicatorTooltips: Record<string, { desc: string; combine: string }> = {
+    "RSI (14)": {
+      desc: "Measures momentum (0-100). Below 30 = oversold (potential buy). Above 70 = overbought (potential sell). Use as confirmation, not standalone signals.",
+      combine: "Best with: SMA Cross (confirms trend direction), ADX (above 25 = strong trend)."
+    },
+    "MACD": {
+      desc: "EMA 12-26 difference. Line above 0 = bullish. Crosses above 0 = buy signal. Crosses below 0 = sell signal. Histogram shows momentum strength.",
+      combine: "Best with: RSI (check oversold/overbought), Volume (high volume confirms move)."
+    },
+    "SMA Cross (20/50)": {
+      desc: "Simple Moving Averages crossover. Fast SMA (20) above slow SMA (50) = bullish (buy). Fast below slow = bearish (sell). Classic trend indicator.",
+      combine: "Best with: ADX (above 25 confirms trend strength), RSI (filters overbought/oversold)."
+    },
+    "Bollinger Bands": {
+      desc: "Price envelope (20 SMA ± 2 std dev). Price touching lower band = potential buy (reversion to mean). Price at upper band = potential sell. Width shows volatility.",
+      combine: "Best with: RSI (below 30 = oversold confirmation), Volume (high volume on breakout)."
+    },
+    "ADX (Trend)": {
+      desc: "Trend strength (0-100). Above 25 = trending market (follow the trend). Below 20 = ranging (use mean-reversion strategies). Does NOT show direction!",
+      combine: "Best with: SMA Cross (shows direction), +DI/-DI (shows bullish/bearish momentum)."
+    },
+    "StochRSI": {
+      desc: "Stochastic of RSI (0-1). Below 0.2 = oversold (buy). Above 0.8 = overbought (sell). More sensitive than regular RSI - good for fast moves.",
+      combine: "Best with: RSI (confirmation), MACD (momentum alignment)."
+    },
+    "Momentum (10)": {
+      desc: "Rate of change (10-period). Above 0 = uptrend, below 0 = downtrend. Divergence (price up, momentum down) = warning sign of weakening trend.",
+      combine: "Best with: ADX (trend strength), Volume (confirms move)."
+    },
+    "Volume": {
+      desc: "Trading volume. High volume on breakout = strong signal. Low volume = weak move (fakeout risk). Volume often leads price.",
+      combine: "Best with: Price action (breakout patterns), RSI (confirmation)."
+    },
+  };
+
+  // Get tooltip for indicator name (handles partial matches)
+  const getIndicatorTooltip = (name: string): { desc: string; combine: string } | null => {
+    for (const key of Object.keys(indicatorTooltips)) {
+      if (name.toLowerCase().includes(key.toLowerCase()) || 
+          key.toLowerCase().includes(name.toLowerCase())) {
+        return indicatorTooltips[key];
+      }
+    }
+    return null;
   };
 
   useEffect(() => {
@@ -217,6 +280,7 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
           setSignals(mergedSignals);
           localStorage.setItem(cacheKey, JSON.stringify(mergedSignals));
           localStorage.setItem(cacheTimeKey, Date.now().toString());
+          onRefresh?.();
         }
       } catch (error) {
         console.error("Failed to fetch signals:", error);
@@ -246,6 +310,12 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
     }
     const entryPrice = signal.current_price || signal.entry_point || 0;
 
+    // Leverage per symbol (from backend INSTRUMENTS)
+    const leverageMap: Record<string, number> = {
+      "XAU": 20, "XAG": 20, "US100": 20, "BTC": 5
+    };
+    const leverage = leverageMap[symbol] || 20;
+    
     try {
       // Get proposed SL/TP from backend (calculated from live ATR data)
       const proposalResponse = await fetch(
@@ -280,10 +350,16 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
         takeProfit,
         suggestedSize,
         selectedSize: suggestedSize,
+        leverage,
         displayTakeProfit: takeProfit.toFixed(2),
         displayStopLoss: stopLoss.toFixed(2),
         displaySelectedSize: suggestedSize.toFixed(4),
         loading: false,
+        signalComponents: signal.components?.map((c: any) => ({
+          name: c.name,
+          description: c.description,
+          value: c.value
+        })),
       });
     } catch (error) {
       console.warn("Failed to get proposal, using fallback:", error);
@@ -308,10 +384,16 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
         takeProfit,
         suggestedSize,
         selectedSize: suggestedSize,
+        leverage,
         displayTakeProfit: takeProfit.toFixed(2),
         displayStopLoss: stopLoss.toFixed(2),
         displaySelectedSize: suggestedSize.toFixed(4),
         loading: false,
+        signalComponents: signal.components?.map((c: any) => ({
+          name: c.name,
+          description: c.description,
+          value: c.value
+        })),
       });
     } finally {
       setTradingSymbol(null);
@@ -368,10 +450,12 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
       takeProfit: 0,
       suggestedSize: 0.01,
       selectedSize: 0.01,
+      leverage: 20,
       loading: false,
       displayTakeProfit: "",
       displayStopLoss: "",
       displaySelectedSize: "",
+      signalComponents: [],
     });
   };
 
@@ -460,8 +544,13 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                   <div className="flex items-center gap-2">
                     <MiniSparkline data={signal.trend || []} />
                     <span
-                      className="font-bold text-xs"
-                      style={{ color: scoreColor }}
+                      className={`font-bold text-xs transition-all duration-300 ${flashingSignals.has(signal.symbol) ? 'scale-125 brightness-150' : ''}`}
+                      style={{ 
+                        color: scoreColor,
+                        backgroundColor: flashingSignals.has(signal.symbol) ? `${scoreColor}30` : 'transparent',
+                        padding: flashingSignals.has(signal.symbol) ? '2px 6px' : '0',
+                        borderRadius: '4px',
+                      }}
                     >
                       {signal.score >= 0 ? "+" : ""}
                       {signal.score.toFixed(2)}
@@ -1066,21 +1155,22 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
               </div>
             </div>
 
-            {/* Risk/Reward display */}
+            {/* Risk/Reward display - now with lot size AND leverage */}
             <div
               className="flex justify-between text-xs mb-4 px-1"
               style={{ color: "#64748b" }}
             >
               <span>
                 Risk: $
-                {Math.abs(tradeModal.entryPrice - tradeModal.stopLoss).toFixed(
+                {(Math.abs(tradeModal.entryPrice - tradeModal.stopLoss) * tradeModal.selectedSize * (tradeModal.leverage || 1)).toFixed(
                   2,
                 )}
               </span>
               <span>
                 Reward: $
-                {Math.abs(
+                {(Math.abs(
                   tradeModal.takeProfit - tradeModal.entryPrice,
+                ) * tradeModal.selectedSize * (tradeModal.leverage || 1)
                 ).toFixed(2)}
               </span>
               <span
@@ -1100,6 +1190,55 @@ export const SignalsGrid: React.FC<SignalsGridProps> = ({
                 ).toFixed(1)}
               </span>
             </div>
+
+            {/* Wskaźniki techniczne z tooltipami */}
+            {tradeModal.signalComponents && tradeModal.signalComponents.length > 0 && (
+              <div className="mb-4 p-3 rounded" style={{ backgroundColor: "#0b0f1a", border: "1px solid #1a1f35" }}>
+                <div className="text-xs font-medium mb-2" style={{ color: "#64748b" }}>
+                  Wskaźniki (najedź dla szczegółów)
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {tradeModal.signalComponents.map((comp, idx) => {
+                    const tooltip = getIndicatorTooltip(comp.name);
+                    return (
+                      <div key={idx} className="relative group">
+                        <span
+                          className="text-[10px] px-2 py-1 rounded cursor-help"
+                          style={{ 
+                            backgroundColor: "#1a1f35", 
+                            color: "#94a3b8",
+                            border: "1px solid #2d3748"
+                          }}
+                        >
+                          {comp.name.replace(/\s*\(\d+\)/, '')}
+                        </span>
+                        {/* Tooltip */}
+                        {tooltip && (
+                          <div 
+                            className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 rounded shadow-lg text-xs hidden group-hover:block"
+                            style={{ 
+                              backgroundColor: "#1e293b", 
+                              color: "#e2e8f0",
+                              border: "1px solid #475569"
+                            }}
+                          >
+                            <div className="font-medium mb-1" style={{ color: "#38bdf8" }}>
+                              {comp.name}
+                            </div>
+                            <div className="mb-2" style={{ color: "#cbd5e1" }}>
+                              {tooltip.desc}
+                            </div>
+                            <div style={{ color: "#22c55e" }}>
+                              💡 {tooltip.combine}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div className="flex gap-3">

@@ -25,7 +25,7 @@ export const Dashboard: React.FC = () => {
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentTime, setCurrentTime] = useState<string>(
-    new Date().toLocaleTimeString("en-GB"),
+    new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/Warsaw" }),
   );
   const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
     return localStorage.getItem("cfd_selectedSymbol") || "XAU";
@@ -42,7 +42,7 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     const timeInterval = setInterval(() => {
-      setCurrentTime(new Date().toLocaleTimeString("en-GB"));
+      setCurrentTime(new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/Warsaw" }));
     }, 1000);
 
     const fetchData = async () => {

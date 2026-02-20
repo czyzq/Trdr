@@ -38,6 +38,11 @@ from database import (
     async_count_candles, async_get_candle_date_range
 )
 from broker_factory import create_broker, create_data_provider
+from settings import (
+    get_all_settings, get_current_broker_settings,
+    PRICE_CACHE_REFRESH_SEC, SIGNAL_SCAN_INTERVAL_SEC,
+    NEWS_REFRESH_INTERVAL_SEC, ACCOUNT_REFRESH_SEC, LOGS_REFRESH_SEC
+)
 
 # =============================================================================
 # TIMING PROFILER - Performance monitoring
@@ -148,7 +153,9 @@ async def lifespan(app: FastAPI):
 
     # Start autonomous trading loop
     _trading_task = asyncio.create_task(auto_trade_loop())
+    _price_cache_task = asyncio.create_task(price_cache_loop())
     log_event("[AUTO-TRADE] Background task launched (5 min interval)", "success")
+    log_event("[PRICE-CACHE] Live price cache started (3 sec refresh)", "success")
 
     yield  # App runs here
 
@@ -157,6 +164,12 @@ async def lifespan(app: FastAPI):
         _trading_task.cancel()
         try:
             await _trading_task
+        except asyncio.CancelledError:
+            pass
+    if _price_cache_task:
+        _price_cache_task.cancel()
+        try:
+            await _price_cache_task
         except asyncio.CancelledError:
             pass
     await async_save_signal_cache_db(signal_history_cache)
@@ -290,6 +303,53 @@ INSTRUMENTS = {
 }
 
 
+# Live price cache - updated every few seconds in background
+# Key: symbol, Value: {"price": float, "timestamp": float}
+_live_price_cache: Dict[str, Dict[str, Any]] = {}
+_live_price_cache_last_update: float = 0
+# PRICE_CACHE_REFRESH_SEC imported from settings.py
+
+
+async def _update_live_price_cache():
+    """Background task: keep live prices fresh for all instruments."""
+    global _live_price_cache, _live_price_cache_last_update
+    
+    symbols = list(INSTRUMENTS.keys())
+    
+    for symbol in symbols:
+        try:
+            # Get latest candle for current price
+            candles = await data_provider.get_candles(symbol, "60", 1)
+            if candles and len(candles) > 0:
+                _live_price_cache[symbol] = {
+                    "price": candles[-1]["close"],
+                    "timestamp": time.time(),
+                    "candle": candles[-1]
+                }
+        except Exception as e:
+            # Fallback to quote
+            try:
+                quote = await data_provider.get_quote(symbol)
+                if quote:
+                    _live_price_cache[symbol] = {
+                        "price": quote.get("price", 0),
+                        "timestamp": time.time(),
+                        "quote": quote
+                    }
+            except:
+                pass
+    
+    _live_price_cache_last_update = time.time()
+
+
+def get_live_price(symbol: str) -> Optional[float]:
+    """Get cached live price for a symbol."""
+    cached = _live_price_cache.get(symbol)
+    if cached:
+        return cached.get("price")
+    return None
+
+
 def is_market_open(symbol: str) -> bool:
     """
     Check if market is currently open for trading.
@@ -352,7 +412,7 @@ def log_event(message: str, log_type: str = "info"):
     global _log_counter
     event_log.append({
         "id": str(len(event_log)),
-        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
         "message": message,
         "type": log_type
     })
@@ -930,6 +990,23 @@ async def generate_signals() -> List[Signal]:
 # AUTO-TRADING ENGINE
 # =====================
 
+# Live price cache task
+_price_cache_task = None
+
+
+async def price_cache_loop():
+    """Background loop: keep live prices fresh for all instruments every few seconds."""
+    global _price_cache_task
+    log_event("[PRICE-CACHE] Live price cache background task started", "info")
+    
+    while True:
+        try:
+            await _update_live_price_cache()
+        except Exception as e:
+            log_event(f"[PRICE-CACHE] Error updating prices: {e}", "warning")
+        await asyncio.sleep(PRICE_CACHE_REFRESH_SEC)
+
+
 AUTO_TRADE_INTERVAL_SEC = 300  # Scan every 5 minutes
 AUTO_TRADE_ENABLED = True     # Master switch - can be toggled via API (disabled until async-signals ready)
 _trading_task = None           # Reference to the background task
@@ -1232,7 +1309,13 @@ async def set_account_mode(mode: str):
 
 @app.get("/api/settings")
 async def get_settings():
-    return db.list_settings()
+    """Get all settings including broker-specific refresh rates."""
+    db_settings = db.list_settings()
+    broker_settings = get_all_settings()
+    return {
+        "db": db_settings,
+        "broker": broker_settings,
+    }
 
 @app.post("/api/settings")
 async def save_setting(key: str, value: float, note: str = ""):
@@ -1609,7 +1692,10 @@ async def close_trade(position_id: str):
 @app.get("/api/trades/open")
 async def get_open_trades():
     """Get all open positions with live P&L - always from DB for consistency"""
-    await sync_account_from_closed_trades()
+    # Only sync occasionally (not every request) to reduce DB load
+    # The background auto-trade loop handles regular syncs
+    # Update prices in real-time for accurate P&L
+    await broker._async_update_prices()
     # Load from DB to ensure we have data after restart
     db_positions = await async_load_open_positions()
     # Merge with in-memory (in-memory may have newer updates)

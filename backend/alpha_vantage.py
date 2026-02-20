@@ -24,7 +24,7 @@ class AsyncAlphaVantageClient:
         self.client = httpx.AsyncClient(timeout=10)
         self.price_cache = {}
         self.cache_time = {}
-        self.cache_ttl = 60  # Cache for 60 seconds
+        self.cache_ttl = 1  # Cache for 1 second (was 60s)
         self.last_api_call = 0
         self.min_interval = 0.05  # 50ms between calls
         self._lock = asyncio.Lock()

@@ -65,7 +65,7 @@ class RealisticPriceFeeder:
             "low": round(low, 2),
             "open": round(open_price, 2),
             "volume": volumes.get(symbol, 100000),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
     
     def get_candles(self, symbol: str, resolution: str = "60", count: int = 100):
@@ -89,31 +89,30 @@ class RealisticPriceFeeder:
         base_price = BASE_PRICES[symbol]
         candles = []
         
-        # Get current time in Warsaw timezone (UTC+1)
-        warsaw_now = datetime.now(WARSAW_OFFSET)
+        # Get current time in UTC (store as UTC, frontend will convert to Warsaw)
+        utc_now = datetime.now(timezone.utc)
         
         # Calculate time interval based on resolution using timedelta
         if resolution == 'D':
             interval = timedelta(days=1)
-            # For daily, start from today at midnight Warsaw time
-            current_time = warsaw_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            # For daily, start from today at midnight UTC
+            current_time = utc_now.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
             # For intraday, use proper minute intervals
             interval_minutes = int(resolution)
             interval = timedelta(minutes=interval_minutes)
             
-            # Round to nearest interval for consistent timestamps
-            current_minute = warsaw_now.minute
-            rounded_minute = (current_minute // interval_minutes) * interval_minutes
-            current_time = warsaw_now.replace(minute=rounded_minute, second=0, microsecond=0)
+            # Round down to current interval boundary for candle timestamps
+            current_minute = (utc_now.minute // interval_minutes) * interval_minutes
+            current_time = utc_now.replace(minute=current_minute, second=0, microsecond=0)
         
         # Generate consistent price data based on current time seed
-        # Use the time hash to ensure same time = same prices
-        time_seed = int(current_time.timestamp())
+        # Include seconds in seed for more dynamic live prices
+        time_seed = int(utc_now.timestamp() * 1000)  # milliseconds for more variation
         random.seed(time_seed)
 
-        # Get current price with some variation based on time
-        current_price = base_price * (1 + random.uniform(-0.002, 0.002))
+        # Get current price with some variation based on time (0.5% range for visible P&L changes)
+        current_price = base_price * (1 + random.uniform(-0.005, 0.005))
 
         # Generate candles in proper chronological order (oldest to newest) for left-to-right chart display
         # Use rounded current_time so candle timestamps align to interval boundaries
@@ -151,7 +150,8 @@ class RealisticPriceFeeder:
             low = min(low, open_price, close)
             
             candles.append({
-                "timestamp": candle_time.isoformat(),
+                # Store as UTC with Z suffix for clear timezone
+                "timestamp": candle_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "time": self._format_time_for_resolution(candle_time, resolution),
                 "open": round(open_price, 2),
                 "high": round(high, 2),
@@ -178,28 +178,21 @@ class RealisticPriceFeeder:
         return candles
     
     def _format_time_for_resolution(self, dt: datetime, resolution: str) -> str:
-        """Format time based on resolution for proper display in Warsaw timezone"""
-        # Ensure dt is timezone-aware in Warsaw offset
+        """Format time based on resolution - always in UTC for frontend to convert"""
+        # Ensure dt is UTC (no timezone conversion)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=WARSAW_OFFSET)
-        elif dt.tzinfo != WARSAW_OFFSET:
-            dt = dt.astimezone(WARSAW_OFFSET)
+            dt = dt.replace(tzinfo=timezone.utc)
         
-        # Generate actual timestamps based on resolution
+        # Always format in UTC (frontend will convert to local Warsaw time)
         if resolution == '1':
-            # For 1min: show actual time like 09:30, 09:31, etc.
             return dt.strftime('%H:%M')
         elif resolution == '5':
-            # For 5min: show times like 09:30, 09:35, 09:40, etc.
             return dt.strftime('%H:%M')
         elif resolution == '15':
-            # For 15min: show times like 09:30, 09:45, 10:00, etc.
             return dt.strftime('%H:%M')
         elif resolution == '30':
-            # For 30min: show times like 09:30, 10:00, 10:30, etc.
             return dt.strftime('%H:%M')
         elif resolution == '60':
-            # For 1hour: show times like 09:00, 10:00, 11:00, etc.
             return dt.strftime('%H:%M')
         elif resolution == 'D':
             # For daily: show dates like 02/06, 02/07, etc.
