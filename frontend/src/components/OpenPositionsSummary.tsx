@@ -32,6 +32,7 @@ const SYMBOL_CONFIG: Record<string, SymbolConfig> = {
 };
 
 interface OpenPositionsSummaryProps {
+  onClearSelection?: () => void;
   onClosePosition?: (id: string) => void;
   onSelectPosition?: (position: Position | null) => void;
   selectedPositionId?: string | null;
@@ -82,6 +83,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
   onClosePosition,
   onSelectPosition,
   selectedPositionId,
+  onClearSelection,
   lastRefresh: externalLastRefresh,
 }) => {
   const [positions, setPositions] = useState<Position[]>([]);
@@ -149,9 +151,20 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
 
   useEffect(() => {
     fetchPositions();
-    const interval = setInterval(fetchPositions, 1000); // Refresh every 1 second for real-time P&L
+    const interval = setInterval(fetchPositions, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Escape key to clear selection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && onClearSelection) {
+        onClearSelection();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClearSelection]);
 
   const handleClose = async (id: string) => {
     setLoading(true);
@@ -430,8 +443,15 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
           const isEditing = editingPosition === pos.id;
 
           return (
-            <div key={pos.id} className="px-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
-              {/* Main Row */}
+            <div 
+              key={pos.id} 
+              className="px-3 py-2 cursor-pointer hover:bg-white/5"
+              style={{ borderBottom: "1px solid var(--border)" }}
+              onClick={() => {
+                startEdit(pos);
+                onSelectPosition?.(pos);
+              }}
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {/* Symbol & Direction */}

@@ -39,6 +39,8 @@ interface CandlestickChartProps {
   showRSI?: boolean;
   resolution?: string;
   trades?: Trade[];
+  selectedPosition?: any;
+  selectedPosition?: any;
 }
 
 // ── Client-side indicator calculations ──
@@ -231,6 +233,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   showRSI = true,
   resolution = "60",
   trades = [],
+  selectedPosition = null,
+  selectedPosition = null,
 }) => {
   const [hoveredCandle, setHoveredCandle] = useState<number | null>(null);
   const [hoveredTrade, setHoveredTrade] = useState<Trade | null>(null);
@@ -1526,6 +1530,25 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 }
             </g>
           )}
+
+        {/* TP/SL Lines - only when selectedPosition is provided */}
+        {selectedPosition && (
+          <g>
+            <text x={chartWidth-25} y={20} fill="#666" fontSize={14} style={{cursor:"pointer"}} onClick={() => window.dispatchEvent(new CustomEvent("clearPosition"))}>✕</text>
+          <g>
+                        {/* TP Line - clickable */}
+            <line x1="0" x2={chartWidth} y1={priceToY(selectedPosition.take_profit)} y2={priceToY(selectedPosition.take_profit)} stroke="#22c55e" strokeWidth="1" strokeDasharray="5,3" />
+            <text x="5" y={priceToY(selectedPosition.take_profit) - 5} fill="#22c55e" fontSize="10" fontWeight="bold" style={{pointerEvents:"none"}}>TP: {selectedPosition.take_profit.toFixed(0)} (+)</text>
+            
+            {/* SL Line - clickable */}
+            <line x1="0" x2={chartWidth} y1={priceToY(selectedPosition.stop_loss)} y2={priceToY(selectedPosition.stop_loss)} stroke="#ef4444" strokeWidth="1" strokeDasharray="5,3" />
+            <text x="5" y={priceToY(selectedPosition.stop_loss) - 5} fill="#ef4444" fontSize="10" fontWeight="bold" style={{pointerEvents:"none"}}>SL: {selectedPosition.stop_loss.toFixed(0)} (-)</text>
+            
+            {/* Entry Line */}
+            <line x1="0" x2={chartWidth} y1={priceToY(selectedPosition.entry_price)} y2={priceToY(selectedPosition.entry_price)} stroke="#fbbf24" strokeWidth="1" strokeDasharray="3,2" opacity="0.6" />
+          </g>
+        )}
+
         </svg>
 
         {/* Trade Tooltip */}

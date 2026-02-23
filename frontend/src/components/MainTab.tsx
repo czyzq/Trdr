@@ -115,6 +115,7 @@ export const MainTab: React.FC<MainTabProps> = ({
 
   // Strategy state
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
+  const [selectedPos, setSelectedPos] = useState<any>(null);
   const [symbolStrategies, setSymbolStrategies] = useState<
     Record<string, string>
   >({});
@@ -415,6 +416,7 @@ export const MainTab: React.FC<MainTabProps> = ({
               showRSI={true}
               resolution={selectedTimeframe}
               trades={trades}
+              selectedPosition={selectedPos}
             />
           ) : (
             <div
@@ -435,7 +437,8 @@ export const MainTab: React.FC<MainTabProps> = ({
       </div>
 
       {/* Open Positions Section - always visible but compact */}
-      <OpenPositionsSummary lastRefresh={lastRefresh.positions} />
+      <OpenPositionsSummary
+        onSelectPosition={(pos) => { setSelectedPos(pos); setSelectedSymbol(pos.symbol); }} lastRefresh={lastRefresh.positions} />
 
       {/* Signals Section - collapsible */}
       <div

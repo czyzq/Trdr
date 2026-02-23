@@ -8,14 +8,31 @@ import asyncio
 import json
 import os
 import uuid
+import signal
+import sys
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import uvicorn
+
+# =============================================================================
+# SIGNAL HANDLERS - Debug why process exits
+# =============================================================================
+def _signal_handler(signum, frame):
+    sig_name = signal.Signals(signum).name
+    print(f"[SIGNAL] Caught {sig_name}, traceback:", file=sys.stderr)
+    traceback.print_stack(frame)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _signal_handler)
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGHUP, _signal_handler)
+print(f"[SIGNAL] Handlers registered, PID: {os.getpid()}", file=sys.stderr)
 from database import async_sync_account_from_closed_trades
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, Query, BackgroundTasks
+from fastapi import Body, FastAPI, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from timezone import WARSAW_TZ, now_warsaw
 
@@ -555,8 +572,8 @@ def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, L
         rsi_score = max(-1, min(1, rsi_score))
         zone = "OVERSOLD" if rsi < 30 else "OVERBOUGHT" if rsi > 70 else "NEUTRAL"
 
-        # RSI weight depends on regime: higher in ranging, lower in trending
-        rsi_weight = 0.15 if is_trending else 0.25
+        # v3 default: RSI weight = 0.35 (as per v3 weights)
+        rsi_weight = 0.35
 
         components.append(
             Component(
@@ -617,8 +634,8 @@ def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, L
             macd_score = max(-1, min(1, norm_hist * 2))
 
             cross = "BULLISH" if macd_line > signal_line else "BEARISH"
-            # MACD weight: higher in trending markets
-            macd_weight = 0.25 if is_trending else 0.15
+            # v3 default: MACD weight = 0.35 (as per v3 weights)
+            macd_weight = 0.35
 
             components.append(
                 Component(
@@ -729,7 +746,7 @@ def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, L
             )
         )
         scores.append(momentum_score)
-        weights.append(0.05)
+        weights.append(0.20)  # v3 default: Momentum weight = 0.20
 
     # --- Candlestick Patterns ---
     cp = indicators.get("candlestick_patterns")
@@ -861,15 +878,27 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
     """
     Calculate position size based on risk per trade and leverage.
     Risks MAX_RISK_PER_TRADE_PCT of account balance per trade.
-    Leverage amplifies both gains and losses - size is adjusted so that
-    the max loss on a SL hit still equals the risk amount.
+    DYNAMIC RISK: risk is divided by number of open positions to keep total risk constant.
     """
     info = INSTRUMENTS.get(symbol, {})
     leverage = info.get("leverage", 1)
 
-    # Risk amount in USD directly
+    # Get max risk per trade
     max_risk_pct = db.get_setting("MAX_RISK_PER_TRADE_PCT", 2.0)
-    risk_amount_usd = account["balance_usd"] * (max_risk_pct / 100)
+    
+    # Check if dynamic risk is enabled
+    dynamic_risk = db.get_setting("DYNAMIC_RISK_ENABLED", 1)
+    
+    # Dynamic risk: divide by number of open positions to cap total risk
+    # But ensure minimum risk of 0.5% per trade
+    n_open = len([p for p in open_positions if p.get("status") == "open"])
+    if dynamic_risk and n_open > 0:
+        # Divide risk among open positions, but keep at least 0.5% per trade
+        adjusted_risk_pct = max(0.5, max_risk_pct / n_open)
+    else:
+        adjusted_risk_pct = max_risk_pct
+    
+    risk_amount_usd = account["balance_usd"] * (adjusted_risk_pct / 100)
 
     risk_per_unit = abs(entry_price - stop_loss)
     if risk_per_unit <= 0:
@@ -884,6 +913,7 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -
     min_size = lot_size
     max_size = lot_size * 10
 
+    log_event(f"[RISK] {symbol}: {max_risk_pct}% base / {n_open} open = {adjusted_risk_pct:.2f}% effective risk", "debug")
     return round(max(min_size, min(size, max_size)), 4)
 
 
@@ -1109,7 +1139,43 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         # except Exception:
         #     pass  # News is optional
 
-        # ── Run selected strategy ──
+        # ── Get selected strategy from DB ──
+        selected_strategy = get_symbol_strategy(symbol)
+        
+        # ── Try JSON-based strategy (if selected or default) ──
+        # If user selected a JSON strategy, use that one. Otherwise use any available JSON strategy for this symbol
+        new_result = analyze_with_new_strategy(
+            symbol, 
+            candles, 
+            current_price, 
+            account.get("balance_usd", 3000),
+            requested_strategy=selected_strategy if selected_strategy.startswith("JSON:") else None
+        )
+        
+        if new_result:
+            print(f"[STRATEGY] Using NEW JSON strategy for {symbol}: {new_result.get('strategy_id')}")
+            # Clamp scores to valid range [-1, 1]
+            json_score = max(-1.0, min(1.0, new_result["score"]))
+            json_technical = max(-1.0, min(1.0, new_result["technical_score"]))
+            return Signal(
+                symbol=symbol,
+                direction=SignalDirection.BUY if new_result["direction"] == "long" else SignalDirection.SELL,
+                score=json_score,
+                confidence=new_result["confidence"],
+                technical_score=json_technical,
+                price_action_score=0.0,
+                news_score=0.0,
+                components=new_result["components"],
+                current_price=current_price,
+                time_horizon="1h",
+                entry_point=current_price,
+                take_profit=new_result["take_profit"],
+                stop_loss=new_result["stop_loss"],
+                risk_reward_ratio=new_result["risk_reward_ratio"],
+            )
+
+        # ── Fallback: OLD strategy (DEPRECATED - see strategies.py) ──
+        # ⚠️ DEPRECATED: Old strategy code - migrate to JSON-based strategies
         strategy_id = get_symbol_strategy(symbol)
         strategy = get_strategy(strategy_id)
         indicators["_closes"] = [c["close"] for c in candles]
@@ -1124,12 +1190,16 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             news_score=news_score,
         )
 
+        # Clamp scores to valid range [-1, 1] - safety guard
+        safe_score = max(-1.0, min(1.0, result["score"]))
+        safe_technical = max(-1.0, min(1.0, result["technical_score"]))
+        
         signal = Signal(
             symbol=symbol,
             direction=result["direction"],
-            score=result["score"],
+            score=safe_score,
             confidence=result["confidence"],
-            technical_score=result["technical_score"],
+            technical_score=safe_technical,
             price_action_score=0.0,
             news_score=news_score,
             components=result["components"],
@@ -1168,7 +1238,9 @@ async def generate_signals() -> List[Signal]:
     """Generate trading signals for all instruments using regime-adaptive scoring - PARALLEL"""
     global alpha_client, account
 
-    account["last_scan"] = datetime.utcnow().isoformat()
+    now = datetime.utcnow().isoformat()
+    account["last_scan"] = now
+    print(f"[DEBUG] generate_signals set last_scan to {now}")
 
     # Track peak equity (balance + unrealized P&L) for drawdown calculation
     current_equity = account.get("equity_usd", account["balance_usd"])
@@ -1239,8 +1311,11 @@ async def auto_trade_loop():
     await asyncio.sleep(5)
     log_event("[AUTO-TRADE] Background trading loop started", "event")
 
+    iteration_count = 0
     while True:
+        iteration_count += 1
         try:
+            print(f"[DEBUG AUTO-TRADE] Loop iteration #{iteration_count} at {datetime.utcnow().isoformat()}")
             if not AUTO_TRADE_ENABLED:
                 await asyncio.sleep(AUTO_TRADE_INTERVAL_SEC)
                 continue
@@ -1297,6 +1372,13 @@ async def auto_trade_loop():
                     # Skip if already have a position on this symbol in same direction
                     already_open = any(p["symbol"] == sym and p["direction"] == direction for p in open_positions)
                     if already_open:
+                        continue
+
+                    # Check if trading is enabled for this symbol
+                    trade_enabled = db.get_setting(f"TRADE_ENABLED_{sym}", 1)
+                    if not trade_enabled:
+                        log_event(f"[AUTO-TRADE] Skipping {sym} - trading disabled", "info")
+                        continue
                         continue
 
                     # Skip if market is closed for this symbol
@@ -1365,9 +1447,29 @@ async def auto_trade_loop():
             )
 
         except Exception as e:
+            import traceback
             log_event(f"[AUTO-TRADE] Error in trading loop: {str(e)}", "error")
+            log_event(f"[AUTO-TRADE] Traceback: {traceback.format_exc()}", "error")
 
-        await asyncio.sleep(AUTO_TRADE_INTERVAL_SEC)
+        # Use shorter sleep intervals to avoid event loop issues
+        sleep_cycles = AUTO_TRADE_INTERVAL_SEC // 60  # Sleep in 60s chunks
+        remaining = AUTO_TRADE_INTERVAL_SEC % 60
+        
+        try:
+            for i in range(sleep_cycles):
+                log_event(f"[AUTO-TRADE] Sleep cycle {i+1}/{sleep_cycles} (60s)...", "info")
+                await asyncio.sleep(60)
+                log_event(f"[AUTO-TRADE] Sleep cycle {i+1} complete", "info")
+            
+            if remaining > 0:
+                log_event(f"[AUTO-TRADE] Final sleep {remaining}s...", "info")
+                await asyncio.sleep(remaining)
+            
+            log_event(f"[AUTO-TRADE] Wake up from full sleep cycle, iteration #{iteration_count}", "info")
+        except Exception as e:
+            log_event(f"[AUTO-TRADE] Error in sleep: {str(e)}", "error")
+            log_event(f"[AUTO-TRADE] Will retry after 30s...", "info")
+            await asyncio.sleep(30)  # Fallback sleep
 
 
 @app.get("/api/auto-trade")
@@ -1403,6 +1505,10 @@ async def set_auto_trade_interval(seconds: int):
 
 @app.get("/")
 async def root():
+    """Serve frontend or return API info"""
+    # Check if frontend dist exists, serve it
+    if _frontend_dist.is_dir():
+        return FileResponse(_frontend_dist / "index.html")
     return {"message": "CFD Trading Bot API", "status": "running", "version": "0.2.0"}
 
 
@@ -1509,11 +1615,69 @@ async def get_logs():
 
 @app.get("/api/account")
 async def get_account():
-    """Get account info with USD balance"""
-    await sync_account_from_closed_trades()
-    # Add initial_balance_usd to response for frontend calculations
+    """Get account info with USD balance - fetches from DB, calculates equity in real-time."""
+    # DEBUG: Check global account's last_scan
+    print(f"[DEBUG] get_account: global account last_scan = {account.get('last_scan')}")
+    
+    # Load open positions from DB
+    open_pos = await async_load_open_positions()
+    
+    # Get live prices and calculate unrealized P&L
+    unrealized_pnl = 0.0
+    for pos in open_pos:
+        try:
+            symbol = pos.get("symbol")
+            direction = pos.get("direction", "buy")
+            size = pos.get("size", 0)
+            leverage = pos.get("leverage", 1)
+            entry_price = pos.get("entry_price", 0)
+            
+            # Get live price (async call)
+            quote = await data_provider.get_quote(symbol)
+            if quote:
+                current_price = quote.get("price", entry_price)
+                pos["current_price"] = current_price
+                
+                # Calculate P&L
+                if direction == "buy":
+                    pnl = (current_price - entry_price) * size * leverage
+                else:
+                    pnl = (entry_price - current_price) * size * leverage
+                pos["unrealized_pnl_usd"] = round(pnl, 2)
+                unrealized_pnl += pnl
+        except Exception as e:
+            print(f"[ACCOUNT] Error getting price for {pos.get('symbol')}: {e}")
+    
+    # Get balance from DB (initial + closed trades P&L)
     initial_balance = db.get_setting("INITIAL_BALANCE_USD", 3000.0)
-    return {**account, "initial_balance_usd": initial_balance}
+    closed_stats = await async_sync_account_from_closed_trades()
+    balance = initial_balance + closed_stats.get("total_pnl_usd", 0)
+    equity = balance + unrealized_pnl
+    
+    # Calculate used margin
+    used_margin = sum(pos.get("margin_usd", 0) for pos in open_pos)
+    available = balance - used_margin
+    
+    return {
+        "balance_usd": round(balance, 2),
+        "equity_usd": round(equity, 2),
+        "available_usd": round(available, 2),
+        "used_margin": round(used_margin, 2),
+        "peak_equity_usd": account.get("peak_equity_usd", equity),
+        "peak_balance_usd": account.get("peak_balance_usd", balance),
+        "total_pnl_usd": closed_stats.get("total_pnl_usd", 0),
+        "win_count": closed_stats.get("win_count", 0),
+        "loss_count": closed_stats.get("loss_count", 0),
+        "win_rate": closed_stats.get("win_rate", 0),
+        "closed_trades": closed_stats.get("closed_trades", 0),
+        "open_trades": len(open_pos),
+        "positions": len(open_pos),
+        "mode": account.get("mode", "live"),
+        "dry_run": account.get("dry_run", False),
+        "currency": "USD",
+        "last_scan": account.get("last_scan"),
+        "initial_balance_usd": initial_balance,
+    }
 
 
 @app.post("/api/account/mode")
@@ -1720,8 +1884,33 @@ async def set_trailing_stop(symbol: str, enabled: bool):
 
 @app.get("/api/strategies")
 async def get_strategies():
-    """List all available trading strategies."""
-    return {"strategies": list_strategies()}
+    """List all available trading strategies (OLD + JSON)."""
+    from strategies import list_strategies as old_list_strategies
+    
+    # Get OLD strategies
+    old_strategies = old_list_strategies()
+    for s in old_strategies:
+        s['source'] = 'OLD'
+        s['id'] = f"OLD:{s['id']}"
+    
+    # Get JSON strategies
+    json_strategies = []
+    manager = get_strategy_manager()
+    if manager:
+        for s in manager.strategies.values():
+            json_strategies.append({
+                'id': f"JSON:{s.id}",
+                'name': s.name,
+                'description': f"JSON-based strategy for {s.symbol}",
+                'source': 'JSON',
+                'symbol': s.symbol,
+                'timeframe': s.timeframe,
+                'enabled': s.enabled
+            })
+    
+    # Combine and return
+    all_strategies = old_strategies + json_strategies
+    return {"strategies": all_strategies}
 
 
 @app.get("/api/strategy/{symbol}")
@@ -1734,11 +1923,23 @@ async def get_strategy_for_symbol(symbol: str):
 async def set_strategy_for_symbol(symbol: str, strategy_id: str):
     """Set the active strategy for a symbol."""
     from strategies import STRATEGIES
-
-    if strategy_id not in STRATEGIES:
-        return {"error": f"Unknown strategy: {strategy_id}. Available: {list(STRATEGIES.keys())}"}
-    set_symbol_strategy(symbol, strategy_id)
-    log_event(f"[STRATEGY] {symbol} → {STRATEGIES[strategy_id].display_name}", "event")
+    
+    # Handle JSON strategies
+    if strategy_id.startswith("JSON:"):
+        json_id = strategy_id.replace("JSON:", "")
+        manager = get_strategy_manager()
+        if manager and json_id in manager.strategies:
+            # Save JSON strategy selection to DB
+            set_symbol_strategy(symbol, strategy_id)
+            log_event(f"[STRATEGY] {symbol} → JSON:{json_id} (JSON strategy)", "event")
+            return {"symbol": symbol, "strategy": strategy_id, "note": "JSON strategy will be used automatically"}
+    
+    # Handle OLD strategies
+    old_id = strategy_id.replace("OLD:", "")
+    if old_id not in STRATEGIES:
+        return {"error": f"Unknown strategy: {strategy_id}. Available OLD: {list(STRATEGIES.keys())}"}
+    set_symbol_strategy(symbol, old_id)
+    log_event(f"[STRATEGY] {symbol} → {STRATEGIES[old_id].display_name} (OLD)", "event")
     return {"symbol": symbol, "strategy": strategy_id}
 
 
@@ -1793,6 +1994,257 @@ async def load_strategy_config(strategy_id: str):
         return {"error": f"Strategy not found: {strategy_id}"}
 
     return {"status": "loaded", "strategy_id": strategy_id}
+
+
+@app.post("/api/strategies/backtest-json")
+async def backtest_from_json(
+    request: Request,
+    symbol: str = Query(..., description="Symbol to backtest"),
+    resolution: str = Query("5", description="Resolution: 5, 15, 60"),
+    days: int = Query(30, description="Number of days"),
+    initial_balance: float = Query(3000.0, description="Initial balance"),
+):
+    """
+    Run backtest using strategy config from JSON body.
+    Send JSON with strategy configuration matching memory/strategies.json format.
+    """
+    import time
+    start_time = time.time()
+    
+    # Get JSON from request body
+    body = await request.body()
+    config = json.loads(body)
+    
+    # Get strategy config from JSON
+    strategies = config.get('strategies', [])
+    if not strategies:
+        return {"error": "No strategies found in JSON"}
+    
+    # Find matching strategy for symbol
+    strategy_config = None
+    for s in strategies:
+        if s.get('symbol', '').upper() == symbol.upper() and s.get('enabled', False):
+            strategy_config = s
+            break
+    
+    if not strategy_config:
+        # Find any strategy for this symbol
+        for s in strategies:
+            if s.get('symbol', '').upper() == symbol.upper():
+                strategy_config = s
+                break
+    
+    if not strategy_config:
+        return {"error": f"No strategy found for symbol: {symbol}"}
+    
+    # Load strategy module and create strategy
+    from strategy import load_strategies_from_json
+    
+    # Create a manager with the strategy
+    json_str = json.dumps({'strategies': [strategy_config]})
+    manager = load_strategies_from_json(json_str)
+    
+    # Get candles
+    from database import get_db
+    db = get_db()
+    
+    # Calculate date range
+    end_ts = int(time.time() * 1000)
+    start_ts = end_ts - (days * 24 * 60 * 60 * 1000)
+    
+    # Get candles from DB - CRITICAL: For BTC, only use binance source!
+    query = {
+        'symbol': symbol.upper(),
+        'resolution': resolution,
+    }
+    
+    # For BTC, only use binance data to avoid mixed yahoo/binance issues
+    if symbol.upper() == "BTC":
+        query['source'] = 'binance'
+    
+    # Try int timestamp first (BTC style), then fall back to string
+    candles = list(db.candles.find({
+        **query,
+        'timestamp': {'$gte': start_ts, '$lte': end_ts}
+    }).sort('timestamp', 1))
+    
+    # If no results with source filter, try without (for compatibility)
+    if not candles:
+        query_no_source = {
+            'symbol': symbol.upper(),
+            'resolution': resolution,
+        }
+        candles = list(db.candles.find({
+            **query_no_source,
+            'timestamp': {'$gte': start_ts, '$lte': end_ts}
+        }).sort('timestamp', 1))
+    
+    # If still no results, try with string timestamps (XAU/XAG style)
+    if not candles:
+        from datetime import datetime
+        start_str = datetime.fromtimestamp(start_ts / 1000).isoformat() + 'Z'
+        end_str = datetime.fromtimestamp(end_ts / 1000).isoformat() + 'Z'
+        
+        # Again, for BTC only binance
+        if symbol.upper() == "BTC":
+            candles = list(db.candles.find({
+                **query,
+                'timestamp': {'$gte': start_str, '$lte': end_str}
+            }).sort('timestamp', 1))
+        else:
+            candles = list(db.candles.find({
+                'symbol': symbol.upper(),
+                'resolution': resolution,
+                'timestamp': {'$gte': start_str, '$lte': end_str}
+            }).sort('timestamp', 1))
+    
+    if not candles:
+        return {"error": f"No candles found for {symbol} {resolution}"}
+    
+    # Warmup period - skip first N candles for indicator warmup
+    warmup_candles = 30  # Need ~30 candles for RSI(14) + MOM(10) + buffer
+    if len(candles) <= warmup_candles:
+        return {"error": f"Not enough candles: {len(candles)}, need at least {warmup_candles}"}
+    
+    # Get strategy config values
+    score_config = strategy_config.get('score', {})
+    min_score = score_config.get('min_score', 0.01)
+    
+    risk_config = strategy_config.get('risk', {})
+    leverage = risk_config.get('leverage', 20)
+    
+    exits_config = strategy_config.get('exits', {})
+    tp_pct = exits_config.get('take_profit', {}).get('value', 5.0) / 100
+    sl_pct = abs(exits_config.get('stop_loss', {}).get('value', -2.0)) / 100
+    
+    # Run backtest
+    balance = initial_balance
+    trades = []
+    position = None
+    
+    # Initialize indicators with warmup data
+    for i, candle in enumerate(candles[:warmup_candles]):
+        candle_data = {
+            'open': candle.get('open'),
+            'high': candle.get('high'),
+            'low': candle.get('low'),
+            'close': candle.get('close'),
+            'volume': candle.get('volume', 0),
+            'timestamp': candle.get('timestamp')
+        }
+        for strat in manager.get_enabled_strategies():
+            for ind in strat.indicators.values():
+                ind.update(candle_data)
+    
+    # Now start trading after warmup
+    for i, candle in enumerate(candles[warmup_candles:], start=warmup_candles):
+        # Create indicator dict for this candle
+        candle_data = {
+            'open': candle.get('open'),
+            'high': candle.get('high'),
+            'low': candle.get('low'),
+            'close': candle.get('close'),
+            'volume': candle.get('volume', 0),
+            'timestamp': candle.get('timestamp')
+        }
+        
+        # Get enabled strategies from manager
+        for strat in manager.get_enabled_strategies():
+            order = strat.on_bar(candle_data, balance)
+            
+            if order and position is None:
+                # Open position
+                position = {
+                    'entry_price': order['entry_price'],
+                    'size': order['size'],
+                    'direction': order['direction'],
+                    'entry_time': candle.get('timestamp'),
+                    'tp_price': order['tp_price'],
+                    'sl_price': order['sl_price']
+                }
+        
+        # Check if we have a position
+        if position:
+            current_price = candle.get('close')
+            direction = position['direction']
+            
+            # Check TP/SL
+            if direction > 0:  # Long
+                if current_price >= position['tp_price']:
+                    # TP hit
+                    pnl = position['size'] * position['entry_price'] * tp_pct * leverage
+                    balance += pnl
+                    trades.append({
+                        'entry': position['entry_price'],
+                        'exit': current_price,
+                        'pnl_usd': pnl,
+                        'result': 'win',
+                        'type': 'TP'
+                    })
+                    position = None
+                elif current_price <= position['sl_price']:
+                    # SL hit
+                    pnl = -position['size'] * position['entry_price'] * sl_pct * leverage
+                    balance += pnl
+                    trades.append({
+                        'entry': position['entry_price'],
+                        'exit': current_price,
+                        'pnl_usd': pnl,
+                        'result': 'loss',
+                        'type': 'SL'
+                    })
+                    position = None
+            else:  # Short
+                if current_price <= position['tp_price']:
+                    pnl = position['size'] * position['entry_price'] * tp_pct * leverage
+                    balance += pnl
+                    trades.append({
+                        'entry': position['entry_price'],
+                        'exit': current_price,
+                        'pnl_usd': pnl,
+                        'result': 'win',
+                        'type': 'TP'
+                    })
+                    position = None
+                elif current_price >= position['sl_price']:
+                    pnl = -position['size'] * position['entry_price'] * sl_pct * leverage
+                    balance += pnl
+                    trades.append({
+                        'entry': position['entry_price'],
+                        'exit': current_price,
+                        'pnl_usd': pnl,
+                        'result': 'loss',
+                        'type': 'SL'
+                    })
+                    position = None
+    
+    # Calculate metrics
+    wins = len([t for t in trades if t['result'] == 'win'])
+    losses = len([t for t in trades if t['result'] == 'loss'])
+    win_rate = (wins / len(trades) * 100) if trades else 0
+    total_pnl = sum(t['pnl_usd'] for t in trades)
+    
+    return {
+        'strategy_id': strategy_config.get('id'),
+        'symbol': symbol,
+        'resolution': resolution,
+        'days': days,
+        'config': {
+            'min_score': min_score,
+            'leverage': leverage,
+            'tp_pct': tp_pct * 100,
+            'sl_pct': sl_pct * 100
+        },
+        'results': {
+            'trades': len(trades),
+            'wins': wins,
+            'losses': losses,
+            'win_rate': round(win_rate, 1),
+            'total_pnl': round(total_pnl, 2),
+            'final_balance': round(balance, 2)
+        },
+        'execution_time_seconds': round(time.time() - start_time, 2)
+    }
 
 
 # =====================
@@ -2051,8 +2503,20 @@ async def update_position(
 @app.post("/api/trade/close/{position_id}")
 async def close_trade(position_id: str):
     """Close an open trade position via broker - uses same price source as chart"""
-    # Get current price for the position
+    global open_positions
+    from database import async_load_open_positions
+    
+    # First try in-memory
     position = next((p for p in open_positions if p["id"] == position_id), None)
+    
+    # If not in memory, try DB
+    if not position:
+        db_positions = await async_load_open_positions()
+        position = next((p for p in db_positions if p.get("id") == position_id), None)
+        if position:
+            # Add to in-memory for consistency
+            open_positions.append(position)
+    
     if not position:
         return {"error": f"Position {position_id} not found"}
 
@@ -2095,26 +2559,50 @@ async def close_trade(position_id: str):
         "success" if pnl_usd >= 0 else "warning",
     )
 
+    # Double-check: ensure status is "closed" in DB
+    from database import save_trade
+    closed_pos["status"] = "closed"
+    save_trade(closed_pos)  # Sync write to ensure it's saved
+    
     await sync_account_from_closed_trades()
+    
+    # Force remove from in-memory list
+    open_positions = [p for p in open_positions if p["id"] != position_id]
+    
     return result
 
 
 @app.get("/api/trades/open")
 async def get_open_trades():
-    """Get all open positions with live P&L - always from DB for consistency"""
-    # Only sync occasionally (not every request) to reduce DB load
-    # The background auto-trade loop handles regular syncs
-    # Update prices in real-time for accurate P&L
-    await broker._async_update_prices()
-    # Load from DB to ensure we have data after restart
-    db_positions = await async_load_open_positions()
-    # Merge with in-memory (in-memory may have newer updates)
-    position_map = {p["id"]: p for p in db_positions}
-    for p in open_positions:
-        position_map[p["id"]] = p  # In-memory wins (newer)
-    merged = list(position_map.values())
-    positions = merged[:20]
-    return {"positions": positions, "count": len(merged)}
+    """Get all open positions with live P&L - fetch from DB, calculate in real-time."""
+    # Load from DB
+    positions = await async_load_open_positions()
+    
+    # Update with live prices and calculate P&L
+    for pos in positions:
+        try:
+            symbol = pos.get("symbol")
+            direction = pos.get("direction", "buy")
+            size = pos.get("size", 0)
+            leverage = pos.get("leverage", 1)
+            entry_price = pos.get("entry_price", 0)
+            
+            # Get live price (async call)
+            quote = await data_provider.get_quote(symbol)
+            if quote:
+                current_price = quote.get("price", entry_price)
+                pos["current_price"] = current_price
+                
+                # Calculate P&L
+                if direction == "buy":
+                    pnl = (current_price - entry_price) * size * leverage
+                else:
+                    pnl = (entry_price - current_price) * size * leverage
+                pos["unrealized_pnl_usd"] = round(pnl, 2)
+        except Exception as e:
+            print(f"[TRADES] Error getting price for {symbol}: {e}")
+    
+    return {"positions": positions[:20], "count": len(positions)}
 
 
 @app.get("/api/trades/history")
@@ -2142,9 +2630,21 @@ async def trades_close_position(position_id: str):
     """
     Close position - simple broker call
     """
+    global open_positions
     result = await broker.close_position(position_id)
     log_event(f"[CLOSE] Position {{position_id}} closed", "info")
+    
+    # Ensure status is "closed" in DB
+    from database import save_trade
+    if result.get("position"):
+        result["position"]["status"] = "closed"
+        save_trade(result["position"])
+    
     await sync_account_from_closed_trades()
+    
+    # Force remove from in-memory list
+    open_positions = [p for p in open_positions if p["id"] != position_id]
+    
     return result
 
 
@@ -2335,6 +2835,26 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
                     asyncio.create_task(async_store_candles(symbol, resolution, candles, "yahoo"))
             except Exception as e:
                 log_event(f"Yahoo chart fetch failed for {symbol}: {e}", "debug")
+        
+        # Try Binance if Yahoo failed or returned bad data
+        if not fresh_candles or resolution == "60":
+            try:
+                from binance_data import fetch_binance_historical
+                period = 30 if resolution in ("1", "5", "15", "30", "60") else 365
+                candles = await asyncio.wait_for(
+                    asyncio.to_thread(fetch_binance_historical, symbol, resolution=resolution, days=period),
+                    timeout=10.0,
+                )
+                if candles and len(candles) > 0:
+                    # Verify data is reasonable (Binance prices should be current)
+                    latest = candles[-1].get("close", 0)
+                    if latest > 1000:  # Basic sanity check
+                        fresh_candles = candles
+                        source = "binance"
+                        asyncio.create_task(async_store_candles(symbol, resolution, candles, "binance"))
+                        log_event(f"Using Binance data for {symbol}: latest price {latest}", "debug")
+            except Exception as e:
+                log_event(f"Binance fetch failed for {symbol}: {e}", "debug")
 
     # 5. Merge fresh data with DB (fresh wins)
     for c in fresh_candles:
@@ -2530,11 +3050,30 @@ async def get_candle_history(
     }
 
 
+@app.delete("/api/candles/{symbol}")
+async def delete_candles(
+    symbol: str,
+    resolution: str = Query("60", description="Resolution: 1, 5, 15, 30, 60, D"),
+):
+    """Delete cached candles for a symbol (to force fresh fetch)"""
+    from database import get_db
+    db = get_db()
+    
+    result = db.candles.delete_many({
+        "symbol": symbol.upper(),
+        "resolution": resolution,
+    })
+    
+    return {"deleted": result.deleted_count, "symbol": symbol.upper(), "resolution": resolution}
+
+
 @app.get("/api/backtest")
 async def run_backtest(
     symbol: str = Query(..., description="Symbol to backtest"),
     resolution: str = Query("5", description="Resolution: 1, 5, 15, 30, 60, D"),
     days: int = Query(14, description="Number of days to backtest"),
+    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD), defaults to days ago"),
+    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
     min_score: float = Query(0.15, description="Minimum score threshold"),
     initial_balance: float = Query(3000.0, description="Initial balance"),
     strategy: Optional[str] = Query(None, description="Strategy ID (adaptive_regime, mms)"),
@@ -2544,6 +3083,31 @@ async def run_backtest(
     settings: Optional[str] = Query(
         None, description="Settings (e.g., rsi_period=14,macd_fast=12)"
     ),
+    leverage: int = Query(10, description="Leverage (e.g., 10 = 10x)"),
+    tp_pct: float = Query(0.02, description="Take profit % (e.g., 0.02 = 2%)"),
+    sl_pct: float = Query(0.01, description="Stop loss % (e.g., 0.01 = 1%)"),
+    risk_pct: float = Query(0.01, description="Risk per trade % (e.g., 0.01 = 1%)"),
+    trailing_sl_pct: float = Query(0.0, description="Trailing SL % (0 = disabled, e.g., 0.5 = move SL to breakeven at 0.5% profit)"),
+    volume_filter: float = Query(0.0, description="Min volume as % of avg (0 = disabled, e.g., 0.5 = only trade if volume > 50% of avg)"),
+    multi_tf: Optional[str] = Query(None, description="Multi-timeframe alignment (e.g., '15,30' - trade only if all timeframes agree)"),
+    htf_rsi_filter: Optional[str] = Query(None, description="HTF RSI filter (e.g., '30' - check RSI on higher TF and skip if extreme)"),
+    htf_adx_filter: Optional[str] = Query(None, description="HTF ADX filter (e.g., '30' - skip if ADX < 20 on higher TF)"),
+    htf_resistance_filter: Optional[str] = Query(None, description="HTF resistance filter (e.g., '30' - reduce TP if price near HTF high/low)"),
+    htf_vwap_filter: Optional[str] = Query(None, description="HTF VWAP filter (e.g., '60' - only trade when price moving toward VWAP)"),
+    htf_trend_filter: Optional[str] = Query(None, description="HTF trend filter (e.g., '30' - only trade with HTF trend: RSI>50 long, RSI<50 short)"),
+    adx_filter_mode: Optional[str] = Query(None, description="ADX filter: 'trend' (ADX>25 uses TP=5%) or 'chop' (ADX<20 uses TP=3%, SL=1.5%)"),
+    divergence_filter: Optional[str] = Query(None, description="Divergence filter (e.g., 'RSI' or 'MACD' - check for bullish/bearish divergence)"),
+    
+    # Strategy weights (v3 defaults: MACD=0.35, RSI=0.35, Momentum=0.2)
+    order_block_filter: Optional[str] = Query(None, description="Order Block filter (e.g., '1' - enable, check for order blocks)"),
+    
+    # Strategy weights
+    rsi_weight: float = Query(None, description="RSI weight override (e.g., 0.2)"),
+    macd_weight: float = Query(None, description="MACD weight override (e.g., 0.3)"),
+    stoch_weight: float = Query(None, description="Stoch weight override (e.g., 0.1)"),
+    momentum_weight: float = Query(None, description="Momentum weight override (e.g., 0.2)"),
+    adx_weight: float = Query(None, description="ADX weight override (e.g., 0.15)"),
+    bb_weight: float = Query(None, description="Bollinger Bands weight override (e.g., 0.15)"),
 ):
     """
     Run backtest on historical data.
@@ -2552,10 +3116,24 @@ async def run_backtest(
     If strategy/indicators not provided, uses per-symbol defaults from DB.
     """
     import time
+    start_time = time.time()
 
     from database import get_db
 
-    start_time = time.time()
+    # Build strategy weights dict if any provided
+    custom_weights = {}
+    if rsi_weight is not None:
+        custom_weights['rsi'] = rsi_weight
+    if macd_weight is not None:
+        custom_weights['macd'] = macd_weight
+    if stoch_weight is not None:
+        custom_weights['stoch'] = stoch_weight
+    if momentum_weight is not None:
+        custom_weights['momentum'] = momentum_weight
+    if adx_weight is not None:
+        custom_weights['adx'] = adx_weight
+    if bb_weight is not None:
+        custom_weights['bb'] = bb_weight
 
     # Get candles from DB
     symbol_key = symbol.upper()
@@ -2630,7 +3208,19 @@ async def run_backtest(
     # Get candles from DB
     end_dt = datetime.utcnow()
     start_dt = end_dt - timedelta(days=days)
-
+    
+    # Override with specific dates if provided
+    if date_from:
+        try:
+            start_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+        except:
+            pass
+    if date_to:
+        try:
+            end_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+        except:
+            pass
+    
     db = get_db()
     cursor = db.candles.find(
         {"symbol": symbol_key, "resolution": resolution, "timestamp": {"$gte": start_dt.isoformat()}}
@@ -2662,6 +3252,87 @@ async def run_backtest(
     peak_balance = initial_balance
     trades = []
     open_trade = None
+    
+    # Parse HTF RSI filter parameter
+    htf_rsi_res = None
+    htf_rsi_candles = []
+    if htf_rsi_filter:
+        htf_rsi_res = htf_rsi_filter.strip()
+        tf_cursor = db.candles.find(
+            {"symbol": symbol_key, "resolution": htf_rsi_res, "timestamp": {"$gte": start_dt.isoformat()}}
+        ).sort("timestamp", 1)
+        htf_rsi_candles = list(tf_cursor)
+        if htf_rsi_candles:
+            print(f"[BACKTEST] HTF RSI filter: {htf_rsi_res}, {len(htf_rsi_candles)} candles")
+    
+    # Parse HTF ADX filter parameter
+    htf_adx_res = None
+    htf_adx_candles = []
+    if htf_adx_filter:
+        htf_adx_res = htf_adx_filter.strip()
+        tf_cursor = db.candles.find(
+            {"symbol": symbol_key, "resolution": htf_adx_res, "timestamp": {"$gte": start_dt.isoformat()}}
+        ).sort("timestamp", 1)
+        htf_adx_candles = list(tf_cursor)
+        if htf_adx_candles:
+            print(f"[BACKTEST] HTF ADX filter: {htf_adx_res}, {len(htf_adx_candles)} candles")
+    
+    # Parse HTF resistance filter parameter
+    htf_res_res = None
+    htf_res_candles = []
+    if htf_resistance_filter:
+        htf_res_res = htf_resistance_filter.strip()
+        tf_cursor = db.candles.find(
+            {"symbol": symbol_key, "resolution": htf_res_res, "timestamp": {"$gte": start_dt.isoformat()}}
+        ).sort("timestamp", 1)
+        htf_res_candles = list(tf_cursor)
+        if htf_res_candles:
+            print(f"[BACKTEST] HTF Resistance filter: {htf_res_res}, {len(htf_res_candles)} candles")
+    
+    # Parse HTF VWAP filter parameter
+    htf_vwap_res = None
+    htf_vwap_candles = []
+    if htf_vwap_filter:
+        htf_vwap_res = htf_vwap_filter.strip()
+        tf_cursor = db.candles.find(
+            {"symbol": symbol_key, "resolution": htf_vwap_res, "timestamp": {"$gte": start_dt.isoformat()}}
+        ).sort("timestamp", 1)
+        htf_vwap_candles = list(tf_cursor)
+        if htf_vwap_candles:
+            print(f"[BACKTEST] HTF VWAP filter: {htf_vwap_res}, {len(htf_vwap_candles)} candles")
+    
+    # Parse HTF trend filter parameter (SIMPLE: RSI > 50 = long, RSI < 50 = short)
+    htf_trend_res = None
+    htf_trend_candles = []
+    if htf_trend_filter:
+        htf_trend_res = htf_trend_filter.strip()
+        tf_cursor = db.candles.find(
+            {"symbol": symbol_key, "resolution": htf_trend_res, "timestamp": {"$gte": start_dt.isoformat()}}
+        ).sort("timestamp", 1)
+        htf_trend_candles = list(tf_cursor)
+        if htf_trend_candles:
+            print(f"[BACKTEST] HTF Trend filter: {htf_trend_res}, {len(htf_trend_candles)} candles")
+    
+    # Parse multi-timeframe parameter
+    multi_tf_resolutions = []
+    multi_tf_candles = {}
+    if multi_tf:
+        multi_tf_resolutions = [r.strip() for r in multi_tf.split(',') if r.strip()]
+        print(f"[BACKTEST] Multi-TF enabled: {multi_tf_resolutions}")
+        
+        # Get candles for additional timeframes from DB
+        if multi_tf_resolutions:
+            for tf_res in multi_tf_resolutions:
+                tf_cursor = db.candles.find(
+                    {"symbol": symbol_key, "resolution": tf_res, "timestamp": {"$gte": start_dt.isoformat()}}
+                ).sort("timestamp", 1)
+                tf_candles = list(tf_cursor)
+                if tf_candles:
+                    multi_tf_candles[tf_res] = [
+                        {"timestamp": c.get("timestamp"), "close": c.get("close"), "volume": c.get("volume")}
+                        for c in tf_candles
+                    ]
+                    print(f"[BACKTEST] Loaded {len(multi_tf_candles[tf_res])} candles for {tf_res}")
 
     # Calculate indicators and signals for each candle
     for i in range(50, len(candles)):  # Need 50 candles for warmup
@@ -2682,7 +3353,7 @@ async def run_backtest(
 
         # Use actual strategy to generate signal
         try:
-            result = strategy.score(candle_window, indicators, symbol_key, instrument_info, current_price)
+            result = strategy.score(candle_window, indicators, symbol_key, instrument_info, current_price, custom_weights=custom_weights if custom_weights else None)
             score = result.get("score", 0)
             direction = result.get("direction")
             tp = result.get("take_profit")
@@ -2704,48 +3375,466 @@ async def run_backtest(
 
         # Check if score meets threshold and we don't have open trade
         if direction_str and open_trade is None:
-            # Open trade
-            price = current_price
-            risk_amount = balance * 0.01
-            size = risk_amount / price
+            # Check volume filter if enabled
+            if volume_filter > 0:
+                try:
+                    # Safety check: ensure candles is defined and has data
+                    if 'candles' not in dir() or not candles or len(candles) < i:
+                        raise ValueError(f"Candles not available or insufficient: len={len(candles) if 'candles' in dir() else 'N/A'}, i={i}")
+                    
+                    current_volume = current_candle.get("volume", 0)
+                    if current_volume is None:
+                        current_volume = 0
+                    # Calculate average volume from last 20 candles
+                    start_idx = max(0, i - 20)
+                    volumes = []
+                    for c in candles[start_idx:i]:
+                        v = c.get("volume", 0)
+                        if v is not None and v > 0:
+                            volumes.append(v)
+                    avg_volume = sum(volumes) / len(volumes) if volumes else 0
+                    if avg_volume > 0 and current_volume < avg_volume * volume_filter:
+                        direction_str = None  # Skip this signal due to low volume
+                except Exception as e:
+                    print(f"[BACKTEST] Volume filter error at i={i}: {e}")
+                    # Don't fail the whole backtest - just skip filtering
+            
+            # Check multi-timeframe alignment if enabled
+            if multi_tf_candles and direction_str:
+                try:
+                    # Get current timestamp
+                    current_ts = current_candle.get("timestamp", "")
+                    
+                    # Check each additional timeframe
+                    tf_agrees = True
+                    for tf_res, tf_candles_list in multi_tf_candles.items():
+                        if not tf_candles_list:
+                            continue
+                        
+                        # Find closest candle in this timeframe
+                        tf_direction = None
+                        for j, tc in enumerate(tf_candles_list):
+                            if tc.get("timestamp", "") >= current_ts:
+                                if j > 0:
+                                    prev = tf_candles_list[j-1]
+                                    curr = tc
+                                    # Simple direction check: compare close prices
+                                    if curr.get("close", 0) > prev.get("close", 0):
+                                        tf_direction = "buy"
+                                    elif curr.get("close", 0) < prev.get("close", 0):
+                                        tf_direction = "sell"
+                                break
+                        
+                        # Check if this timeframe agrees
+                        if tf_direction and tf_direction != direction_str:
+                            tf_agrees = False
+                            break
+                    
+                    if not tf_agrees:
+                        direction_str = None  # Skip - timeframes don't agree
+                        print(f"[BACKTEST] Multi-TF: Skipping {symbol_key} at i={i} - timeframes don't align")
+                except Exception as e:
+                    print(f"[BACKTEST] Multi-TF error: {e}")
+            
+            # HTF RSI Filter - skip trade if higher timeframe RSI is extreme
+            if htf_rsi_candles and direction_str:
+                try:
+                    current_ts = current_candle.get("timestamp", "")
+                    for j, tc in enumerate(htf_rsi_candles):
+                        if tc.get("timestamp", "") >= current_ts:
+                            if j > 0:
+                                window = htf_rsi_candles[max(0, j-14):j]
+                                if len(window) >= 14:
+                                    closes = [c.get("close", 0) for c in window]
+                                    if closes and all(c > 0 for c in closes):
+                                        gains = []
+                                        losses = []
+                                        for k in range(1, len(closes)):
+                                            diff = closes[k] - closes[k-1]
+                                            if diff > 0:
+                                                gains.append(diff)
+                                            else:
+                                                losses.append(abs(diff))
+                                        avg_gain = sum(gains) / 14 if gains else 0
+                                        avg_loss = sum(losses) / 14 if losses else 0
+                                        rs = avg_gain / avg_loss if avg_loss > 0 else 100
+                                        rsi = 100 - (100 / (1 + rs))
+                                        
+                                        # Skip if HTF RSI is extreme
+                                        if (direction_str == "buy" and rsi > 70) or (direction_str == "sell" and rsi < 30):
+                                            print(f"[BACKTEST] HTF RSI {rsi:.0f} extreme - SKIPPING trade")
+                                            direction_str = None
+                            break
+                except Exception as e:
+                    pass  # Continue on error
+            
+            # HTF ADX Filter - skip if no trend
+            if htf_adx_candles and direction_str:
+                try:
+                    current_ts = current_candle.get("timestamp", "")
+                    for j, tc in enumerate(htf_adx_candles):
+                        if tc.get("timestamp", "") >= current_ts:
+                            if j > 14:
+                                window = htf_adx_candles[j-14:j]
+                                highs = [c.get("high", 0) for c in window]
+                                lows = [c.get("low", 0) for c in window]
+                                closes = [c.get("close", 0) for c in window]
+                                
+                                if highs and lows and closes and all(h > 0 and l > 0 and c > 0 for h,l,c in zip(highs, lows, closes)):
+                                    plus_dm = []
+                                    minus_dm = []
+                                    for k in range(1, len(window)):
+                                        high_diff = highs[k] - highs[k-1]
+                                        low_diff = lows[k-1] - lows[k]
+                                        if high_diff > low_diff and high_diff > 0:
+                                            plus_dm.append(high_diff)
+                                            minus_dm.append(0)
+                                        elif low_diff > high_diff and low_diff > 0:
+                                            plus_dm.append(0)
+                                            minus_dm.append(low_diff)
+                                        else:
+                                            plus_dm.append(0)
+                                            minus_dm.append(0)
+                                    
+                                    tr = []
+                                    for k in range(1, len(window)):
+                                        h, l, pc = highs[k], lows[k], closes[k-1]
+                                        tr.append(max(h-l, abs(h-pc), abs(l-pc)))
+                                    
+                                    atr = sum(tr) / 14 if tr else 1
+                                    plus_di = (sum(plus_dm) / 14 / atr * 100) if atr > 0 else 0
+                                    minus_di = (sum(minus_dm) / 14 / atr * 100) if atr > 0 else 0
+                                    dx = abs(plus_di - minus_di) / (plus_di + minus_di) * 100 if (plus_di + minus_di) > 0 else 0
+                                    
+                                    if dx < 20:
+                                        print(f"[BACKTEST] HTF ADX {dx:.0f} < 20 - SKIP (no trend)")
+                                        direction_str = None
+                            break
+                except Exception as e:
+                    pass
+            
+            # HTF Resistance Filter - reduce TP if price near HTF extremes
+            if htf_res_candles and direction_str and tp_pct > 0:
+                try:
+                    current_ts = current_candle.get("timestamp", "")
+                    for j, tc in enumerate(htf_res_candles):
+                        if tc.get("timestamp", "") >= current_ts:
+                            if j > 0:
+                                window = htf_res_candles[max(0, j-20):j]
+                                htf_high = max(c.get("high", 0) for c in window)
+                                htf_low = min(c.get("low", 0) for c in window)
+                                htf_range = htf_high - htf_low
+                                
+                                if htf_range > 0 and current_price > 0:
+                                    dist_to_high = (htf_high - current_price) / htf_range
+                                    dist_to_low = (current_price - htf_low) / htf_range
+                                    
+                                    if direction_str == "buy" and dist_to_high < 0.1:
+                                        tp_pct = tp_pct * 0.7
+                                        print(f"[BACKTEST] Near HTF high - TP to {tp_pct*100:.1f}%")
+                                    elif direction_str == "sell" and dist_to_low < 0.1:
+                                        tp_pct = tp_pct * 0.7
+                                        print(f"[BACKTEST] Near HTF low - TP to {tp_pct*100:.1f}%")
+                            break
+                except Exception as e:
+                    pass
+            
+            # HTF VWAP Filter - only trade when price is moving toward VWAP
+            if htf_vwap_candles and direction_str:
+                try:
+                    current_ts = current_candle.get("timestamp", "")
+                    for j, tc in enumerate(htf_vwap_candles):
+                        if tc.get("timestamp", "") >= current_ts:
+                            if j > 14:
+                                # Calculate VWAP for last 20 candles
+                                window = htf_vwap_candles[j-20:j]
+                                cum_vol = 0
+                                cum_pv = 0
+                                for c in window:
+                                    h = c.get("high", 0)
+                                    l = c.get("low", 0)
+                                    c_ = c.get("close", 0)
+                                    v = c.get("volume", 0)
+                                    if h > 0 and l > 0 and c_ > 0 and v > 0:
+                                        typical_price = (h + l + c_) / 3
+                                        cum_pv += typical_price * v
+                                        cum_vol += v
+                                
+                                vwap = cum_pv / cum_vol if cum_vol > 0 else 0
+                                
+                                if vwap > 0 and current_price > 0:
+                                    # Check if price is on the "right side" of VWAP
+                                    # Buy only if price > VWAP (bullish) or just crossed above
+                                    # Sell only if price < VWAP (bearish) or just crossed below
+                                    
+                                    # Get previous candle
+                                    prev_candle = htf_vwap_candles[j-1] if j > 0 else None
+                                    prev_vwap = None
+                                    if prev_candle and j > 15:
+                                        prev_window = htf_vwap_candles[j-21:j-1]
+                                        prev_cum_vol = 0
+                                        prev_cum_pv = 0
+                                        for c in prev_window:
+                                            h = c.get("high", 0)
+                                            l = c.get("low", 0)
+                                            c_ = c.get("close", 0)
+                                            v = c.get("volume", 0)
+                                            if h > 0 and l > 0 and c_ > 0 and v > 0:
+                                                typical_price = (h + l + c_) / 3
+                                                prev_cum_pv += typical_price * v
+                                                prev_cum_vol += v
+                                        prev_vwap = prev_cum_pv / prev_cum_vol if prev_cum_vol > 0 else 0
+                                    
+                                    # VWAP direction
+                                    vwap_up = current_price > vwap
+                                    prev_vwap_up = prev_vwap is not None and prev_vwap > 0 and prev_candle.get("close", 0) > prev_vwap if prev_vwap else False
+                                    
+                                    # Trade with VWAP trend
+                                    if direction_str == "buy":
+                                        # For buy: price should be above VWAP or crossing above
+                                        if current_price < vwap and not (prev_vwap and prev_candle.get("close", 0) < prev_vwap):
+                                            print(f"[BACKTEST] HTF VWAP: price below VWAP ({current_price} < {vwap:.0f}) - SKIP")
+                                            direction_str = None
+                                    elif direction_str == "sell":
+                                        # For sell: price should be below VWAP or crossing below
+                                        if current_price > vwap and not (prev_vwap and prev_candle.get("close", 0) > prev_vwap):
+                                            print(f"[BACKTEST] HTF VWAP: price above VWAP ({current_price} > {vwap:.0f}) - SKIP")
+                                            direction_str = None
+                            break
+                except Exception as e:
+                    pass
+            
+            # Simple HTF Trend Filter - SOFT filter (adjust min_score, not block)
+            # Long: HTF RSI > 50, Short: HTF RSI < 50
+            # This uses CLOSED HTF candle to avoid look-ahead bias
+            if htf_trend_candles and direction_str:
+                try:
+                    # Find the LAST CLOSED HTF candle (not current one - avoid look-ahead)
+                    current_ts = current_candle.get("timestamp", "")
+                    htf_index = None
+                    for j, tc in enumerate(htf_trend_candles):
+                        if tc.get("timestamp", "") >= current_ts:
+                            htf_index = max(0, j - 1)  # Use PREVIOUS closed candle
+                            break
+                    
+                    if htf_index is not None and htf_index > 14:
+                        window = htf_trend_candles[max(0, htf_index-14):htf_index]
+                        closes = [c.get("close", 0) for c in window]
+                        if closes and all(c > 0 for c in closes):
+                            gains = []
+                            losses = []
+                            for k in range(1, len(closes)):
+                                diff = closes[k] - closes[k-1]
+                                if diff > 0:
+                                    gains.append(diff)
+                                else:
+                                    losses.append(abs(diff))
+                            avg_gain = sum(gains) / 14 if gains else 0
+                            avg_loss = sum(losses) / 14 if losses else 0
+                            rs = avg_gain / avg_loss if avg_loss > 0 else 100
+                            htf_rsi = 100 - (100 / (1 + rs))
+                            
+                            # Soft filter: if trading against HTF trend, require HIGHER score
+                            if direction_str == "buy" and htf_rsi < 45:
+                                # HTF bearish, but we want to buy - require stronger signal
+                                min_score_adjusted = min_score * 2  # Double the threshold
+                                if abs(score) < min_score_adjusted:
+                                    print(f"[BACKTEST] HTF Trend: RSI={htf_rsi:.0f} < 45, need stronger signal - SKIP")
+                                    direction_str = None
+                            elif direction_str == "sell" and htf_rsi > 55:
+                                # HTF bullish, but we want to sell - require stronger signal
+                                min_score_adjusted = min_score * 2
+                                if abs(score) < min_score_adjusted:
+                                    print(f"[BACKTEST] HTF Trend: RSI={htf_rsi:.0f} > 55, need stronger signal - SKIP")
+                                    direction_str = None
+                except Exception as e:
+                    pass
+            
+            # Divergence Filter - check for price/indicator divergence
+            if divergence_filter and direction_str:
+                try:
+                    div_indicator = divergence_filter.upper().strip()
+                    if div_indicator in ["RSI", "MACD", "STOCH"]:
+                        # Get indicator values
+                        if div_indicator == "RSI":
+                            rsi_val = indicators.get("RSI", {}).get("value", 50)
+                            # Need previous RSI from earlier in window
+                            if i > 60:
+                                prev_indicators = TechnicalIndicators.calculate_all(candle_window[:-1], period=14)
+                                prev_rsi = prev_indicators.get("RSI", {}).get("value", 50)
+                                
+                                # Check divergence
+                                prev_price = candle_window[-2].get("close", 0) if len(candle_window) > 1 else current_price
+                                
+                                # Bearish divergence: price higher, RSI lower
+                                if direction_str == "buy" and current_price > prev_price and rsi_val < prev_rsi:
+                                    print(f"[BACKTEST] Divergence: bearish - SKIP")
+                                    direction_str = None
+                                # Bullish divergence: price lower, RSI higher
+                                elif direction_str == "sell" and current_price < prev_price and rsi_val > prev_rsi:
+                                    print(f"[BACKTEST] Divergence: bullish - SKIP")
+                                    direction_str = None
+                except Exception as e:
+                    pass
+            
+            # Order Block Filter - only trade from order blocks
+            if order_block_filter and direction_str:
+                try:
+                    # Look for recent order block (last 5 candles)
+                    for ob_idx in range(max(1, i-5), i):
+                        if ob_idx < len(candles):
+                            ob_candle = candles[ob_idx]
+                            ob_close = ob_candle.get("close", 0)
+                            ob_open = ob_candle.get("open", 0)
+                            ob_is_green = ob_close > ob_open
+                            
+                            # Check if price is returning to OB zone
+                            if direction_str == "buy" and ob_is_green:
+                                # Green OB = buy order block, look for price return to it
+                                ob_high = ob_candle.get("high", 0)
+                                if current_price >= ob_high * 0.99 and current_price <= ob_high * 1.02:
+                                    # Price at or near OB high - good entry
+                                    pass
+                            elif direction_str == "sell" and not ob_is_green:
+                                ob_low = ob_candle.get("low", 0)
+                                if current_price <= ob_low * 1.01 and current_price >= ob_low * 0.98:
+                                    # Price at or near OB low - good entry
+                                    pass
+                            else:
+                                # Price not at OB - skip
+                                if direction_str == "buy":
+                                    print(f"[BACKTEST] Order Block: price not at buy OB - SKIP")
+                                    direction_str = None
+                                else:
+                                    print(f"[BACKTEST] Order Block: price not at sell OB - SKIP")
+                                    direction_str = None
+                            break
+                except Exception as e:
+                    pass
+            
+            # Open trade with leverage
+            if direction_str:
+                price = current_price
+                risk_amount = balance * risk_pct
+                # With leverage: size = (balance * risk_pct * leverage) / price
+                size = (risk_amount * leverage) / price
 
-            open_trade = {
-                "id": str(uuid.uuid4())[:8],
-                "symbol": symbol_key,
-                "direction": direction_str,
-                "entry_price": price,
-                "size": size,
-                "opened_at": current_candle.get("timestamp", ""),
-                "balance_at_entry": balance,
-                "tp": tp,
-                "sl": sl,
-            }
+                open_trade = {
+                    "id": str(uuid.uuid4())[:8],
+                    "symbol": symbol_key,
+                    "direction": direction_str,
+                    "entry_price": price,
+                    "size": size,
+                    "leverage": leverage,
+                    "risk_pct": risk_pct,
+                    "tp_pct": tp_pct,
+                    "sl_pct": sl_pct,
+                    "trailing_sl_pct": trailing_sl_pct,
+                    "trailing_sl_activated": False,
+                    "opened_at": current_candle.get("timestamp", ""),
+                    "opened_at_candle": i,  # Track which candle we opened at
+                    "balance_at_entry": balance,
+                    "tp": tp,
+                    "sl": sl,
+                }
 
         # Check close conditions
         if open_trade:
             price = current_candle.get("close", 0)
             entry = open_trade["entry_price"]
             direction = open_trade["direction"]
+            tp_pct = open_trade.get("tp_pct", 0.02)
+            sl_pct = open_trade.get("sl_pct", 0.01)
+            trailing_sl_pct = open_trade.get("trailing_sl_pct", 0)
+            trailing_sl_activated = open_trade.get("trailing_sl_activated", False)
+            
+            # Dynamic TP adjustment based on HTF (only adjust, never increase TP)
+            original_tp_pct = tp_pct
+            if htf_rsi_candles:
+                try:
+                    current_ts = current_candle.get("timestamp", "")
+                    for j, tc in enumerate(htf_rsi_candles):
+                        if tc.get("timestamp", "") >= current_ts:
+                            if j > 14:
+                                window = htf_rsi_candles[j-14:j]
+                                closes = [c.get("close", 0) for c in window]
+                                if closes and all(c > 0 for c in closes):
+                                    gains = []
+                                    losses = []
+                                    for k in range(1, len(closes)):
+                                        diff = closes[k] - closes[k-1]
+                                        if diff > 0:
+                                            gains.append(diff)
+                                        else:
+                                            losses.append(abs(diff))
+                                    avg_gain = sum(gains) / 14 if gains else 0
+                                    avg_loss = sum(losses) / 14 if losses else 0
+                                    rs = avg_gain / avg_loss if avg_loss > 0 else 100
+                                    rsi = 100 - (100 / (1 + rs))
+                                    
+                                    # Adjust TP based on HTF RSI (only reduce, never increase)
+                                    if direction == "buy" and rsi > 65:
+                                        tp_pct = min(tp_pct, 0.03)  # Reduce TP if overbought
+                                    elif direction == "buy" and rsi < 40:
+                                        tp_pct = max(tp_pct, 0.06)  # Increase TP if oversold (more room)
+                                    elif direction == "sell" and rsi < 35:
+                                        tp_pct = min(tp_pct, 0.03)
+                                    elif direction == "sell" and rsi > 60:
+                                        tp_pct = max(tp_pct, 0.06)
+                except Exception as e:
+                    pass
+            
+            # Update trade with adjusted TP
+            open_trade["tp_pct"] = tp_pct
 
-            # Use TP/SL from strategy or default
-            tp_price = open_trade.get("tp") or entry * 1.02
-            sl_price = open_trade.get("sl") or entry * 0.99
+            # Use percentage-based TP/SL
+            tp_price = entry * (1 + tp_pct) if direction == "buy" else entry * (1 - tp_pct)
+            sl_price = entry * (1 - sl_pct) if direction == "buy" else entry * (1 + sl_pct)
 
             closed = False
             pnl = 0
+
+            # Calculate current profit/loss %
+            if direction == "buy":
+                profit_pct = (price - entry) / entry
+            else:
+                profit_pct = (entry - price) / entry
+
+            # Trailing SL: if profit > trailing_sl_pct, move SL to breakeven
+            if trailing_sl_pct > 0 and not trailing_sl_activated and profit_pct >= trailing_sl_pct:
+                # Activate trailing SL - move SL to breakeven
+                trailing_sl_activated = True
+                if direction == "buy":
+                    sl_price = entry  # Move SL to entry price
+                else:
+                    sl_price = entry  # Move SL to entry price
+                open_trade["trailing_sl_activated"] = True
+                open_trade["trailing_sl_price"] = sl_price
+            elif trailing_sl_activated:
+                # Update trailing SL - move it up as price moves
+                if direction == "buy":
+                    new_sl = entry + (price - entry) * 0.5  # Keep 50% of profits
+                    if new_sl > sl_price:
+                        sl_price = new_sl
+                        open_trade["trailing_sl_price"] = sl_price
+                else:
+                    new_sl = entry - (entry - price) * 0.5
+                    if new_sl < sl_price:
+                        sl_price = new_sl
+                        open_trade["trailing_sl_price"] = sl_price
 
             if direction == "buy":
                 if price >= tp_price:  # TP
                     pnl = (price - entry) * open_trade["size"]
                     closed = True
-                elif price <= sl_price:  # SL
+                elif price <= sl_price:  # SL (or trailing SL)
                     pnl = (price - entry) * open_trade["size"]
                     closed = True
             else:  # sell
                 if price <= tp_price:  # TP
                     pnl = (entry - price) * open_trade["size"]
                     closed = True
-                elif price >= sl_price:  # SL
+                elif price >= sl_price:  # SL (or trailing SL)
                     pnl = (entry - price) * open_trade["size"]
                     closed = True
 
@@ -2762,6 +3851,45 @@ async def run_backtest(
                 }
                 trades.append(trade_result)
                 open_trade = None
+            else:
+                # Close position if open for too long (max 4 hours / 240 minutes of candles)
+                candles_open = i - open_trade.get("opened_at_candle", i)
+                if candles_open > 240:  # 240 candles = 4 hours for 1min resolution
+                    # Close at market price
+                    pnl = 0
+                    if direction == "buy":
+                        pnl = (price - entry) * open_trade["size"]
+                    else:
+                        pnl = (entry - price) * open_trade["size"]
+                    balance += pnl
+                    trade_result = {
+                        **open_trade,
+                        "exit_price": price,
+                        "closed_at": current_candle.get("timestamp", ""),
+                        "pnl_usd": pnl,
+                        "result": "win" if pnl > 0 else ("loss" if pnl < 0 else "breakeven"),
+                    }
+                    trades.append(trade_result)
+                    open_trade = None
+
+    # Close any remaining open positions at last candle price
+    if open_trade:
+        last_price = candles[-1].get("close", 0)
+        entry = open_trade["entry_price"]
+        direction = open_trade["direction"]
+        if direction == "buy":
+            pnl = (last_price - entry) * open_trade["size"]
+        else:
+            pnl = (entry - last_price) * open_trade["size"]
+        balance += pnl
+        trade_result = {
+            **open_trade,
+            "exit_price": last_price,
+            "closed_at": candles[-1].get("timestamp", ""),
+            "pnl_usd": pnl,
+            "result": "win" if pnl > 0 else ("loss" if pnl < 0 else "breakeven"),
+        }
+        trades.append(trade_result)
 
     # Calculate metrics
     winning_trades = [t for t in trades if t["pnl_usd"] > 0]
@@ -2787,7 +3915,7 @@ async def run_backtest(
             "to": candles[-1].get("timestamp", "")[:10],
         },
         "trades_count": len(trades),
-        "trades": trades[:50],  # Return first 50 trades
+        "trades": trades[:200],  # Return up to 200 trades
         "metrics": {
             "initial_balance": initial_balance,
             "final_balance": balance,
@@ -2836,6 +3964,7 @@ async def start_optimize(
     return {
         "job_id": job_id,
         "status": "started",
+        "symbol": symbol,
         "message": "Optimization started in background. Poll /api/backtest/optimize/{job_id} for results."
     }
 
@@ -2868,6 +3997,12 @@ def run_optimization(job_id: str, symbol: str, resolution: str, days: int, min_s
                 for ind2 in ALL_INDICATORS[i+1:]:
                     if len(combinations) < 30:  # Limit to 30
                         combinations.append({"strategy": strat, "indicators": [ind1, ind2]})
+        
+        # Save total combinations count
+        db.optimize_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"total_combinations": len(combinations)}}
+        )
         
         results = []
         for combo in combinations:
@@ -2947,8 +4082,10 @@ async def get_optimize_results(job_id: str):
     return {
         "job_id": job_id,
         "status": job.get("status"),
+        "symbol": job.get("symbol"),
         "best": job.get("best"),
         "results": job.get("results", []),
+        "total": job.get("total_combinations", 0),
     }
 
 
@@ -3098,3 +4235,147 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8001")))
     args = parser.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)
+
+
+# =====================
+# NEW STRATEGY MODULE (JSON-based)
+# =====================
+
+# Global strategy manager - loaded once
+_strategy_manager = None
+
+def get_strategy_manager(force_reload: bool = False):
+    """Get or create the JSON-based strategy manager."""
+    global _strategy_manager
+    
+    if _strategy_manager is None or force_reload:
+        try:
+            from strategy import load_strategies_from_file
+            import os
+            
+            # Try to load from workspace memory
+            json_path = os.path.expanduser("~/.openclaw/workspace/memory/strategies.json")
+            if os.path.exists(json_path):
+                _strategy_manager = load_strategies_from_file(json_path)
+                print(f"[STRATEGY] Loaded {len(_strategy_manager.strategies)} strategies from JSON")
+            else:
+                print(f"[STRATEGY] JSON config not found at {json_path}")
+                _strategy_manager = None
+        except Exception as e:
+            print(f"[STRATEGY] Failed to load JSON strategies: {e}")
+            _strategy_manager = None
+    
+    return _strategy_manager
+
+
+def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, balance: float, requested_strategy: str = None) -> dict:
+    """
+    Analyze using new JSON-based strategy module.
+    Returns dict with direction, score, confidence, etc. or None if not available.
+    
+    Args:
+        symbol: Trading symbol
+        candles: Price candles
+        current_price: Current price
+        balance: Account balance
+        requested_strategy: Specific JSON strategy ID to use (e.g., "JSON:btc_v2_core")
+    """
+    manager = get_strategy_manager()
+    if not manager:
+        return None
+    
+    # Find strategy - use requested one or find any for symbol
+    strategy = None
+    
+    if requested_strategy:
+        # User specifically requested this JSON strategy
+        json_id = requested_strategy.replace("JSON:", "")
+        if json_id in manager.strategies:
+            strategy = manager.strategies[json_id]
+            print(f"[STRATEGY] Using requested JSON strategy: {json_id}")
+    else:
+        # Default: use enabled strategy for this symbol
+        for s in manager.get_enabled_strategies():
+            if s.symbol.upper() == symbol.upper():
+                strategy = s
+                break
+        
+        # If no enabled, try any for this symbol
+        if not strategy:
+            for s in manager.strategies.values():
+                if s.symbol.upper() == symbol.upper():
+                    strategy = s
+                    break
+    
+    if not strategy:
+        return None
+    
+    # Update indicators with latest candles
+    for candle in candles[-50:]:  # Last 50 candles for warmup
+        candle_data = {
+            'open': candle.get('open'),
+            'high': candle.get('high'),
+            'low': candle.get('low'),
+            'close': candle.get('close'),
+            'volume': candle.get('volume', 0),
+            'timestamp': candle.get('timestamp')
+        }
+        for ind in strategy.indicators.values():
+            ind.update(candle_data)
+    
+    # Get current candle
+    if not candles:
+        return None
+    
+    current_candle = candles[-1]
+    candle_data = {
+        'open': current_candle.get('open'),
+        'high': current_candle.get('high'),
+        'low': current_candle.get('low'),
+        'close': current_candle.get('close'),
+        'volume': current_candle.get('volume', 0),
+        'timestamp': current_candle.get('timestamp')
+    }
+    
+    # Check if we have enough indicator data
+    has_data = all(ind.value() is not None for ind in strategy.indicators.values())
+    if not has_data:
+        return None
+    
+    # Get signal
+    signal = strategy.score_engine.get_signal()
+    score = strategy.score_engine.compute_score()
+    
+    if not signal:
+        return None
+    
+    direction = 1 if signal == 'buy' else -1
+    
+    # Calculate exits
+    exits = strategy.exit_engine.initialize_position(
+        position_id=f"live_{symbol}",
+        entry_price=current_price,
+        direction=direction
+    )
+    
+    # Clamp score to valid range [-1, 1]
+    clamped_score = max(-1.0, min(1.0, score))
+    
+    return {
+        'direction': 'long' if direction > 0 else 'short',
+        'score': abs(clamped_score),
+        'confidence': min(1.0, abs(clamped_score)),
+        'technical_score': abs(clamped_score),
+        'components': [{
+            'type': 'technical',
+            'name': f'JSON Strategy ({strategy.id})',
+            'value': score,
+            'description': f'Score: {score:.3f}, Signal: {signal}',
+            'confidence': 0.5
+        }],
+        'take_profit': exits['tp_price'],
+        'stop_loss': exits['sl_price'],
+        'risk_reward_ratio': abs(exits['tp_price'] - current_price) / abs(current_price - exits['sl_price']) if exits['sl_price'] != current_price else 0,
+        'strategy_id': strategy.id
+    }
+

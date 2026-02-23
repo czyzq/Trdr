@@ -1,4 +1,24 @@
 """
+⚠️ DEPRECATED STRATEGIES MODULE ⚠️
+===================================
+This module is deprecated. Please use the new JSON-based strategy system:
+
+  - JSON config: ~/.openclaw/workspace/memory/strategies.json
+  - New module: backend/strategy/
+  - API: POST /api/strategies/backtest-json
+
+The new system supports:
+  - JSON configuration (easy to edit/share)
+  - Configurable indicator weights
+  - Volume filters
+  - Dynamic TP/SL
+  - Multiple strategies per symbol
+
+This file will be removed in a future version.
+
+---
+OLD DOCUMENTATION (DEPRECATED):
+-------------------------------
 Trading strategy abstraction layer.
 
 Strategies:
@@ -241,10 +261,21 @@ class AdaptiveRegimeStrategy(BaseStrategy):
         IndicatorConfig("MOMENTUM", enabled=True, settings={"period": 10}),
     ]
 
-    def score(self, candles, indicators, symbol, instrument_info, current_price, htf_bias=0.0, news_score=0.0):
+    def score(self, candles, indicators, symbol, instrument_info, current_price, htf_bias=0.0, news_score=0.0, custom_weights=None):
         components = []
         scores = []
         weights = []
+        
+        # Default weights
+        default_weights = {
+            'rsi': 0.15,
+            'macd': 0.25,
+            'stoch': 0.10,
+            'momentum': 0.20,
+            'adx': 0.15,
+            'bb': 0.15,
+        }
+        w = {**default_weights, **(custom_weights or {})}
 
         # --- Detect market regime via ADX ---
         adx_data = indicators.get("adx")
@@ -284,7 +315,7 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 rsi_score = 0
             rsi_score = max(-1, min(1, rsi_score))
             zone = "OVERSOLD" if rsi < 30 else "OVERBOUGHT" if rsi > 70 else "NEUTRAL"
-            rsi_weight = 0.15 if is_trending else 0.25
+            rsi_weight = w.get('rsi', 0.15) if is_trending else w.get('rsi', 0.25)
             components.append(
                 Component(
                     type=ComponentType.TECHNICAL,
@@ -325,7 +356,7 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                     )
                 )
                 scores.append(stoch_score)
-                weights.append(0.10)
+                weights.append(w.get('stoch', 0.10))
 
         # --- MACD ---
         if indicators.get("macd"):
@@ -338,7 +369,7 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 norm_hist = histogram / atr
                 macd_score = max(-1, min(1, norm_hist * 2))
                 cross = "BULLISH" if macd_line > signal_line else "BEARISH"
-                macd_weight = 0.25 if is_trending else 0.15
+                macd_weight = w.get('macd', 0.25) if is_trending else w.get('macd', 0.15)
                 components.append(
                     Component(
                         type=ComponentType.TECHNICAL,
@@ -362,7 +393,7 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 bb_position = ((cp - bb["lower"]) / bb_range) * 2 - 1
                 bb_score = -bb_position * 0.8
                 zone = "UPPER" if cp > bb["upper"] else "LOWER" if cp < bb["lower"] else "MIDDLE"
-                bb_weight = 0.15 if is_trending else 0.25
+                bb_weight = w.get('bb', 0.15) if is_trending else w.get('bb', 0.25)
                 components.append(
                     Component(
                         type=ComponentType.TECHNICAL,
@@ -384,7 +415,7 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 sma_diff_pct = ((sma_20 - sma_50) / sma_50) * 100
                 sma_score = max(-1, min(1, sma_diff_pct / 2))
                 trend = "BULLISH" if sma_20 > sma_50 else "BEARISH"
-                sma_weight = 0.20 if is_trending else 0.10
+                sma_weight = w.get('sma', 0.20) if is_trending else w.get('sma', 0.10)
                 components.append(
                     Component(
                         type=ComponentType.TECHNICAL,
@@ -432,7 +463,7 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 )
             )
             scores.append(momentum_score)
-            weights.append(0.05)
+            weights.append(w.get('momentum', 0.05))
 
         # --- Candlestick Patterns ---
         cp_data = indicators.get("candlestick_patterns")
@@ -450,12 +481,15 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 )
             )
             scores.append(cp_score)
-            weights.append(0.15)
+            weights.append(w.get('adx', 0.15))
 
         # --- Composite ---
         if scores:
             total_weight = sum(weights)
-            technical_score = sum(s * w for s, w in zip(scores, weights)) / total_weight if total_weight > 0 else 0
+            # Always normalize to sum = 1.0
+            if total_weight > 0:
+                weights = [w / total_weight for w in weights]
+            technical_score = sum(s * w for s, w in zip(scores, weights)) if weights else 0
         else:
             technical_score = 0
 
@@ -525,9 +559,9 @@ class AdaptiveRegimeStrategy(BaseStrategy):
                 )
             )
 
-        # Apply seasonality bias
+        # Apply seasonality bias (with clamping)
         if seasonality_bias > 0:
-            technical_score = technical_score * 0.9 + seasonality_bias
+            technical_score = max(-1, min(1, technical_score * 0.9 + seasonality_bias))
 
         # === END V2 FILTERS ===
 
@@ -929,7 +963,7 @@ class MMSStrategy(BaseStrategy):
         is_turn_of_month = now.day <= 3
         if is_turn_of_month:
             # MMS gets stronger bias: +0.15 (mean reversion effect stronger)
-            technical_score = technical_score * 0.85 + 0.15
+            technical_score = max(-1, min(1, technical_score * 0.85 + 0.15))
             components.append(
                 Component(
                     type=ComponentType.TECHNICAL,

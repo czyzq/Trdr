@@ -69,6 +69,39 @@ export const Dashboard: React.FC = () => {
   const [backtestResults, setBacktestResults] = useState<any>(null);
   const [strategies, setStrategies] = useState<any[]>([]);
   const [optimizeJobId, setOptimizeJobId] = useState<string | null>(null);
+  const [optimizeStartTime, setOptimizeStartTime] = useState<number | null>(null);
+
+  // Calculate elapsed time for optimize
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  
+  // Timer for elapsed seconds
+  useEffect(() => {
+    if (!optimizeStartTime) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - optimizeStartTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [optimizeStartTime]);
+
+  // Load saved optimize results on mount
+  useEffect(() => {
+    const savedResults = localStorage.getItem("cfd_optimize_results");
+    if (savedResults) {
+      try {
+        setBacktestResults({ optimize: JSON.parse(savedResults) });
+      } catch (e) {}
+    }
+  }, []);
+
+  // Save optimize results to localStorage when they change
+  useEffect(() => {
+    if (backtestResults?.optimize?.best) {
+      localStorage.setItem("cfd_optimize_results", JSON.stringify(backtestResults.optimize));
+    }
+  }, [backtestResults]);
 
   // Load trading mode and strategies from API on mount
   useEffect(() => {
@@ -460,6 +493,7 @@ export const Dashboard: React.FC = () => {
                   >
                     <option value="5">5m</option>
                     <option value="15">15m</option>
+                    <option value="30">30m</option>
                     <option value="60">1H</option>
                     <option value="D">1D</option>
                   </select>
@@ -479,11 +513,31 @@ export const Dashboard: React.FC = () => {
                   <input
                     id="backtest-min-score"
                     type="number"
-                    step="0.05"
-                    defaultValue="0.05"
+                    step="0.001"
+                    defaultValue="0.01"
                     className="p-2 rounded text-sm w-20"
                     style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
                   />
+                </div>
+                <div>
+                  <label className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>Lev</label>
+                  <input id="backtest-leverage" type="number" defaultValue="3" className="p-2 rounded text-sm w-16" style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)" }} />
+                </div>
+                <div>
+                  <label className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>TP%</label>
+                  <input id="backtest-tp" type="number" step="0.01" defaultValue="0.04" className="p-2 rounded text-sm w-16" style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)" }} />
+                </div>
+                <div>
+                  <label className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>SL%</label>
+                  <input id="backtest-sl" type="number" step="0.005" defaultValue="0.02" className="p-2 rounded text-sm w-16" style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)" }} />
+                </div>
+                <div>
+                  <label className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>Trail</label>
+                  <input id="backtest-trailing" type="number" step="0.005" defaultValue="0" className="p-2 rounded text-sm w-16" style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)" }} />
+                </div>
+                <div>
+                  <label className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>Vol</label>
+                  <input id="backtest-volume" type="number" step="0.1" defaultValue="0" className="p-2 rounded text-sm w-16" style={{ backgroundColor: "var(--bg-tertiary)", color: "var(--text-primary)" }} />
                 </div>
                 <div className="flex items-end gap-2">
                   <button
@@ -547,6 +601,15 @@ export const Dashboard: React.FC = () => {
                       if (strategy) url += `&strategy=${strategy}`;
                       if (indicators) url += `&indicators=${indicators}`;
                       
+                      // Add trading params
+                      const leverage = (document.getElementById("backtest-leverage") as HTMLInputElement)?.value || "3";
+                      const tp = (document.getElementById("backtest-tp") as HTMLInputElement)?.value || "0.04";
+                      const sl = (document.getElementById("backtest-sl") as HTMLInputElement)?.value || "0.02";
+                      const trailing = (document.getElementById("backtest-trailing") as HTMLInputElement)?.value || "0";
+                      const volume = (document.getElementById("backtest-volume") as HTMLInputElement)?.value || "0";
+                      
+                      url += `&leverage=${leverage}&tp_pct=${tp}&sl_pct=${sl}&trailing_sl_pct=${trailing}&volume_filter=${volume}`;
+                      
                       // Add settings to URL
                       const settingsStr = Object.entries(settings).map(([k, v]) => `${k}=${v}`).join(",");
                       if (settingsStr) url += `&settings=${settingsStr}`;
@@ -580,6 +643,7 @@ export const Dashboard: React.FC = () => {
                         
                         if (data.job_id) {
                           setOptimizeJobId(data.job_id);
+                          setOptimizeStartTime(Date.now());
                           // Poll in background - allows tab switching
                           pollOptimization(
                             data.job_id,
@@ -587,6 +651,7 @@ export const Dashboard: React.FC = () => {
                             () => {
                               setBacktestRunning(false);
                               setOptimizeJobId(null);
+                              setOptimizeStartTime(null);
                             }
                           );
                         }
@@ -598,9 +663,9 @@ export const Dashboard: React.FC = () => {
                     className="px-4 py-2 rounded text-sm font-bold"
                     style={{ backgroundColor: "#f59e0b", color: "black", border: "2px solid #f59e0b" }}
                   >
-                    {optimizeJobId ? "⚡ Running..." : "⚡ Optimize"}
+                    ⚡ Optimize
                   </button>
-                  {optimizeJobId && (
+                  {(backtestRunning || optimizeJobId) && (
                     <button
                       onClick={async () => {
                         // Cancel by calling a cancel endpoint or just ignore results
@@ -648,9 +713,15 @@ export const Dashboard: React.FC = () => {
                   {/* Optimize results */}
                   {backtestResults.optimize && (
                     <div className="mb-4">
-                      <h3 className="text-md font-bold mb-2" style={{ color: "var(--accent)" }}>Optimization Results</h3>
+                      <h3 className="text-md font-bold mb-2" style={{ color: "var(--accent)" }}>Optimization Results
+                        {backtestResults.optimize.status === "running" && (
+                          <span className="ml-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                            ({backtestResults.optimize.results?.length || 0}/{backtestResults.optimize.total || "?"} - {elapsedSeconds}s)
+                          </span>
+                        )}
+                      </h3>
                       <div className="p-3 rounded mb-3" style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--accent)" }}>
-                        <div className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>Best Combination</div>
+                        <div className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>Best Combination {backtestResults.optimize.symbol && <span style={{ color: "var(--accent)" }}>for {backtestResults.optimize.symbol}</span>}</div>
                         <div className="flex gap-4 text-sm">
                           <div><span style={{ color: "var(--text-muted)" }}>Strategy:</span> <span style={{ color: "var(--success)" }}>{backtestResults.optimize.best?.strategy}</span></div>
                           <div><span style={{ color: "var(--text-muted)" }}>Indicators:</span> <span style={{ color: "var(--success)" }}>{(backtestResults.optimize.best?.indicators || []).join(", ")}</span></div>
@@ -658,8 +729,11 @@ export const Dashboard: React.FC = () => {
                           <div><span style={{ color: "var(--text-muted)" }}>Win Rate:</span> <span style={{ color: "var(--text-primary)" }}>{backtestResults.optimize.best?.win_rate}%</span></div>
                         </div>
                       </div>
-                      <div className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>Top 10 combinations:</div>
-                      <div className="overflow-x-auto">
+                      <div className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>
+                        Top {(backtestResults.optimize.results || []).length} combinations:
+                        {backtestResults.optimize.total && <span className="ml-2">(progress: {(backtestResults.optimize.results || []).length}/{backtestResults.optimize.total})</span>}
+                      </div>
+                      <div className="overflow-x-auto" style={{ maxHeight: "300px", overflowY: "auto" }}>
                         <table className="w-full text-xs">
                           <thead>
                             <tr style={{ borderBottom: "1px solid var(--border)" }}>
@@ -729,7 +803,7 @@ export const Dashboard: React.FC = () => {
                     <div className="p-3 rounded" style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
                       <div className="text-xs" style={{ color: "var(--text-muted)" }}>Trades</div>
                       <div className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
-                        {backtestResults.metrics?.trades_count}
+                        {backtestResults.trades_count || 0}
                       </div>
                     </div>
                     <div className="p-3 rounded" style={{ backgroundColor: "var(--bg-secondary)", border: "1px solid var(--border)" }}>

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import database as db
 from alpha_vantage import get_async_client
+from binance_data import fetch_binance_candles
 from broker import Broker, DataProvider
 from database import async_save_account, async_save_quote, async_save_trade
 from historical_data import fetch_yahoo_historical
@@ -86,6 +87,24 @@ class AsyncSimulatedDataProvider:
         """Get candles - async with fallbacks."""
         candles = None
         source = ""
+
+        # 0. Binance for BTC (fastest, free)
+        if symbol == "BTC":
+            try:
+                import time
+                interval = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "240": "4h", "D": "1d"}.get(resolution, "1h")
+                binance_symbol = "BTCUSDT"
+                # Fetch last N*2 candles to account for possible gaps, then take last N
+                fetched = await asyncio.to_thread(
+                    fetch_binance_candles, binance_symbol, interval, limit=count * 2
+                )
+                if fetched and len(fetched) > 0:
+                    # Binance returns newest first, reverse for chronological
+                    fetched = list(reversed(fetched))
+                    candles = fetched[-count:]
+                    source = "binance"
+            except Exception:
+                candles = None
 
         # Skip Alpha Vantage for BTC - it returns ETF ticker "BTC" not Bitcoin
         if symbol != "BTC":
@@ -308,7 +327,12 @@ class AsyncSimulatedBroker(Broker):
         self.account["open_trades"] = len(self.open_positions)
         self.account["positions"] = len(self.open_positions)
 
-        await async_save_trade(closed_pos)
+        # Save to DB - ensure status is updated
+        try:
+            await async_save_trade(closed_pos)
+        except Exception as e:
+            print(f"[ERROR] Failed to save closed trade: {e}")
+        
         await async_save_account(self.account)
 
         return {"status": "closed", "position": closed_pos}
@@ -358,6 +382,57 @@ class AsyncSimulatedBroker(Broker):
             pos["current_price"] = price
             pos["unrealized_pnl_usd"] = round(pnl, 2)
 
+            # Dynamic TP adjustment based on HTF RSI
+            try:
+                from database import get_db
+                db = get_db()
+                htf_rsi_enabled = db.get_setting("HTF_RSI_DYNAMIC_TP", 0)
+                if htf_rsi_enabled and htf_rsi_enabled > 0:
+                    # Get HTF candles (e.g., 30 min)
+                    htf_res = str(int(htf_rsi_enabled))
+                    htf_candles = list(db.candles.find(
+                        {"symbol": symbol, "resolution": htf_res}
+                    ).sort("timestamp", -1).limit(20))
+                    
+                    if htf_candles and len(htf_candles) >= 14:
+                        closes = [c.get("close", 0) for c in htf_candles[:14]]
+                        if closes and all(c > 0 for c in closes):
+                            gains = []
+                            losses = []
+                            for k in range(1, len(closes)):
+                                diff = closes[k] - closes[k-1]
+                                if diff > 0:
+                                    gains.append(diff)
+                                else:
+                                    losses.append(abs(diff))
+                            avg_gain = sum(gains) / 14 if gains else 0
+                            avg_loss = sum(losses) / 14 if losses else 0
+                            rs = avg_gain / avg_loss if avg_loss > 0 else 100
+                            rsi = 100 - (100 / (1 + rs))
+                            
+                            original_tp = pos.get("take_profit")
+                            entry = pos["entry_price"]
+                            direction = pos["direction"]
+                            
+                            # Adjust TP based on HTF RSI
+                            new_tp = None
+                            if direction == "buy" and rsi > 65:
+                                # Overbought - reduce TP to protect profits
+                                new_tp = entry * 1.03  # 3% instead of original
+                            elif direction == "buy" and rsi < 40:
+                                # Oversold - give more room
+                                new_tp = entry * 1.07  # 7% instead of original
+                            elif direction == "sell" and rsi < 35:
+                                new_tp = entry * 0.97
+                            elif direction == "sell" and rsi > 60:
+                                new_tp = entry * 0.93
+                            
+                            if new_tp and new_tp != original_tp:
+                                pos["take_profit"] = new_tp
+                                print(f"[DYNAMIC TP] {symbol} {direction} RSI={rsi:.0f} TP: {original_tp} -> {new_tp}")
+            except Exception as e:
+                pass  # Continue on error
+
             # Trailing stop logic
             if pos.get("trailing_enabled", False) and pos["unrealized_pnl_usd"] > 0:
                 entry = pos["entry_price"]
@@ -366,6 +441,47 @@ class AsyncSimulatedBroker(Broker):
                 be_sl = entry
                 if (dir_ == "buy" and be_sl > curr_sl) or (dir_ == "sell" and be_sl < curr_sl):
                     pos["stop_loss"] = be_sl
+
+            # === TREND REVERSAL EARLY EXIT ===
+            # Check if trend has reversed - close position if RSI/MACD shows opposite signal
+            try:
+                trend_exit_enabled = db.get_setting("TREND_REVERSAL_EXIT", 0)
+                if trend_exit_enabled and pos.get("unrealized_pnl_usd", 0) > 0:  # Only close if in profit
+                    # Get short-term candles for trend detection
+                    st_candles = await self._data_provider.get_candles(symbol, "15", 30)
+                    if st_candles and len(st_candles) >= 20:
+                        closes = [c["close"] for c in st_candles[-20:]]
+                        
+                        # Calculate RSI
+                        gains, losses = [], []
+                        for i in range(1, len(closes)):
+                            diff = closes[i] - closes[i-1]
+                            if diff > 0: gains.append(diff)
+                            else: losses.append(abs(diff))
+                        avg_gain = sum(gains) / 14 if gains else 0
+                        avg_loss = sum(losses) / 14 if losses else 0
+                        rsi = 100 - (100 / (1 + avg_gain/avg_loss)) if avg_loss > 0 else 50
+                        
+                        # Check for reversal
+                        entry = pos["entry_price"]
+                        direction = pos["direction"]
+                        reversal = False
+                        
+                        if direction == "buy" and rsi > 70:  # Overbought - trend may reverse down
+                            reversal = True
+                            reason = f"RSI={rsi:.0f} overbought"
+                        elif direction == "sell" and rsi < 30:  # Oversold - trend may reverse up
+                            reversal = True
+                            reason = f"RSI={rsi:.0f} oversold"
+                        
+                        if reversal:
+                            # Only close if we have some profit (>0.5%)
+                            profit_pct = (price - entry) / entry * 100 if direction == "buy" else (entry - price) / entry * 100
+                            if profit_pct > 0.5:
+                                print(f"[TREND EXIT] {symbol} {direction} {reason} profit={profit_pct:.1f}% - closing early")
+                                to_close.append((pos["id"], price, "TREND"))
+            except Exception as e:
+                pass  # Continue on error
 
             tp = pos.get("take_profit")
             sl = pos.get("stop_loss")
@@ -437,10 +553,6 @@ class AsyncSimulatedBroker(Broker):
         self.account["equity_usd"] = round(self.account["balance_usd"] + unrealized_usd, 2)
         self.account["open_trades"] = len(self.open_positions)
         self.account["positions"] = len(self.open_positions)
-
-        for pos in self.open_positions:
-            await async_save_trade(pos)
-        await async_save_account(self.account)
 
         return auto_closed
 

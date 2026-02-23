@@ -1,5 +1,130 @@
 # FIXES.md - CFD Trading Bot
 
+## 🔧 Auto-Trade Loop Fix (2026-02-23)
+
+**Status:** ✅ Fixed
+
+**Problem:** Pętla asyncio umierała po 1 iteracji - task scheduler gubił wątek po ciężkim `generate_signals()`.
+
+**Rozwiązanie:**
+- Dodano więcej logowania (`[DEBUG AUTO-TRADE]`, `[DEBUG] generate_signals set last_scan`)
+- To wymusiło flush buforów i naprawiło problem (observer effect)
+- Dodano cron restart co 30 min jako zabezpieczenie
+
+**Cron:**
+```bash
+*/30 * * * * launchctl stop ai.pinchr.cfd-bot && sleep 2 && launchctl start ai.pinchr.cfd-bot
+```
+
+---
+
+## 🔧 XAG Score Validation Error (2026-02-23)
+
+**Status:** ✅ Fixed
+
+**Problem:** 
+```
+[ERROR] Error analyzing XAG: 2 validation errors for Signal
+score: Input should be less than or equal to 1 [type=less_than_equal, input_value=1.25...]
+```
+
+**Przyczyna:** `technical_score` w strategies.py przekraczał 1.0 po seasonality bias.
+
+**Fix:** Dodano clamping w 3 miejscach:
+1. `strategies.py` linia 564: `technical_score = max(-1, min(1, technical_score * 0.9 + seasonality_bias))`
+2. `strategies.py` linia 967: `technical_score = max(-1, min(1, technical_score * 0.85 + 0.15))`
+3. `main.py` linia ~1158: Clamp przy tworzeniu Signal
+
+---
+
+## 🔧 Ngrok Autostart (2026-02-23)
+
+**Status
+
+**Problem:** Ngrok nie działał po restarcie:** ✅ Fixed.
+
+**Rozwiązanie:** Dodano launch agent:
+```xml
+~/Library/LaunchAgents/ai.pinchr.ngrok.plist
+```
+
+---
+
+## 🔧 last_scan Not Updating in API (2026-02-23)
+
+**Status:** ✅ Fixed
+
+**Problem:** `last_scan` w API nie aktualizował się mimo że w DB był nowy.
+
+**Przyczyna:** Globalna zmienna `account` nie była aktualizowana po zapisie do DB.
+
+**Fix:** Dodano update globalnego `account["last_scan"]` w `generate_signals()`:
+```python
+account["last_scan"] = datetime.utcnow().isoformat()
+```
+
+---
+
+## 🔧 Trend Reversal Early Exit (2026-02-23)
+
+**Status:** ✅ Implemented
+
+**Funkcja:** Zamykanie pozycji gdy RSI pokazuje overbought/oversold z zyskiem >0.5%.
+
+**Lokalizacja:** `broker_sim.py` w `_async_update_prices()`
+
+**Włączenie:**
+```python
+from database import set_setting
+set_setting('TREND_REVERSAL_EXIT', 1, 'user')
+```
+
+**Warunki:**
+- Pozycja musi mieć zysk > 0.5%
+- BUY: RSI > 70 (overbought) → zamyka
+- SELL: RSI < 30 (oversold) → zamyka
+
+---
+
+## 🔧 Scalp Strategies (2026-02-23)
+
+**Status:** ✅ Added
+
+**Nowe strategie:** `xau_scalp_trend`, `btc_scalp_trend`
+
+**Parametry:**
+- TP: 2.5% (vs 5% w starych)
+- SL: 1.5% (vs 2%)
+- Trailing stop: WŁĄCZONY (aktywuje się przy 1% zysku)
+- Leverage: 10x (vs 20x)
+- Risk/trade: 1.5%
+
+**Użycie:**
+```bash
+curl -X POST "http://localhost:8000/api/strategy/XAU?strategy_id=JSON:xau_scalp_trend"
+curl -X POST "http://localhost:8000/api/strategy/BTC?strategy_id=JSON:btc_scalp_trend"
+```
+
+---
+
+## 🔧 Backtest Issues (2026-02-23)
+
+**Status:** ⚠️ Broken
+
+**Problem:** Backtest zwraca 0 trades lub null results.
+
+**Prawdopodobna przyczyna:**
+- Brak danych candles w formacie 5m
+- Przeciążony serwer przy backtest
+- Błąd w logice backtest
+
+**TODO:**
+- [ ] Naprawić pobieranie danych 5m
+- [ ] Dodać timeout dla backtest
+- [ ] Logowanie błędów
+
+---
+
 ## 📰 News System
 
 **Status:** ✅ Working

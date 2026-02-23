@@ -105,7 +105,7 @@ def fetch_yahoo_historical(
                 dt = datetime.utcfromtimestamp(ts)
                 candles.append(
                     {
-                        "timestamp": dt.isoformat(),
+                        "timestamp": dt.isoformat() + "Z",
                         "time": dt.strftime("%m/%d") if interval.endswith("d") else dt.strftime("%H:%M"),
                         "open": round(o * multiplier, 2),
                         "high": round(h * multiplier, 2),
@@ -144,7 +144,7 @@ def fetch_yahoo_historical(
                 dt = datetime.strptime(row["Date"], "%Y-%m-%d")
                 candles.append(
                     {
-                        "timestamp": dt.isoformat(),
+                        "timestamp": dt.isoformat() + "Z",
                         "time": dt.strftime("%m/%d"),
                         "open": round(float(row["Open"]) * multiplier, 2),
                         "high": round(float(row["High"]) * multiplier, 2),
@@ -194,7 +194,7 @@ def load_csv_candles(filepath: str, multiplier: float = 1.0) -> Optional[List[Di
 
                 candles.append(
                     {
-                        "timestamp": dt.isoformat(),
+                        "timestamp": dt.isoformat() + "Z",
                         "time": dt.strftime("%m/%d") if dt.hour == 0 else dt.strftime("%H:%M"),
                         "open": round(float(row["Open"]) * multiplier, 2),
                         "high": round(float(row["High"]) * multiplier, 2),
@@ -233,7 +233,7 @@ def fetch_alpha_vantage_historical(
                     dt = datetime.now()
                 result.append(
                     {
-                        "timestamp": dt.isoformat(),
+                        "timestamp": dt.isoformat() + "Z",
                         "time": dt.strftime("%m/%d"),
                         "open": round(c["open"], 2),
                         "high": round(c["high"], 2),
@@ -312,7 +312,7 @@ def generate_sample_data(
 
             candles.append(
                 {
-                    "timestamp": dt.isoformat(),
+                    "timestamp": dt.isoformat() + "Z",
                     "time": dt.strftime("%m/%d"),
                     "open": round(open_price, 2),
                     "high": round(high, 2),
