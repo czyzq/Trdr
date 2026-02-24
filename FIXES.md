@@ -1,5 +1,59 @@
 # FIXES.md - CFD Trading Bot
 
+## 🔧 Frontend Build Errors - Duplicate Identifiers (2026-02-24)
+
+**Status:** ✅ FIXED
+
+**Problem:** 
+```
+src/components/CandlestickChart.tsx(42,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/CandlestickChart.tsx(43,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/CandlestickChart.tsx(236,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/CandlestickChart.tsx(237,3): error TS2300: Duplicate identifier 'selectedPosition'.
+```
+
+**Fix:** Removed duplicate `selectedPosition` declarations in:
+- Interface (lines 42-43) - removed duplicate
+- Function params (lines 236-237) - removed duplicate
+
+---
+
+## 🔧 MainTab.tsx - Missing setSelectedSymbol (2026-02-24)
+
+**Status:** ✅ FIXED
+
+**Problem:**
+```
+src/components/MainTab.tsx(441,59): error TS2552: Cannot find name 'setSelectedSymbol'. Did you mean 'selectedSymbol'?
+src/components/MainTab.tsx(441,77): error TS18047: 'pos' is possibly 'null'.
+```
+
+**Fix:** Changed `setSelectedSymbol(pos.symbol)` to `onSymbolSelect(pos.symbol)` and added null check for `pos`.
+
+---
+
+## 🔧 Fixer Cron Script (2026-02-24)
+
+**Status:** ✅ Added
+
+**Problem:** Need automated error checking every 30 minutes.
+
+**Solution:** Created `/Users/pinchr/dev/cfd-trading-bot/fixer.sh` that:
+- Checks if frontend (port 5173) and backend (port 8000) are running
+- Restarts services if not running
+- Checks backend API health
+- Runs TypeScript build to catch errors
+- Checks MongoDB connection
+- Logs to `/Users/pinchr/dev/cfd-trading-bot/logs/fixer.log`
+- Updates FIXES.md with any issues found
+
+**Cron:**
+```bash
+*/30 * * * * /Users/pinchr/dev/cfd-trading-bot/fixer.sh >> /Users/pinchr/dev/cfd-trading-bot/logs/fixer.log 2>&1
+```
+
+---
+
 ## 🔧 Auto-Trade Loop Fix (2026-02-23)
 
 **Status:** ✅ Fixed
@@ -213,3 +267,25 @@ curl -X POST "http://localhost:8000/api/strategy/BTC?strategy_id=JSON:btc_scalp_
 - [x] Save strategy - zapisz nową strategię z własną nazwą
 - [ ] Speed control (x1, x5, x10...)
 - [ ] Real-time updates podczas backtestu
+
+## 🔧 Frontend Build Error (2026-02-24 00:49:42)
+**Status:** ✅ Fixed (2026-02-24 08:16)
+
+**Problem:** src/components/CandlestickChart.tsx(42,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/CandlestickChart.tsx(43,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/CandlestickChart.tsx(236,3): error TS2300: Duplicate identifier 'selectedPosition'.
+
+**Full Output:**
+```
+
+> polymarket-bot-frontend@0.1.0 build
+> tsc && vite build
+
+src/components/CandlestickChart.tsx(42,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/CandlestickChart.tsx(43,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/CandlestickChart.tsx(236,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/CandlestickChart.tsx(237,3): error TS2300: Duplicate identifier 'selectedPosition'.
+src/components/MainTab.tsx(441,59): error TS2552: Cannot find name 'setSelectedSymbol'. Did you mean 'selectedSymbol'?
+src/components/MainTab.tsx(441,77): error TS18047: 'pos' is possibly 'null'.
+```
+

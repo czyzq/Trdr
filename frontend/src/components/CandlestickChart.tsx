@@ -40,7 +40,6 @@ interface CandlestickChartProps {
   resolution?: string;
   trades?: Trade[];
   selectedPosition?: any;
-  selectedPosition?: any;
 }
 
 // ── Client-side indicator calculations ──
@@ -233,7 +232,6 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   showRSI = true,
   resolution = "60",
   trades = [],
-  selectedPosition = null,
   selectedPosition = null,
 }) => {
   const [hoveredCandle, setHoveredCandle] = useState<number | null>(null);
@@ -1546,6 +1544,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             
             {/* Entry Line */}
             <line x1="0" x2={chartWidth} y1={priceToY(selectedPosition.entry_price)} y2={priceToY(selectedPosition.entry_price)} stroke="#fbbf24" strokeWidth="1" strokeDasharray="3,2" opacity="0.6" />
+          </g>
           </g>
         )}
 

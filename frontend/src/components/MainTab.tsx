@@ -438,7 +438,7 @@ export const MainTab: React.FC<MainTabProps> = ({
 
       {/* Open Positions Section - always visible but compact */}
       <OpenPositionsSummary
-        onSelectPosition={(pos) => { setSelectedPos(pos); setSelectedSymbol(pos.symbol); }} lastRefresh={lastRefresh.positions} />
+        onSelectPosition={(pos) => { if (pos) { setSelectedPos(pos); onSymbolSelect(pos.symbol); } }} lastRefresh={lastRefresh.positions} />
 
       {/* Signals Section - collapsible */}
       <div
