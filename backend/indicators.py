@@ -9,6 +9,119 @@ from typing import Dict, List, Optional, Tuple
 class TechnicalIndicators:
     """Calculate technical indicators from price data"""
 
+    # ── Backward compatibility wrapper ─────────────────────────────────────
+    def __init__(self, candles: List[Dict] = None):
+        """Legacy constructor for backward compatibility with tests."""
+        self.candles = candles or []
+        self.closes = [c.get("close", c.get("close_price", 0)) for c in self.candles]
+        self.highs = [c.get("high", c.get("high_price", 0)) for c in self.candles]
+        self.lows = [c.get("low", c.get("low_price", 0)) for c in self.candles]
+
+    def calculate_rsi(self, period: int = 14) -> Dict:
+        """Legacy method - returns dict with rsi key."""
+        result = TechnicalIndicators.rsi(self.closes, period)
+        return {"rsi": result} if result is not None else {"rsi": None}
+
+    def calculate_macd(self, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict:
+        """Legacy method."""
+        result = TechnicalIndicators.macd(self.closes, fast, slow, signal)
+        return result or {}
+
+    def calculate_bollinger_bands(self, period: int = 20, std_dev: float = 2.0) -> Dict:
+        """Legacy method."""
+        result = TechnicalIndicators.bollinger_bands(self.closes, period, std_dev)
+        if not result:
+            return {}
+        # Map to legacy keys expected by tests
+        return {
+            "bb_upper": result.get("upper"),
+            "bb_middle": result.get("middle"),
+            "bb_lower": result.get("lower"),
+            "bb_position": result.get("position"),
+            "bb_std_dev": result.get("std_dev"),
+        }
+
+    def calculate_adx(self, period: int = 14) -> Dict:
+        """Legacy method."""
+        result = TechnicalIndicators.adx(self.highs, self.lows, self.closes, period)
+        return result or {}
+
+    def calculate_sma(self, period: int = 20) -> Dict:
+        """Legacy method - returns dict with sma key."""
+        result = TechnicalIndicators.sma(self.closes, period)
+        return {"sma": result} if result is not None else {"sma": None}
+
+    def calculate_atr(self, period: int = 14) -> Dict:
+        """Legacy method."""
+        result = TechnicalIndicators.atr(self.highs, self.lows, self.closes, period)
+        return {"atr": result} if result is not None else {"atr": None}
+
+    def calculate_stochastic_rsi(self, rsi_period: int = 14, stoch_period: int = 14) -> Dict:
+        """Legacy method."""
+        result = TechnicalIndicators.stochastic_rsi(self.closes, rsi_period, stoch_period)
+        return result or {}
+
+    def calculate_volume_ratio(self, period: int = 20) -> Dict:
+        """Legacy method."""
+        result = TechnicalIndicators.volume_profile(self.candles, period)
+        return result or {}
+
+    def calculate_all_indicators(self, period: int = 14) -> Dict:
+        """Legacy method - alias for calculate_all."""
+        return TechnicalIndicators.calculate_all(self.candles, period) or {}
+
+    def calculate_all(self, candles=None) -> Dict:
+        """Legacy method - calculate all indicators."""
+        if candles is None:
+            candles = self.candles
+        return TechnicalIndicators.calculate_all(candles, 14) or {}
+
+    # ── Additional legacy methods ─────────────────────────────────────────
+
+    def _get_rsi_zone(self, rsi: float) -> str:
+        """Get RSI zone - OVERSOLD/NEUTRAL/OVERBOUGHT."""
+        if rsi is None:
+            return "NEUTRAL"
+        if rsi < 30:
+            return "OVERSOLD"
+        if rsi > 70:
+            return "OVERBOUGHT"
+        return "NEUTRAL"
+
+    def _get_macd_bullish(self, macd_result: Dict) -> bool:
+        """Check if MACD is bullish."""
+        if not macd_result:
+            return False
+        hist = macd_result.get("histogram", 0)
+        return hist > 0
+
+    def _get_bb_zone(self, bb_result: Dict) -> str:
+        """Get Bollinger Bands zone."""
+        if not bb_result:
+            return "MIDDLE"
+        position = bb_result.get("position", 0.5)
+        if position < 0.2:
+            return "LOWER"
+        if position > 0.8:
+            return "UPPER"
+        return "MIDDLE"
+
+    def _get_trend(self, adx_result: Dict) -> str:
+        """Get trend direction from ADX."""
+        if not adx_result:
+            return "NEUTRAL"
+        if adx_result.get("adx", 0) < 25:
+            return "NEUTRAL"
+        plus_di = adx_result.get("plus_di", 0)
+        minus_di = adx_result.get("minus_di", 0)
+        if plus_di > minus_di:
+            return "BULLISH"
+        if minus_di > plus_di:
+            return "BEARISH"
+        return "NEUTRAL"
+
+    # ── Static methods ─────────────────────────────────────────────────────
+
     @staticmethod
     def rsi(prices: List[float], period: int = 14) -> Optional[float]:
         """
