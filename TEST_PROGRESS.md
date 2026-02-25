@@ -1,10 +1,10 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
-## Last Updated: 2026-02-25 04:36
+## Last Updated: 2026-02-25 09:36
 
 ## Status Summary
-- Total Tests: 170
-- Passing: 170 ✅
+- Total Tests: 192
+- Passing: 192 ✅
 - Failing: 0 ❌
 - Skipped: 2 ⏭️ (trailing_stop not implemented)
 
@@ -18,7 +18,9 @@
 - [x] Fixed all remaining failing tests (5 total)
 - [x] Enabled async tests with pytest-asyncio
 - [x] Added size validation to broker (rejects size <= 0)
-- [x] All 170 tests passing (2 skipped by design - trailing_stop)
+- [x] Created test_risk.py - Risk management tests (TP/SL)
+- [x] Created test_news.py - News/sentiment tests
+- [x] All 192 tests passing (2 skipped by design - trailing_stop)
 
 ## Today's Work (2026-02-25)
 - 04:30 - Installed pytest-asyncio, now running 168 tests (was 154 sync-only)
@@ -30,6 +32,26 @@
 - 05:36 - Added size validation to broker (rejects size <= 0)
 - 05:37 - Enabled 2 previously skipped tests (negative/zero size)
 - 05:38 - 170 tests passing, 2 skipped (trailing_stop only)
+- 06:36 - Verified all 170 tests still passing ✅
+- 07:36 - Verified all 170 tests still passing ✅ (Status check)
+- 08:36 - Verified all 170 tests still passing ✅ (Hourly check)
+- 09:36 - Created test_risk.py (13 tests - TP/SL functionality)
+- 09:36 - Created test_news.py (10 tests - sentiment analysis)
+- 09:36 - All 192 tests passing! ✅
+
+## New Test Files Created
+
+### test_risk.py (13 tests)
+- TestTakeProfit: Opening positions with TP
+- TestStopLoss: Opening positions with SL
+- TestRiskDefaults: Default TP/SL calculation
+- TestCloseWithTP: Manual closing at TP/SL prices
+- TestEdgeCases: No TP/SL, TP-only, SL-only
+
+### test_news.py (10 tests)
+- TestNewsSentiment: Bullish/bearish/neutral keyword detection
+- TestNewsClientIntegration: get_news method testing
+- TestNewsClientEdgeCases: Empty/long/special character handling
 
 ## Test Fixes Applied
 1. **broker_sim.py**: Added `initial_balance` optional parameter to `AsyncSimulatedBroker.__init__()` to allow test-specific balance overrides
@@ -59,7 +81,7 @@
 
 ## Remaining Issues
 - 2 tests skipped (by design - trailing_stop not implemented)
-- No other issues - all 170 tests passing!
+- No other issues - all 192 tests passing!
 
 ---
 
