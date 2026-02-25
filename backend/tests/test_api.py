@@ -193,7 +193,14 @@ class TestBacktestEndpoint:
 
     def test_get_backtest(self, client):
         """Test GET /api/backtest with parameters."""
-        response = client.get("/api/backtest?symbol=XAU&resolution=60&days=30&min_score=0.1")
+        # Mock database for backtest endpoint
+        mock_db = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = []
+        mock_db.candles.find.return_value = mock_cursor
+        
+        with patch('database.get_db', return_value=mock_db):
+            response = client.get("/api/backtest?symbol=XAU&resolution=60&days=30&min_score=0.1")
         
         # Should return backtest results or error
         assert response.status_code in [200, 400, 500]

@@ -180,8 +180,14 @@ class AsyncSimulatedDataProvider:
 class AsyncSimulatedBroker(Broker):
     """Async paper-trading broker."""
 
-    def __init__(self):
+    def __init__(self, initial_balance: Optional[float] = None):
         self.account: Dict[str, Any] = db.load_account()
+        # Allow overriding initial balance for testing
+        if initial_balance is not None:
+            self.account["balance_usd"] = initial_balance
+            self.account["equity_usd"] = initial_balance
+            self.account["available_usd"] = initial_balance
+            self.account["peak_equity_usd"] = initial_balance
         self.open_positions: List[Dict[str, Any]] = db.load_open_positions()
         self.closed_positions: List[Dict[str, Any]] = db.load_closed_positions()
         self._data_provider = AsyncSimulatedDataProvider()
