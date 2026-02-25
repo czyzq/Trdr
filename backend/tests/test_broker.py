@@ -190,7 +190,6 @@ class TestEdgeCases:
         # Should fail with insufficient margin error
         assert "error" in result or broker.account["available_usd"] >= 0
 
-    @pytest.mark.skip(reason="broker doesn't validate negative/zero size")
     @pytest.mark.asyncio
     async def test_open_position_negative_size(self):
         """Test opening position with negative size."""
@@ -208,7 +207,6 @@ class TestEdgeCases:
         # Should return error
         assert "error" in result
 
-    @pytest.mark.skip(reason="broker doesn't validate negative/zero size")
     @pytest.mark.asyncio
     async def test_open_position_zero_size(self):
         """Test opening position with zero size."""

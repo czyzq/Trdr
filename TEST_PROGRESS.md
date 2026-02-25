@@ -3,10 +3,10 @@
 ## Last Updated: 2026-02-25 04:36
 
 ## Status Summary
-- Total Tests: 172
-- Passing: 168 ✅
+- Total Tests: 170
+- Passing: 170 ✅
 - Failing: 0 ❌
-- Skipped: 4 ⏭️ (trailing_stop not implemented + broker size validation)
+- Skipped: 2 ⏭️ (trailing_stop not implemented)
 
 ## Completed Tasks
 - [x] TEST_PLAN.md created
@@ -17,7 +17,8 @@
 - [x] Fixed test_broker.py initialization tests
 - [x] Fixed all remaining failing tests (5 total)
 - [x] Enabled async tests with pytest-asyncio
-- [x] All tests now passing (168/168)
+- [x] Added size validation to broker (rejects size <= 0)
+- [x] All 170 tests passing (2 skipped by design - trailing_stop)
 
 ## Today's Work (2026-02-25)
 - 04:30 - Installed pytest-asyncio, now running 168 tests (was 154 sync-only)
@@ -26,6 +27,9 @@
 - 04:34 - Fixed close_reason -> result field in TP test
 - 04:35 - Skipped 4 tests (trailing_stop not implemented, broker size validation)
 - 04:36 - All 168 tests passing!
+- 05:36 - Added size validation to broker (rejects size <= 0)
+- 05:37 - Enabled 2 previously skipped tests (negative/zero size)
+- 05:38 - 170 tests passing, 2 skipped (trailing_stop only)
 
 ## Test Fixes Applied
 1. **broker_sim.py**: Added `initial_balance` optional parameter to `AsyncSimulatedBroker.__init__()` to allow test-specific balance overrides
@@ -44,7 +48,9 @@
 
 8. **test_broker.py** (today): Fixed close_reason -> result field (broker returns "win"/"loss", not "take_profit"/"manual")
 
-9. **test_broker.py** (today): Skipped 4 tests for unimplemented features (trailing_stop, size validation)
+10. **broker_sim.py** (today): Added size validation - rejects positions with size <= 0
+
+11. **test_broker.py** (today): Enabled 2 previously skipped tests - size validation now works
 
 ## Git Status
 - Branch: `feature/add-tests`
@@ -52,8 +58,8 @@
 - PR: Not created (gh not authenticated)
 
 ## Remaining Issues
-- None! All tests passing.
-- 4 tests skipped (by design - feature not implemented)
+- 2 tests skipped (by design - trailing_stop not implemented)
+- No other issues - all 170 tests passing!
 
 ---
 

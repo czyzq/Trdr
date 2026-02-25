@@ -229,6 +229,8 @@ class AsyncSimulatedBroker(Broker):
             return {"error": "Direction must be 'buy' or 'sell'"}
         if entry_price is None:
             return {"error": "entry_price is required"}
+        if size <= 0:
+            return {"error": "Invalid size: must be greater than 0"}
 
         leverage = INSTRUMENTS[symbol].get("leverage", 20)
         margin_usd = entry_price * size / leverage
