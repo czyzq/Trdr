@@ -61,6 +61,29 @@ class TechnicalIndicators:
         result = TechnicalIndicators.stochastic_rsi(self.closes, rsi_period, stoch_period)
         return result or {}
 
+    def calculate_stoch_rsi(self, period: int = 14) -> Dict:
+        """Alias for calculate_stochastic_rsi for backward compatibility."""
+        return self.calculate_stochastic_rsi(period, period)
+
+    def calculate_sma_cross(self, fast: int = 20, slow: int = 50) -> Dict:
+        """Calculate SMA crossover - returns both SMA values."""
+        sma_fast = TechnicalIndicators.sma(self.closes, fast)
+        sma_slow = TechnicalIndicators.sma(self.closes, slow)
+        return {
+            "sma_fast": sma_fast,
+            "sma_slow": sma_slow,
+            f"sma_{fast}": sma_fast,
+            f"sma_{slow}": sma_slow,
+        }
+
+    def analyze_volume(self) -> Dict:
+        """Analyze volume - alias for calculate_volume_ratio."""
+        return self.calculate_volume_ratio(20)
+
+    def detect_candlestick_patterns(self) -> Dict:
+        """Detect candlestick patterns - alias for candlestick_patterns."""
+        return TechnicalIndicators.candlestick_patterns(self.candles)
+
     def calculate_volume_ratio(self, period: int = 20) -> Dict:
         """Legacy method."""
         result = TechnicalIndicators.volume_profile(self.candles, period)
@@ -68,13 +91,28 @@ class TechnicalIndicators:
 
     def calculate_all_indicators(self, period: int = 14) -> Dict:
         """Legacy method - alias for calculate_all."""
-        return TechnicalIndicators.calculate_all(self.candles, period) or {}
+        return TechnicalIndicators.calculate_all_indicators_static(self.candles, period) or {}
 
-    def calculate_all(self, candles=None) -> Dict:
-        """Legacy method - calculate all indicators."""
-        if candles is None:
-            candles = self.candles
-        return TechnicalIndicators.calculate_all(candles, 14) or {}
+    def calculate_all(self, candles=None, symbol: str = None, period: int = 14) -> Dict:
+        """Calculate all indicators.
+        
+        Can be called as:
+        - Instance method: ti.calculate_all() - uses self.candles
+        - Class method: TechnicalIndicators.calculate_all(candles_list) - static call
+        
+        For backward compatibility, also accepts being called with candles as first arg
+        (class method style): TechnicalIndicators.calculate_all(candles_list)
+        """
+        # Detect if called as class method (self is actually the candles list)
+        # If self is a list, it's a class method call where candles was passed as first arg
+        if isinstance(self, list):
+            # Class method call - self is actually candles
+            return TechnicalIndicators.calculate_all_indicators_static(self, period) or {}
+        else:
+            # Instance method call - self is the TechnicalIndicators instance
+            if candles is None:
+                candles = self.candles
+            return TechnicalIndicators.calculate_all_indicators_static(candles, period) or {}
 
     # ── Additional legacy methods ─────────────────────────────────────────
 
@@ -237,7 +275,15 @@ class TechnicalIndicators:
         upper = middle + (std_dev * std)
         lower = middle - (std_dev * std)
 
-        return {"upper": upper, "middle": middle, "lower": lower, "std_dev": std}
+        # Calculate position: (close - lower) / (upper - lower)
+        # Returns value between 0 and 1 (0 = at lower band, 1 = at upper band)
+        current_price = prices[-1] if prices else middle
+        if upper != lower:
+            position = (current_price - lower) / (upper - lower)
+        else:
+            position = 0.5
+
+        return {"upper": upper, "middle": middle, "lower": lower, "std_dev": std, "position": position}
 
     @staticmethod
     def momentum(prices: List[float], period: int = 10) -> Optional[float]:
@@ -457,9 +503,9 @@ class TechnicalIndicators:
         }
 
     @staticmethod
-    def calculate_all(candles: List[Dict], period: int = 14) -> Optional[Dict]:
+    def calculate_all_indicators_static(candles: List[Dict], period: int = 14) -> Optional[Dict]:
         """
-        Calculate all indicators from candlestick data
+        Calculate all indicators from candlestick data (static version)
         """
         if not candles or len(candles) < max(26, period):
             return None

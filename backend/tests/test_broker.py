@@ -26,15 +26,15 @@ class TestBrokerInitialization:
         broker = SimulatedBroker()
         
         assert broker is not None
-        assert hasattr(broker, 'positions')
+        assert hasattr(broker, 'open_positions')
         assert hasattr(broker, 'closed_positions')
-        assert hasattr(broker, 'balance')
+        assert hasattr(broker, 'account')
 
     def test_broker_initial_balance(self):
         """Test initial balance is set correctly."""
         broker = SimulatedBroker()
         
-        assert broker.balance == 10000.0  # Default initial balance
+        assert broker.account["balance_usd"] == 3000.0  # Default initial balance
 
 
 class TestPositionOpening:

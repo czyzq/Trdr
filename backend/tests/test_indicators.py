@@ -389,10 +389,11 @@ class TestCandlestickPatterns:
 
     def test_bullish_engulfing(self):
         """Test bullish engulfing pattern detection."""
-        # Create a bearish candle followed by bullish engulfing
+        # Create a bearish candle followed by bullish engulfing (need 3 candles minimum)
         candles = [
             {"timestamp": "2026-01-01", "open": 100, "high": 102, "low": 98, "close": 99, "volume": 1000},
-            {"timestamp": "2026-01-02", "open": 98, "high": 103, "low": 97, "close": 102, "volume": 1000}
+            {"timestamp": "2026-01-02", "open": 99, "high": 101, "low": 97, "close": 100, "volume": 1000},
+            {"timestamp": "2026-01-03", "open": 98, "high": 103, "low": 97, "close": 102, "volume": 1000}
         ]
         
         ti = TechnicalIndicators(candles)
@@ -404,7 +405,8 @@ class TestCandlestickPatterns:
         """Test bearish engulfing pattern detection."""
         candles = [
             {"timestamp": "2026-01-01", "open": 100, "high": 102, "low": 98, "close": 101, "volume": 1000},
-            {"timestamp": "2026-01-02", "open": 102, "high": 103, "low": 97, "close": 98, "volume": 1000}
+            {"timestamp": "2026-01-02", "open": 101, "high": 103, "low": 99, "close": 100, "volume": 1000},
+            {"timestamp": "2026-01-03", "open": 102, "high": 103, "low": 97, "close": 98, "volume": 1000}
         ]
         
         ti = TechnicalIndicators(candles)
