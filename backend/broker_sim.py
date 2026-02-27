@@ -299,7 +299,18 @@ class AsyncSimulatedBroker(Broker):
             return {"error": f"Position {position_id} not found"}
 
         if exit_price is None:
-            exit_price = position.get("current_price", position["entry_price"])
+            # Always get fresh price for accurate P&L calculation
+            try:
+                candles = await self._data_provider.get_candles(position["symbol"], "60", 1)
+                if candles and len(candles) > 0:
+                    exit_price = candles[-1]["close"]
+                else:
+                    # Fallback to quote
+                    quote = await self._data_provider.get_quote(position["symbol"])
+                    exit_price = quote.get("price") if quote else position.get("current_price", position["entry_price"])
+            except Exception:
+                # Last resort fallback
+                exit_price = position.get("current_price", position["entry_price"])
 
         pos_leverage = position.get("leverage", 1)
         if position["direction"] == "buy":
