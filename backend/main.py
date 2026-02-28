@@ -255,6 +255,19 @@ event_log = db.load_event_log()  # Restore log from DB on startup
 data_provider = create_data_provider()
 broker = create_broker(data_provider)
 
+# Enable Dynamic Positions feature
+try:
+    broker.enable_dynamic_exit(True, decay_threshold=0.25)  # Close if signal drops 25%
+    try:
+        log_event("[DYNAMIC-POSITIONS] Enabled with 25% decay threshold", "info")
+    except:
+        print("[DYNAMIC-POSITIONS] Enabled with 25% decay threshold")
+except Exception as e:
+    try:
+        log_event(f"[DYNAMIC-POSITIONS] Not available: {e}", "warning")
+    except:
+        print(f"[DYNAMIC-POSITIONS] Not available: {e}")
+
 # Convenience references (broker owns this state)
 account = broker.get_account()
 open_positions = broker.get_open_positions() if hasattr(broker, "open_positions") else []
@@ -1349,6 +1362,29 @@ async def auto_trade_loop():
             min_score_boost = account.get("_min_score_boost", 0.0)
 
             if can_trade:
+                # ── Step 2.5: Dynamic Positions - close weak profitable positions ──
+                # Build current signals dict for dynamic exit check
+                current_signals = {s.symbol: s.score for s in signals if s.direction not in (SignalDirection.NEUTRAL,)}
+                positions_to_close = broker.check_dynamic_exit(current_signals)
+                if positions_to_close:
+                    log_event(f"[DYNAMIC-EXIT] Checking {len(positions_to_close)} positions for exit...", "info")
+                    for pos_id in positions_to_close:
+                        # Get fresh price for closing
+                        pos = next((p for p in open_positions if p["id"] == pos_id), None)
+                        if pos:
+                            try:
+                                quote = await data_provider.get_quote(pos["symbol"])
+                                exit_price = quote.get("price") if quote else None
+                            except:
+                                exit_price = None
+                            result = await broker.close_position(pos_id, exit_price=exit_price)
+                            if "error" not in result:
+                                pnl = result.get("position", {}).get("pnl_usd", 0)
+                                log_event(f"[DYNAMIC-CLOSE] {pos['symbol']} | P&L: ${pnl:.2f} | Signal decayed", "info")
+                            else:
+                                log_event(f"[DYNAMIC-CLOSE] Failed: {result['error']}", "warning")
+                    await async_save_account(account)
+
                 for signal in signals:
                     if signal.direction in (SignalDirection.NEUTRAL,):
                         continue
@@ -1384,6 +1420,12 @@ async def auto_trade_loop():
                     # Skip if market is closed for this symbol
                     if not is_market_open(sym):
                         log_event(f"[AUTO-TRADE] Skipping {sym} - market closed ({get_market_hours(sym)})", "info")
+                        continue
+
+                    # Check position limit BEFORE opening
+                    max_positions = db.get_setting("MAX_OPEN_POSITIONS", 3)
+                    if len(open_positions) >= max_positions:
+                        log_event(f"[AUTO-TRADE] Skipping {sym} - max {max_positions} positions reached", "info")
                         continue
 
                     # Get CURRENT market price (not the signal's historical entry_point)
@@ -1424,6 +1466,7 @@ async def auto_trade_loop():
                         take_profit=take_profit,
                         stop_loss=stop_loss,
                         entry_price=entry_price,
+                        signal_score=signal.score,
                     )
                     if "error" not in result:
                         log_event(

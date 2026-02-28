@@ -191,6 +191,52 @@ class AsyncSimulatedBroker(Broker):
         self.open_positions: List[Dict[str, Any]] = db.load_open_positions()
         self.closed_positions: List[Dict[str, Any]] = db.load_closed_positions()
         self._data_provider = AsyncSimulatedDataProvider()
+        self._max_positions = 3  # Default max positions
+        self._dynamic_exit_enabled = False
+        self._signal_decay_threshold = 0.3  # Close if signal drops by 30%
+
+    def set_max_positions(self, max_pos: int):
+        """Set maximum open positions."""
+        self._max_positions = max_pos
+
+    def enable_dynamic_exit(self, enabled: bool = True, decay_threshold: float = 0.3):
+        """Enable dynamic position management - close positions with weak signals to make room for new ones."""
+        self._dynamic_exit_enabled = enabled
+        self._signal_decay_threshold = decay_threshold
+
+    def check_dynamic_exit(self, current_signals: Dict[str, float]) -> List[str]:
+        """
+        Check if any positions should be closed for Dynamic Positions.
+        Returns list of position IDs to close.
+        
+        Logic:
+        - Position has profit (unrealized_pnl > 0)
+        - Current signal for that symbol is weaker than original by more than threshold
+        """
+        if not self._dynamic_exit_enabled:
+            return []
+        
+        positions_to_close = []
+        for pos in self.open_positions:
+            symbol = pos.get("symbol")
+            original_score = pos.get("original_signal_score", 0)
+            current_pnl = pos.get("unrealized_pnl_usd", 0)
+            
+            if current_pnl <= 0:
+                continue  # Only close profitable positions
+            
+            if symbol not in current_signals:
+                continue
+                
+            current_score = current_signals[symbol]
+            
+            # Check if signal decayed significantly
+            if original_score > 0:
+                decay_pct = (original_score - current_score) / original_score
+                if decay_pct > self._signal_decay_threshold:
+                    positions_to_close.append(pos["id"])
+                    
+        return positions_to_close
 
     def get_account(self) -> Dict[str, Any]:
         return self.account
@@ -209,9 +255,10 @@ class AsyncSimulatedBroker(Broker):
         take_profit: Optional[float] = None,
         stop_loss: Optional[float] = None,
         entry_price: Optional[float] = None,
+        signal_score: float = 0.0,
     ) -> Dict[str, Any]:
         """Async open position."""
-        return await self._async_open_position(symbol, direction, size, take_profit, stop_loss, entry_price)
+        return await self._async_open_position(symbol, direction, size, take_profit, stop_loss, entry_price, signal_score)
 
     async def _async_open_position(
         self,
@@ -221,6 +268,7 @@ class AsyncSimulatedBroker(Broker):
         take_profit: Optional[float] = None,
         stop_loss: Optional[float] = None,
         entry_price: Optional[float] = None,
+        signal_score: float = 0.0,
     ) -> Dict[str, Any]:
         """Async position opening."""
         if symbol not in INSTRUMENTS:
@@ -231,6 +279,11 @@ class AsyncSimulatedBroker(Broker):
             return {"error": "entry_price is required"}
         if size <= 0:
             return {"error": "Invalid size: must be greater than 0"}
+
+        # Check max positions limit
+        max_positions = getattr(self, '_max_positions', 3)
+        if len(self.open_positions) >= max_positions:
+            return {"error": f"Max {max_positions} positions reached"}
 
         leverage = INSTRUMENTS[symbol].get("leverage", 20)
         margin_usd = entry_price * size / leverage
@@ -266,6 +319,7 @@ class AsyncSimulatedBroker(Broker):
             "trailing_enabled": False,
             "margin_usd": round(margin_usd, 2),
             "unrealized_pnl_usd": 0.0,
+            "original_signal_score": signal_score,
             "opened_at": datetime.utcnow().isoformat(),
             "status": "open",
         }

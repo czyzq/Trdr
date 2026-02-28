@@ -1,9 +1,13 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
-## Today's Work (2026-02-27)
-- 00:55 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
+## Today's Work (2026-03-01)
+- 00:50 - Fixed bug: main.py called non-existent `set_signal_decay_threshold()`, changed to use correct method `enable_dynamic_exit(True, decay_threshold=0.25)` ✅
+- 00:50 - Verified all 192 tests still passing ✅
 
-## Last Updated: 2026-02-27 00:55
+## Today's Work (2026-02-28)
+- 18:46 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
+
+## Last Updated: 2026-02-28 08:37
 
 ## Status Summary
 - Total Tests: 192
@@ -109,6 +113,8 @@
 11. **test_broker.py** (today): Enabled 2 previously skipped tests - size validation now works
 
 12. **test_indicators.py** (today): Fixed test_bb_position - bb_position can exceed typical range in volatile markets; added math import
+
+13. **main.py** (today): Fixed non-existent method call `set_signal_decay_threshold()` -> changed to use correct `enable_dynamic_exit(True, decay_threshold=0.25)`
 
 ## Git Status
 - Branch: `feature/add-tests`
