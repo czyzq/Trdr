@@ -676,11 +676,11 @@ async def async_ensure_trades_indexes():
 
 def sync_account_from_closed_trades_sync() -> dict:
     """Fast sync of account stats from closed trades using MongoDB aggregation.
-    Returns stats dict with total_pnl_usd, win_count, loss_count, closed_trades.
+    Returns stats dict with total_pnl_usd, win_count, loss_count, closed_trades, win_rate.
     """
     db = get_db()
     if db is None:
-        return {"total_pnl_usd": 0.0, "win_count": 0, "loss_count": 0, "closed_trades": 0}
+        return {"total_pnl_usd": 0.0, "win_count": 0, "loss_count": 0, "closed_trades": 0, "win_rate": 0.0}
 
     pipeline = [
         {"$match": {"status": "closed"}},
@@ -698,13 +698,17 @@ def sync_account_from_closed_trades_sync() -> dict:
     result = list(db.trades.aggregate(pipeline))
     if result:
         doc = result[0]
+        total = doc.get("closed_trades", 0)
+        win_count = doc.get("win_count", 0)
+        win_rate = round(win_count / total * 100, 1) if total > 0 else 0.0
         return {
             "total_pnl_usd": round(doc.get("total_pnl_usd", 0.0), 2),
-            "win_count": doc.get("win_count", 0),
+            "win_count": win_count,
             "loss_count": doc.get("loss_count", 0),
-            "closed_trades": doc.get("closed_trades", 0),
+            "closed_trades": total,
+            "win_rate": win_rate,
         }
-    return {"total_pnl_usd": 0.0, "win_count": 0, "loss_count": 0, "closed_trades": 0}
+    return {"total_pnl_usd": 0.0, "win_count": 0, "loss_count": 0, "closed_trades": 0, "win_rate": 0.0}
 
 
 async def async_sync_account_from_closed_trades() -> dict:

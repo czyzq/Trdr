@@ -300,6 +300,22 @@ def save_to_csv(results: List[Dict], output_dir: Path):
     # Also save all-time results
     all_time_path = output_dir / "backtests_all.csv"
     
+    # Data quality info per symbol (for CSV)
+    DATA_QUALITY = {
+        ("XAU", "60"): {"status": "GOOD", "candles": 85008, "period": "1 year"},
+        ("XAU", "15"): {"status": "GOOD", "candles": 3736, "period": "1 month"},
+        ("XAU", "5"): {"status": "GOOD", "candles": 11057, "period": "1 month"},
+        ("XAG", "60"): {"status": "GOOD", "candles": 4113, "period": "5 months"},
+        ("XAG", "15"): {"status": "GOOD", "candles": 3750, "period": "1 month"},
+        ("XAG", "5"): {"status": "GOOD", "candles": 6015, "period": "1 month"},
+        ("BTC", "60"): {"status": "LIMITED", "candles": 7063, "period": "~1 month"},
+        ("BTC", "15"): {"status": "LIMITED", "candles": 6195, "period": "~1 month"},
+        ("BTC", "5"): {"status": "LIMITED", "candles": 8319, "period": "~1 month"},
+        ("US100", "60"): {"status": "BAD", "candles": 102220, "period": "~10 days"},
+        ("US100", "15"): {"status": "BAD", "candles": 2118, "period": "~1 month"},
+        ("US100", "5"): {"status": "BAD", "candles": 6253, "period": "~1 month"},
+    }
+    
     # Flatten results for CSV
     rows = []
     for r in results:
@@ -355,6 +371,14 @@ def save_to_csv(results: List[Dict], output_dir: Path):
                 "profit_factor": symbol_result.get("profit_factor", 0),
                 "sharpe_approx": symbol_result.get("sharpe_approx", 0),
             }
+            
+            # Add data quality info
+            timeframe_key = r.get("resolution", "")
+            quality = DATA_QUALITY.get((symbol, timeframe_key), {"status": "UNKNOWN", "candles": 0, "period": "unknown"})
+            row["data_status"] = quality["status"]
+            row["data_candles"] = quality["candles"]
+            row["data_period"] = quality["period"]
+            
             rows.append(row)
     
     if not rows:
@@ -366,6 +390,7 @@ def save_to_csv(results: List[Dict], output_dir: Path):
     
     fieldnames = [
         "run_id", "run_at", "config_name", "config_description", "period", "timeframe",
+        "data_status", "data_candles", "data_period",
         "dynamic_positions", "dynamic_threshold", "min_score", "indicators", "symbol",
         "initial_balance", "final_balance", "profit_30d", "profit_60d", "profit_90d",
         "total_trades", "winning_trades", "losing_trades", "neutral_skipped", "total_signals",
@@ -406,11 +431,14 @@ def save_to_csv(results: List[Dict], output_dir: Path):
 # Valid symbols/resolutions for ranking (clean data only)
 VALID_FOR_RANKING = {
     ("XAU", "60"): "Full year clean data",
-    ("XAG", "60"): "Full year clean data",
+    ("XAG", "60"): "Full year clean data", 
+    ("BTC", "60"): "~1 month clean data (limited)",
     ("XAU", "15"): "Recent clean data",
     ("XAG", "15"): "Recent clean data",
+    ("BTC", "15"): "Recent clean data",
     ("XAU", "5"): "Recent clean data",
     ("XAG", "5"): "Recent clean data",
+    ("BTC", "5"): "Recent clean data",
 }
 
 
@@ -430,12 +458,18 @@ def get_summary_stats(csv_path: Path) -> Dict:
         return {}
     
     # Filter to valid symbols only (exclude bad data)
+    # Convert string values to proper types
     valid_rows = []
     excluded = 0
     for r in rows:
+        # Convert numeric fields from string to proper type
+        r["total_trades"] = int(float(r.get("total_trades", 0))) if r.get("total_trades") else 0
+        r["win_rate"] = float(r.get("win_rate", 0)) if r.get("win_rate") else 0.0
+        r["total_return_pct"] = float(r.get("total_return_pct", 0)) if r.get("total_return_pct") else 0.0
+        
         symbol = r.get("symbol", "")
         timeframe = r.get("timeframe", "").replace("m", "")
-        trades = int(r.get("total_trades", 0))
+        trades = r.get("total_trades", 0)
         
         # Check if this is valid clean data
         if (symbol, timeframe) in VALID_FOR_RANKING:
