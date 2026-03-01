@@ -1,6 +1,9 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
 ## Today's Work (2026-03-01)
+- 14:44 - Created test_account.py (13 tests) - all 205 tests passing ✅
+- 13:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+- 12:44 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
 - 11:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
 - 11:44 - Committed win_rate fix to database.py and data quality tracking to backtest_runner.py
 - 10:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
@@ -11,11 +14,11 @@
 ## Today's Work (2026-02-28)
 - 18:46 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
 
-## Last Updated: 2026-03-01 11:44
+## Last Updated: 2026-03-01 14:44
 
 ## Status Summary
-- Total Tests: 192
-- Passing: 192 ✅
+- Total Tests: 205
+- Passing: 205 ✅
 - Failing: 0 ❌
 - Skipped: 2 ⏭️ (trailing_stop not implemented)
 - [x] TEST_PLAN.md created
@@ -29,7 +32,8 @@
 - [x] Added size validation to broker (rejects size <= 0)
 - [x] Created test_risk.py - Risk management tests (TP/SL)
 - [x] Created test_news.py - News/sentiment tests
-- [x] All 192 tests passing (2 skipped by design - trailing_stop)
+- [x] Created test_account.py - Account management tests (13 tests)
+- [x] All 205 tests passing (2 skipped by design - trailing_stop)
 
 ## Today's Work (2026-02-26)
 - 02:15 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
@@ -94,6 +98,13 @@
 - TestNewsSentiment: Bullish/bearish/neutral keyword detection
 - TestNewsClientIntegration: get_news method testing
 - TestNewsClientEdgeCases: Empty/long/special character handling
+
+### test_account.py (13 tests)
+- TestAccountManagement: Account retrieval and positions
+- TestAccountBalance: Balance operations (profit/loss)
+- TestAccountEdgeCases: Zero/large balance, equity, margin
+- TestAccountMode: Mode persistence
+- TestMaxDrawdown: Drawdown tracking
 
 ## Test Fixes Applied
 1. **broker_sim.py**: Added `initial_balance` optional parameter to `AsyncSimulatedBroker.__init__()` to allow test-specific balance overrides
