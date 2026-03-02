@@ -382,7 +382,7 @@ export const Dashboard: React.FC = () => {
                       const selectedStrat = strategies.find(s => s.id === e.target.value);
                       if (selectedStrat) {
                         const defaultInds = selectedStrat.default_indicators || [];
-                        const allInds = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM"];
+                        const allInds = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM", "DIVERGENCE", "HTF_CANDLE"];
                         allInds.forEach(ind => {
                           const cb = document.getElementById(`backtest-ind-${ind}`) as HTMLInputElement;
                           const details = document.getElementById(`settings-${ind}`);
@@ -417,7 +417,7 @@ export const Dashboard: React.FC = () => {
                 <div>
                   <label className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>Indicators</label>
                   <div className="flex flex-wrap gap-2 text-xs">
-                    {["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM"].map(ind => (
+                    {["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM", "DIVERGENCE", "HTF_CANDLE"].map(ind => (
                       <label key={ind} className="flex items-center gap-1 cursor-pointer">
                         <input type="checkbox" id={`backtest-ind-${ind}`} defaultChecked className="cursor-pointer" onChange={(e) => {
                           // Toggle settings visibility
@@ -545,7 +545,7 @@ export const Dashboard: React.FC = () => {
                       const symbol = (document.getElementById("backtest-symbol") as HTMLSelectElement).value;
                       const strategy = (document.getElementById("backtest-strategy") as HTMLSelectElement).value;
                       // Get checked indicators
-                      const allInds = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM"];
+                      const allInds = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM", "DIVERGENCE", "HTF_CANDLE"];
                       const selectedInds = allInds.filter(ind => (document.getElementById(`backtest-ind-${ind}`) as HTMLInputElement)?.checked);
                       const indicators = selectedInds.join(",");
                       const resolution = (document.getElementById("backtest-resolution") as HTMLSelectElement).value;
