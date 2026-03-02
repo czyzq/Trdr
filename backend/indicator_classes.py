@@ -163,6 +163,59 @@ class Momentum(Indicator):
         return TechnicalIndicators.momentum(closes, params.get("period", 10))
 
 
+class Divergence(Indicator):
+    """Detects RSI divergence - compares price action with RSI for potential reversals"""
+    id = "DIVERGENCE"
+    name = "RSI Divergence"
+    description = "Detects bullish/bearish divergence between price and RSI indicator"
+    default_params = {
+        "lookback": 20,
+    }
+
+    def calculate(self, candles: List[Dict], params: dict = None) -> Optional[Dict]:
+        params = params or self.default_params
+        return TechnicalIndicators.divergence(candles, params.get("lookback", 20))
+
+    def get_value(self, indicators_result: Dict, prefix: str = None) -> Optional[float]:
+        """Get divergence value from indicators result"""
+        div_result = indicators_result.get("divergence")
+        if isinstance(div_result, dict):
+            return div_result.get("bias", 0.0)
+        return 0.0
+
+
+class HTFCandlePattern(Indicator):
+    """Detects candlestick patterns - bullish/bearish formations"""
+    id = "HTF_CANDLE"
+    name = "HTF Candle Patterns"
+    description = "Detects candlestick patterns (Engulfing, Hammer, Doji, etc.) for trend reversals"
+    default_params = {
+        "min_strength": 0.3,
+    }
+
+    def calculate(self, candles: List[Dict], params: dict = None) -> Optional[Dict]:
+        params = params or self.default_params
+        result = TechnicalIndicators.candlestick_patterns(candles)
+        if not result:
+            return {"pattern": None, "bias": 0.0, "strength": 0.0}
+        
+        # Filter by min_strength
+        patterns = result.get("patterns", [])
+        if params.get("min_strength"):
+            patterns = [p for p in patterns if p.get("strength", 0) >= params["min_strength"]]
+        
+        if not patterns:
+            return {"pattern": None, "bias": 0.0, "strength": 0.0}
+        
+        # Return strongest pattern
+        strongest = max(patterns, key=lambda x: x.get("strength", 0))
+        return {
+            "pattern": strongest.get("name"),
+            "bias": strongest.get("bias", 0.0),
+            "strength": strongest.get("strength", 0.0),
+        }
+
+
 # All available indicators
 INDICATORS: Dict[str, type] = {
     "RSI": RSI,
@@ -172,6 +225,8 @@ INDICATORS: Dict[str, type] = {
     "ADX": ADX,
     "STOCH": StochasticRSI,
     "MOMENTUM": Momentum,
+    "DIVERGENCE": Divergence,
+    "HTF_CANDLE": HTFCandlePattern,
 }
 
 # List of all indicator IDs
