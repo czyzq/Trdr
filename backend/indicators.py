@@ -526,4 +526,153 @@ class TechnicalIndicators:
             "stoch_rsi": TechnicalIndicators.stochastic_rsi(closes, 14, 14),
             "volume_profile": TechnicalIndicators.volume_profile(candles, 20),
             "candlestick_patterns": TechnicalIndicators.candlestick_patterns(candles),
+            "divergence": TechnicalIndicators.divergence(candles),
+        }
+
+    @staticmethod
+    def rsi_series(prices: List[float], period: int = 14) -> List[Optional[float]]:
+        """Calculate RSI as a series (for each bar)"""
+        if len(prices) < period + 1:
+            return []
+        
+        result = [None] * period
+        for i in range(period, len(prices)):
+            window = prices[i-period:i+1]
+            rsi_val = TechnicalIndicators.rsi(window, period)
+            result.append(rsi_val)
+        return result
+
+    @staticmethod
+    def divergence(candles: List[Dict], lookback: int = 20) -> Optional[Dict]:
+        """
+        Detect RSI divergence - compares price action with RSI.
+        
+        Bullish divergence: price makes lower low, RSI makes higher low = potential upward reversal
+        Bearish divergence: price makes higher peak, RSI makes lower peak = potential downward reversal
+        
+        Returns dict with divergence signal (-1 to +1) and strength
+        """
+        if len(candles) < lookback + 10:
+            return {"divergence": 0.0, "bias": 0.0, "strength": 0.0}
+        
+        closes = [c["close"] for c in candles]
+        highs = [c["high"] for c in candles]
+        lows = [c["low"] for c in candles]
+        
+        # Calculate RSI series
+        rsi_values = TechnicalIndicators.rsi_series(closes, 14)
+        
+        # Get last N values
+        valid_rsi = [(i, r) for i, r in enumerate(rsi_values) if r is not None]
+        if len(valid_rsi) < lookback:
+            return {"divergence": 0.0, "bias": 0.0, "strength": 0.0}
+        
+        # Use last lookback values
+        rsi_values = [r for _, r in valid_rsi[-lookback:]]
+        closes = closes[-lookback:]
+        highs = highs[-lookback:]
+        lows = lows[-lookback:]
+        
+        # Split into halves for comparison
+        mid = len(closes) // 2
+        
+        # First half (older)
+        first_high = max(highs[:mid])
+        first_low = min(lows[:mid])
+        first_rsi_high = max(rsi_values[:mid])
+        first_rsi_low = min(rsi_values[:mid])
+        
+        # Second half (recent)
+        second_high = max(highs[mid:])
+        second_low = min(lows[mid:])
+        second_rsi_high = max(rsi_values[mid:])
+        second_rsi_low = min(rsi_values[mid:])
+        
+        divergences = []
+        
+        # Bearish divergence: price higher high, RSI lower high
+        if second_high > first_high and second_rsi_high < first_rsi_high:
+            strength = (first_rsi_high - second_rsi_high) / 30  # Normalize
+            strength = min(1.0, max(0.1, strength))  # At least 0.1
+            divergences.append({
+                "type": "bearish", 
+                "bias": -0.6 * strength, 
+                "strength": strength
+            })
+        
+        # Bullish divergence: price lower low, RSI higher low
+        if second_low < first_low and second_rsi_low > first_rsi_low:
+            strength = (second_rsi_low - first_rsi_low) / 30
+            strength = min(1.0, max(0.1, strength))
+            divergences.append({
+                "type": "bullish", 
+                "bias": 0.6 * strength, 
+                "strength": strength
+            })
+        
+        # Hidden bearish: price lower high, RSI higher high (weaker but still valid)
+        if second_high < first_high and second_rsi_high > first_rsi_high:
+            strength = (second_rsi_high - first_rsi_high) / 40
+            strength = min(0.8, max(0.05, strength))
+            divergences.append({
+                "type": "hidden_bearish", 
+                "bias": -0.5 * strength, 
+                "strength": strength
+            })
+        
+        # Hidden bullish: price higher low, RSI lower low
+        if second_low > first_low and second_rsi_low < first_rsi_low:
+            strength = (first_rsi_low - second_rsi_low) / 40
+            strength = min(0.8, max(0.05, strength))
+            divergences.append({
+                "type": "hidden_bullish", 
+                "bias": 0.5 * strength, 
+                "strength": strength
+            })
+        
+        if not divergences:
+            return {"divergence": 0.0, "bias": 0.0, "strength": 0.0}
+        
+        # Return strongest divergence
+        strongest = max(divergences, key=lambda x: x["strength"])
+        
+        return {
+            "divergence": strongest["bias"],
+            "bias": strongest["bias"],
+            "strength": strongest["strength"],
+            "type": strongest["type"]
+        }
+        
+        # Bullish divergence: price lower trough, RSI higher trough
+        if price_troughs and rsi_troughs:
+            last_price_trough = price_troughs[-1]
+            last_rsi_trough = rsi_troughs[-1]
+            
+            if last_price_trough[0] > last_rsi_trough[0]:
+                price_low = lows[last_price_trough[0]]
+                rsi_low = rsi_values[last_rsi_trough[0]]
+                
+                if len(price_troughs) > 1 and len(rsi_troughs) > 1:
+                    prev_price_trough = price_troughs[-2]
+                    prev_rsi_trough = rsi_troughs[-2]
+                    
+                    prev_price_low = lows[prev_price_trough[0]]
+                    prev_rsi_low = rsi_values[prev_rsi_trough[0]]
+                    
+                    # Bullish: price lower, RSI higher
+                    if price_low < prev_price_low and rsi_low > prev_rsi_low:
+                        strength = min(1.0, (rsi_low - prev_rsi_low) / 20)
+                        divergences.append({"type": "bullish", "bias": 0.7, "strength": strength})
+        
+        if not divergences:
+            return {"divergence": 0.0, "bias": 0.0, "strength": 0.0}
+        
+        # Return strongest divergence
+        strongest = max(divergences, key=lambda x: x["strength"])
+        
+        return {
+            "divergence": strongest["bias"],
+            "bias": strongest["bias"],
+            "strength": strongest["strength"],
+            "type": strongest["type"]
         }

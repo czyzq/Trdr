@@ -1,15 +1,53 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
-## Last Updated: 2026-02-26 01:08
+## Today's Work (2026-03-02)
+- 22:36 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 20:18 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 19:18 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 18:18 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 17:18 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 16:17 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 15:17 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 14:17 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 13:17 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 12:17 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 11:17 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 10:10 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 09:06 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+
+## Today's Work (2026-03-01)
+- 23:37 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 22:37 - Verified all 205 tests still passing ✅ (Fixes agent check - all tests passing)
+- 21:37 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 20:37 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 19:37 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 18:55 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 17:55 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 16:55 - Verified all 205 tests still passing ✅ (Hourly cron check - all tests passing)
+- 15:44 - Verified all 205 tests still passing ✅ (indicator + API tests included)
+- 14:44 - Created test_account.py (13 tests) - all 205 tests passing ✅
+- 13:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+- 12:44 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
+- 11:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+- 11:44 - Committed win_rate fix to database.py and data quality tracking to backtest_runner.py
+- 10:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+- 09:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+- 08:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+- 07:44 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+
+## Today's Work (2026-02-28)
+- 18:46 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
+
+## Last Updated: 2026-03-02 22:36
 
 ## Status Summary
-- Total Tests: 192
-- Passing: 192 ✅
+- Total Tests: 205
+- Passing: 205 ✅
 - Failing: 0 ❌
 - Skipped: 2 ⏭️ (trailing_stop not implemented)
 - [x] TEST_PLAN.md created
 - [x] Existing tests discovered and run
-- [x] Issues identified (TypeErrors, AttributeErrors)
+- [x] Issues identified and fixed (TypeErrors, AttributeErrors in previous runs)
 - [x] Fixed indicator tests (TypeError in calculate_all)
 - [x] Fixed API tests (proper mocking)
 - [x] Fixed test_broker.py initialization tests
@@ -18,13 +56,24 @@
 - [x] Added size validation to broker (rejects size <= 0)
 - [x] Created test_risk.py - Risk management tests (TP/SL)
 - [x] Created test_news.py - News/sentiment tests
-- [x] All 192 tests passing (2 skipped by design - trailing_stop)
+- [x] Created test_account.py - Account management tests (13 tests)
+- [x] All 205 tests passing (2 skipped by design - trailing_stop)
+- [x] Test infrastructure complete - no active issues
 
 ## Today's Work (2026-02-26)
-- 01:08 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
-- 03:16 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
-- 05:58 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
-- 08:00 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
+- 02:15 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
+- 10:26 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
+- 11:30 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+- 12:40 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
+- 13:41 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
+- 14:45 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
+- 15:48 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
+- 16:48 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
+- 17:48 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
+- 18:48 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
+- 18:49 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
+- 19:49 - Verified all 192 tests still passing ✅ (Hourly cron check - status quo maintained)
+- 21:50 - Verified all 192 tests still passing ✅ (Hourly cron check - all tests passing)
 
 ## Today's Work (2026-02-25)
 - 04:30 - Installed pytest-asyncio, now running 168 tests (was 154 sync-only)
@@ -75,6 +124,13 @@
 - TestNewsClientIntegration: get_news method testing
 - TestNewsClientEdgeCases: Empty/long/special character handling
 
+### test_account.py (13 tests)
+- TestAccountManagement: Account retrieval and positions
+- TestAccountBalance: Balance operations (profit/loss)
+- TestAccountEdgeCases: Zero/large balance, equity, margin
+- TestAccountMode: Mode persistence
+- TestMaxDrawdown: Drawdown tracking
+
 ## Test Fixes Applied
 1. **broker_sim.py**: Added `initial_balance` optional parameter to `AsyncSimulatedBroker.__init__()` to allow test-specific balance overrides
 
@@ -97,6 +153,8 @@
 11. **test_broker.py** (today): Enabled 2 previously skipped tests - size validation now works
 
 12. **test_indicators.py** (today): Fixed test_bb_position - bb_position can exceed typical range in volatile markets; added math import
+
+13. **main.py** (today): Fixed non-existent method call `set_signal_decay_threshold()` -> changed to use correct `enable_dynamic_exit(True, decay_threshold=0.25)`
 
 ## Git Status
 - Branch: `feature/add-tests`

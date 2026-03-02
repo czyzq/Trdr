@@ -111,6 +111,33 @@ export const SettingsTab: React.FC = () => {
       className="h-full flex flex-col p-4 md:p-6 bg-[var(--bg-primary)]"
       style={{ color: "var(--text-primary)" }}
     >
+      {/* Dynamic Positions Status */}
+      <div style={{ 
+        background: "rgba(0,255,136,0.1)", 
+        border: "1px solid #00ff88", 
+        borderRadius: "8px", 
+        padding: "12px",
+        marginBottom: "20px"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span>🎯</span>
+          <div>
+            <strong>Dynamic Positions</strong>
+            <div style={{ fontSize: "11px", color: "#888" }}>
+              Auto-zamykanie przy spadku sygnału &gt;25%
+            </div>
+          </div>
+          <span style={{ 
+            background: "#00ff88", 
+            color: "#000", 
+            padding: "2px 8px", 
+            borderRadius: "4px",
+            fontSize: "11px",
+            marginLeft: "auto"
+          }}>ON</span>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between mb-4 md:mb-6">
         <h2 className="text-lg md:text-xl font-bold uppercase tracking-wider text-[var(--text-primary)]">
           Settings

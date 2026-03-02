@@ -9,7 +9,7 @@ load_dotenv()
 BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
 BRAVE_BASE_URL = "https://api.search.brave.com/res/v1/web/search"
 
-print(f"Testing Brave API with key: {BRAVE_API_KEY[:10]}...")
+print(f"Testing Brave API with key: {BRAVE_API_KEY[:10] if BRAVE_API_KEY else 'NOT SET'}...")
 
 params = {
     "q": "gold price news",
