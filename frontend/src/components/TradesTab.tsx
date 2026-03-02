@@ -671,6 +671,12 @@ export const TradesTab: React.FC = () => {
                         Dir.
                       </th>
                       <th
+                        className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        Opened
+                      </th>
+                      <th
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
                         style={{ color: "var(--text-muted)" }}
                       >
@@ -686,19 +692,13 @@ export const TradesTab: React.FC = () => {
                         className="px-3 py-2.5 text-right font-medium uppercase tracking-wider"
                         style={{ color: "var(--text-muted)" }}
                       >
-                        P&L (USD)
+                        P&L
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
                         style={{ color: "var(--text-muted)" }}
                       >
                         Result
-                      </th>
-                      <th
-                        className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        Opened
                       </th>
                       <th
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
@@ -739,16 +739,16 @@ export const TradesTab: React.FC = () => {
                             </span>
                           </td>
                           <td
-                            className="px-3 py-2.5 text-right"
-                            style={{ color: "#94a3b8" }}
-                          >
-                            {formatPrice(trade.entry_price)}
-                          </td>
-                          <td
                             className="px-3 py-2.5 text-center"
                             style={{ color: "var(--text-muted)" }}
                           >
                             {formatTime(trade.opened_at, true)}
+                          </td>
+                          <td
+                            className="px-3 py-2.5 text-right"
+                            style={{ color: "#94a3b8" }}
+                          >
+                            {formatPrice(trade.entry_price)}
                           </td>
                           <td
                             className="px-3 py-2.5 text-right"
