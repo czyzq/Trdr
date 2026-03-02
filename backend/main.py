@@ -1788,6 +1788,15 @@ async def set_trading_mode(broker: str = "simulation", autoTrade: bool = False):
     db.set_setting("PREFERRED_BROKER", broker_type, "system")
     db.set_setting("AUTO_TRADE_ENABLED", 1 if autoTrade else 0, "system")
     log_event(f"[TRADING-MODE] Broker: {broker}, Auto-trade: {'ON' if autoTrade else 'OFF'}", "event")
+    return {"status": "ok", "broker": broker_type, "auto_trade": autoTrade}
+
+
+@app.post("/api/settings/dynamic-positions")
+async def set_dynamic_positions(enabled: bool = True):
+    """Enable/disable dynamic position sizing."""
+    db.set_setting("DYNAMIC_POSITIONS_ENABLED", 1 if enabled else 0, "system")
+    log_event(f"[DYNAMIC-POSITIONS] {'Enabled' if enabled else 'Disabled'}", "event")
+    return {"status": "ok", "enabled": enabled}
     return {
         "broker": broker,
         "autoTrade": autoTrade,
