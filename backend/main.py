@@ -4415,9 +4415,9 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, 
     
     return {
         'direction': 'long' if direction > 0 else 'short',
-        'score': abs(clamped_score),
+        'score': clamped_score,  # Keep sign - positive for buy, negative for sell
         'confidence': min(1.0, abs(clamped_score)),
-        'technical_score': abs(clamped_score),
+        'technical_score': clamped_score,
         'components': [{
             'type': 'technical',
             'name': f'JSON Strategy ({strategy.id})',

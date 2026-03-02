@@ -95,20 +95,21 @@ class ScoreEngine:
         rsi_val = rsi.value() if rsi else None
         mom_val = momentum.value() if momentum else None
         
-        # Determine direction
+        # Determine direction - FIXED logic
         direction = None
         
-        # BUY signals: RSI oversold OR momentum negative
+        # BUY signals: RSI oversold OR momentum negative (lower prices expected)
         if rsi_val is not None and rsi_val < rsi_oversold:
             direction = 'buy'
         elif mom_val is not None and mom_val < momentum_threshold:
             direction = 'buy'
         
-        # SELL signals: RSI overbought OR momentum positive
-        if rsi_val is not None and rsi_val > rsi_overbought:
-            direction = 'sell'
-        elif mom_val is not None and mom_val > momentum_threshold:
-            direction = 'sell'
+        # SELL signals: RSI overbought OR momentum positive - ONLY if not already set to buy
+        if direction is None:  # Only check sell if not already buy
+            if rsi_val is not None and rsi_val > rsi_overbought:
+                direction = 'sell'
+            elif mom_val is not None and mom_val > momentum_threshold:
+                direction = 'sell'
         
         if direction is None:
             return None
