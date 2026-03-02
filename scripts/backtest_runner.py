@@ -21,6 +21,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Allow passing MONGO_URI via CLI for cron jobs
+# Usage: python backtest_runner.py --mongo-uri "mongodb+sr://..."
+
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
@@ -539,7 +542,18 @@ def fetch_candles_for_period(
     """Fetch candles for a specific period, with validation."""
     db = get_db()
     
-    # Try DB first - use longer lookback for backtest
+    # Try backtest_cache first (fresh sync from Binance/Yahoo)
+    if db is not None:
+        backtest_doc = db.backtest_cache.find_one({"symbol": symbol, "resolution": resolution})
+        if backtest_doc and backtest_doc.get("candles"):
+            candles = backtest_doc["candles"]
+            # Filter by date range
+            candles = [c for c in candles if start_date <= c.get("timestamp", "") <= end_date]
+            if len(candles) >= 50:
+                print(f"    {symbol} {resolution}: {len(candles)} candles from backtest_cache ({backtest_doc.get('source', '?')})")
+                return candles
+    
+    # Fall back to original logic
     if db is not None:
         # First try exact resolution
         candles = list(db.candles.find({
@@ -828,9 +842,15 @@ def main():
     parser.add_argument("--resolutions", default="", help="Comma-separated resolutions for multi-resolution run")
     parser.add_argument("--scan", choices=["min_score", "indicators", "all"], help="Scan mode")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show individual trades")
+    parser.add_argument("--mongo-uri", default=None, help="MongoDB URI (optional, for backtest data)")
     parser.add_argument("--output-dir", default="~/dev/cfd-trading-bot/backtests", help="Output directory for CSVs")
     
     args = parser.parse_args()
+    
+    # Set MONGO_URI from CLI if provided (for cron jobs)
+    if args.mongo_uri:
+        os.environ["MONGO_URI"] = args.mongo_uri
+        print(f"[INFO] MONGO_URI set from CLI")
     
     symbols = args.symbols.split(",")
     base_config = CONFIG_PRESETS.get(args.config, CONFIG_PRESETS["base"]).copy()

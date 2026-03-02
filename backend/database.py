@@ -238,6 +238,18 @@ def load_candles(symbol: str, resolution: str) -> Optional[dict]:
     return cached
 
 
+def load_backtest_candles(symbol: str, resolution: str) -> Optional[dict]:
+    """Load backtest candle data from backtest_cache collection (separate from live trading)."""
+    db = get_db()
+    if db is not None:
+        doc = db.backtest_cache.find_one({"symbol": symbol, "resolution": resolution})
+        if doc:
+            doc.pop("_id", None)
+            print(f"[Backtest] Loaded {len(doc.get('candles', []))} candles from backtest_cache: {symbol}_{resolution}")
+            return doc
+    return None
+
+
 def save_quote(symbol: str, quote: dict):
     """Cache a price quote (DB or in-memory)."""
     doc = {
