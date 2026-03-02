@@ -424,6 +424,26 @@ def run_backtest(
             neutral_skipped += 1
             continue
 
+        # Divergence filter: require divergence confirmation for entry
+        # Only enter if divergence aligns with direction (bullish divergence for BUY, bearish for SELL)
+        divergence = ind.get("divergence")
+        if divergence and isinstance(divergence, dict):
+            div_bias = divergence.get("bias", 0.0)
+            div_strength = divergence.get("strength", 0.0)
+            # If divergence present (lower threshold), require alignment with trade direction
+            if div_strength > 0.15:
+                is_buy = direction in ("BUY", "STRONG_BUY")
+                div_bullish = div_bias > 0.1
+                div_bearish = div_bias < -0.1
+                
+                # If divergence contradicts direction, skip
+                if is_buy and div_bearish:
+                    neutral_skipped += 1
+                    continue
+                if not is_buy and div_bullish:
+                    neutral_skipped += 1
+                    continue
+
         # Trend-alignment filter for commodities
         # Only trade with the SMA50 trend direction
         sma_50 = ind.get("sma_50")

@@ -199,14 +199,14 @@ CONFIG_PRESETS = {
         "indicators": ["RSI", "MACD", "Momentum", "ADX"],
     },
     "btc_v3_exp": {
-        "description": "JSON: BTC v3 Experimental - RSI/Momentum only",
+        "description": "JSON: BTC v3 Experimental - RSI/Momentum only + DIV",
         "dynamic_positions": True,
         "dynamic_threshold": 0.20,
-        "min_score": {"XAU": 0.25, "XAG": 0.25, "US100": 0.20, "BTC": 0.15},
+        "min_score": {"XAU": 0.20, "XAG": 0.20, "US100": 0.15, "BTC": 0.12},
         "min_agreement": {"XAU": 2, "XAG": 2, "US100": 2, "BTC": 2},
         "trailing_stop": False,
         "risk_per_trade_pct": 2.0,
-        "indicators": ["RSI", "Momentum"],
+        "indicators": ["RSI", "Momentum", "DIVERGENCE"],
     },
     "xau_v3_exp": {
         "description": "JSON: XAU v3 Experimental - RSI/Momentum only",
