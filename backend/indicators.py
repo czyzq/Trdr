@@ -545,14 +545,14 @@ class TechnicalIndicators:
     @staticmethod
     def divergence(candles: List[Dict], lookback: int = 20) -> Optional[Dict]:
         """
-        Detect RSI divergence - compares price peaks/troughs with RSI peaks/troughs.
+        Detect RSI divergence - compares price action with RSI.
         
         Bullish divergence: price makes lower low, RSI makes higher low = potential upward reversal
         Bearish divergence: price makes higher peak, RSI makes lower peak = potential downward reversal
         
         Returns dict with divergence signal (-1 to +1) and strength
         """
-        if len(candles) < lookback + 20:
+        if len(candles) < lookback + 10:
             return {"divergence": 0.0, "bias": 0.0, "strength": 0.0}
         
         closes = [c["close"] for c in candles]
@@ -562,7 +562,7 @@ class TechnicalIndicators:
         # Calculate RSI series
         rsi_values = TechnicalIndicators.rsi_series(closes, 14)
         
-        # Get last N values (excluding None)
+        # Get last N values
         valid_rsi = [(i, r) for i, r in enumerate(rsi_values) if r is not None]
         if len(valid_rsi) < lookback:
             return {"divergence": 0.0, "bias": 0.0, "strength": 0.0}
@@ -573,49 +573,75 @@ class TechnicalIndicators:
         highs = highs[-lookback:]
         lows = lows[-lookback:]
         
-        # Find local peaks and troughs
-        def find_peaks(values, threshold=0.02):
-            peaks = []
-            for i in range(2, len(values) - 2):
-                if values[i] > values[i-1] and values[i] > values[i+1]:
-                    # Check it's significant
-                    if i >= 2 and values[i] > max(values[i-2:i]) * (1 + threshold):
-                        peaks.append((i, values[i]))
-            return peaks
+        # Split into halves for comparison
+        mid = len(closes) // 2
         
-        price_peaks = find_peaks(highs)
-        price_troughs = find_peaks([-l for l in lows])
-        rsi_peaks = find_peaks(rsi_values)
-        rsi_troughs = find_peaks([-v for v in rsi_values])
+        # First half (older)
+        first_high = max(highs[:mid])
+        first_low = min(lows[:mid])
+        first_rsi_high = max(rsi_values[:mid])
+        first_rsi_low = min(rsi_values[:mid])
         
-        if not price_peaks or not rsi_peaks:
-            return {"divergence": 0.0, "bias": 0.0, "strength": 0.0}
+        # Second half (recent)
+        second_high = max(highs[mid:])
+        second_low = min(lows[mid:])
+        second_rsi_high = max(rsi_values[mid:])
+        second_rsi_low = min(rsi_values[mid:])
         
-        # Check last significant price peak vs RSI peak
         divergences = []
         
-        # Bearish divergence: price higher peak, RSI lower peak
-        if price_peaks and rsi_peaks:
-            last_price_peak = price_peaks[-1]
-            last_rsi_peak = rsi_peaks[-1]
-            
-            # If price peak is more recent than RSI peak
-            if last_price_peak[0] > last_rsi_peak[0]:
-                price_high = highs[last_price_peak[0]]
-                rsi_high = rsi_values[last_rsi_peak[0]]
-                
-                # Find previous peaks to compare
-                if len(price_peaks) > 1 and len(rsi_peaks) > 1:
-                    prev_price_peak = price_peaks[-2]
-                    prev_rsi_peak = rsi_peaks[-2]
-                    
-                    prev_price_high = highs[prev_price_peak[0]]
-                    prev_rsi_high = rsi_values[prev_rsi_peak[0]]
-                    
-                    # Bearish: price higher, RSI lower
-                    if price_high > prev_price_high and rsi_high < prev_rsi_high:
-                        strength = min(1.0, (rsi_high - prev_rsi_high) / 20)
-                        divergences.append({"type": "bearish", "bias": -0.7, "strength": strength})
+        # Bearish divergence: price higher high, RSI lower high
+        if second_high > first_high and second_rsi_high < first_rsi_high:
+            strength = (first_rsi_high - second_rsi_high) / 30  # Normalize
+            strength = min(1.0, max(0.1, strength))  # At least 0.1
+            divergences.append({
+                "type": "bearish", 
+                "bias": -0.6 * strength, 
+                "strength": strength
+            })
+        
+        # Bullish divergence: price lower low, RSI higher low
+        if second_low < first_low and second_rsi_low > first_rsi_low:
+            strength = (second_rsi_low - first_rsi_low) / 30
+            strength = min(1.0, max(0.1, strength))
+            divergences.append({
+                "type": "bullish", 
+                "bias": 0.6 * strength, 
+                "strength": strength
+            })
+        
+        # Hidden bearish: price lower high, RSI higher high (weaker but still valid)
+        if second_high < first_high and second_rsi_high > first_rsi_high:
+            strength = (second_rsi_high - first_rsi_high) / 40
+            strength = min(0.8, max(0.05, strength))
+            divergences.append({
+                "type": "hidden_bearish", 
+                "bias": -0.5 * strength, 
+                "strength": strength
+            })
+        
+        # Hidden bullish: price higher low, RSI lower low
+        if second_low > first_low and second_rsi_low < first_rsi_low:
+            strength = (first_rsi_low - second_rsi_low) / 40
+            strength = min(0.8, max(0.05, strength))
+            divergences.append({
+                "type": "hidden_bullish", 
+                "bias": 0.5 * strength, 
+                "strength": strength
+            })
+        
+        if not divergences:
+            return {"divergence": 0.0, "bias": 0.0, "strength": 0.0}
+        
+        # Return strongest divergence
+        strongest = max(divergences, key=lambda x: x["strength"])
+        
+        return {
+            "divergence": strongest["bias"],
+            "bias": strongest["bias"],
+            "strength": strongest["strength"],
+            "type": strongest["type"]
+        }
         
         # Bullish divergence: price lower trough, RSI higher trough
         if price_troughs and rsi_troughs:
