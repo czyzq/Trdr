@@ -698,6 +698,12 @@ export const TradesTab: React.FC = () => {
                         className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
                         style={{ color: "var(--text-muted)" }}
                       >
+                        Opened
+                      </th>
+                      <th
+                        className="px-3 py-2.5 text-center font-medium uppercase tracking-wider"
+                        style={{ color: "var(--text-muted)" }}
+                      >
                         Closed
                       </th>
                     </tr>
@@ -737,6 +743,12 @@ export const TradesTab: React.FC = () => {
                             style={{ color: "#94a3b8" }}
                           >
                             {formatPrice(trade.entry_price)}
+                          </td>
+                          <td
+                            className="px-3 py-2.5 text-center"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            {formatTime(trade.opened_at, true)}
                           </td>
                           <td
                             className="px-3 py-2.5 text-right"
