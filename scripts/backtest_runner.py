@@ -248,6 +248,17 @@ CONFIG_PRESETS = {
         "risk_per_trade_pct": 1.0,
         "indicators": ["RSI", "MACD", "Momentum"],
     },
+    # HTF Divergence Test Strategy - with DIVERGENCE and HTF_CANDLE indicators
+    "htf_divergence_test": {
+        "description": "TEST: HTF Candle Patterns + RSI Divergence strategy",
+        "dynamic_positions": True,
+        "dynamic_threshold": 0.15,
+        "min_score": {"XAU": 0.10, "XAG": 0.10, "US100": 0.10, "BTC": 0.10},
+        "min_agreement": {"XAU": 2, "XAG": 2, "US100": 2, "BTC": 2},
+        "trailing_stop": False,
+        "risk_per_trade_pct": 2.0,
+        "indicators": ["RSI", "MACD", "Momentum", "DIVERGENCE", "HTF_CANDLE"],
+    },
 }
 
 

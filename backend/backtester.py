@@ -128,6 +128,15 @@ def calculate_signal_score(indicators: dict) -> Tuple[float, str]:
         scores.append(max(-1, min(1, cp["net_bias"])))
         weights.append(0.15)
 
+    # RSI Divergence (new indicator)
+    divergence = indicators.get("divergence")
+    if divergence and isinstance(divergence, dict):
+        div_bias = divergence.get("bias", 0.0)
+        div_strength = divergence.get("strength", 0.0)
+        if div_bias != 0 and div_strength > 0.1:
+            scores.append(max(-1, min(1, div_bias * div_strength)))
+            weights.append(0.20)  # Higher weight for divergence signals
+
     # Composite
     if scores:
         total_w = sum(weights)
