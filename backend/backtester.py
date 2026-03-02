@@ -424,24 +424,6 @@ def run_backtest(
             neutral_skipped += 1
             continue
 
-        # HTF Candle Pattern filter: require pattern confirmation for entry
-        # Skip trade if strong opposing candle pattern detected
-        cp = ind.get("candlestick_patterns")
-        if cp and cp.get("patterns"):
-            # Check for strong bearish patterns when going long
-            # or strong bullish patterns when going short
-            is_buy = direction in ("BUY", "STRONG_BUY")
-            net_bias = cp.get("net_bias", 0.0)
-            
-            # Strong bullish pattern but we're selling = skip
-            if not is_buy and net_bias > 0.5:
-                neutral_skipped += 1
-                continue
-            # Strong bearish pattern but we're buying = skip
-            if is_buy and net_bias < -0.5:
-                neutral_skipped += 1
-                continue
-
         # Trend-alignment filter for commodities
         # Only trade with the SMA50 trend direction
         sma_50 = ind.get("sma_50")
