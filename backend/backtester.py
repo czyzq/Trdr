@@ -9,18 +9,17 @@ Usage:
     python backtester.py --symbol XAU --days 365  # Fetch Yahoo Finance data
     python backtester.py --csv data/gold_2024.csv --symbol XAU
     python backtester.py --all --days 180         # All instruments
-    python backtester.py --sample                 # Use synthetic data (testing only)
 
 Data sources (in priority order):
     1. --csv <file>          CSV file (Yahoo Finance download format)
     2. Yahoo Finance API     Automatic when no --csv given
     3. Alpha Vantage API     Fallback if Yahoo fails
-    4. --sample              Synthetic data (only for unit tests, not real analysis)
 """
 
 import argparse
 import json
-import sys
+import logging
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -753,7 +752,6 @@ def main():
     parser.add_argument("--days", type=int, default=365, help="Days of history (default: 365)")
     parser.add_argument("--resolution", default="D", help="Candle interval: D, 60, 30, 15, 5 (default: D)")
     parser.add_argument("--csv", type=str, help="Path to CSV file with OHLCV data")
-    parser.add_argument("--sample", action="store_true", help="Use built-in sample data (no API needed)")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show individual trade entries")
     args = parser.parse_args()
@@ -762,7 +760,6 @@ def main():
         fetch_alpha_vantage_historical,
         fetch_from_db_cache,
         fetch_yahoo_historical,
-        generate_sample_data,
         load_csv_candles,
     )
 
@@ -792,7 +789,7 @@ def main():
             "30": "30m",
             "15": "15m",
             "5": "5m",
-            "1": "2m",
+            "1": "2m",  # TODO: we can have such thing how is it suppose to help 
         }
         yahoo_interval = yahoo_interval_map.get(args.resolution, "1d")
 
@@ -826,18 +823,16 @@ def main():
                         candles = None
 
             if candles is None:
+                logging.error(f"No cached data for {symbol} at {args.resolution} resolution")
                 print(f"  Fetching {args.days} days ({args.resolution} candles) from Yahoo Finance...")
                 candles = fetch_yahoo_historical(symbol, period_days=args.days, interval=yahoo_interval)
                 if candles:
                     print(f"  Fetched {len(candles)} candles from Yahoo Finance")
-                    # Store to DB history for future use
-                    _db.store_candles(symbol, args.resolution, candles, "yahoo")
                 else:
                     print(f"  Yahoo fetch failed, trying Alpha Vantage...")
                     candles = fetch_alpha_vantage_historical(symbol, count=min(args.days, 200))
                     if candles:
                         print(f"  Fetched {len(candles)} candles from Alpha Vantage")
-                        _db.store_candles(symbol, args.resolution, candles, "alpha_vantage")
                     else:
                         print(f"  Alpha Vantage failed, trying DB cache...")
                         candles = fetch_from_db_cache(symbol, args.resolution)
@@ -846,16 +841,10 @@ def main():
                             print(f"  Use --csv <file> to provide data, or --sample for synthetic test data.")
                             continue
 
+        # Try sample data ONLY if explicitly requested AND no real data available
         if candles is None and args.sample:
-            base_prices = {"XAU": 2000.0, "XAG": 23.0, "US100": 17500.0, "BTC": 95000.0}
-            sample_days = max(args.days, 300) if args.resolution == "D" else max(args.days, 30)
-            candles = generate_sample_data(
-                symbol,
-                days=sample_days,
-                base_price=base_prices.get(symbol, 1000),
-                resolution=args.resolution,
-            )
-            print(f"  WARNING: Using synthetic sample data ({len(candles)} candles) — not real market data")
+            print(f"  ERROR: No real data available for {symbol}. Use --csv <file> to provide data.")
+            continue
 
         # Generate/fetch daily candles for multi-timeframe filter
         htf_candles = None

@@ -7,6 +7,7 @@ import os
 import sys
 from datetime import datetime
 from typing import Dict, List
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -17,6 +18,34 @@ from backtester import BacktestTrade
 from historical_data import generate_sample_data
 from models import Component, ComponentType, Signal, SignalDirection
 from strategies import BaseStrategy, get_strategy
+
+
+# ── Mock Database Fixtures ──
+
+@pytest.fixture(autouse=True)
+def mock_database():
+    """Mock database functions to prevent tests from writing to real database."""
+    import database as db_module
+    
+    # Mock async functions
+    db_module.async_save_trade = AsyncMock(return_value=None)
+    db_module.async_save_account = AsyncMock(return_value=None)
+    db_module.async_save_quote = AsyncMock(return_value=None)
+    db_module.save_trade = MagicMock(return_value=None)
+    db_module.save_account = MagicMock(return_value=None)
+    db_module.save_quote = MagicMock(return_value=None)
+    db_module.save_backtest_candles = MagicMock(return_value=None)
+    
+    # Also patch the module import in broker_sim
+    import broker_sim
+    broker_sim.async_save_trade = AsyncMock(return_value=None)
+    broker_sim.async_save_account = AsyncMock(return_value=None)
+    broker_sim.async_save_quote = AsyncMock(return_value=None)
+    
+    yield
+    
+    # Cleanup after test
+    pass
 
 
 # ── Sample Data Fixtures ──
