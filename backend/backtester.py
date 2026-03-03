@@ -478,32 +478,35 @@ def run_backtest(
             inst_config = INSTRUMENT_CONFIG.get(symbol, {})
             min_score = inst_config.get("min_score", 0.15)
 
+        inst_config = INSTRUMENT_CONFIG.get(symbol, {})  # Always need this for filters
         direction = get_direction(score, min_score=min_score)
 
         if direction == "NEUTRAL":
             neutral_skipped += 1
             continue
 
-        # Minimum indicator agreement filter (per-instrument)
-        bullish_c = sum(1 for s in component_scores if s > 0.1)
-        bearish_c = sum(1 for s in component_scores if s < -0.1)
-        min_agreement = inst_config.get("min_agreement", 2)
-        if max(bullish_c, bearish_c) < min_agreement:
-            neutral_skipped += 1
-            continue
+        # Minimum indicator agreement filter (per-instrument) - skip for unified
+        if not using_unified:
+            bullish_c = sum(1 for s in component_scores if s > 0.1)
+            bearish_c = sum(1 for s in component_scores if s < -0.1)
+            min_agreement = inst_config.get("min_agreement", 2)
+            if max(bullish_c, bearish_c) < min_agreement:
+                neutral_skipped += 1
+                continue
 
-        # Trend-alignment filter for commodities
-        # Only trade with the SMA50 trend direction
-        sma_50 = ind.get("sma_50")
-        if asset_class == "commodity" and sma_50:
-            price_above_sma50 = current_price > sma_50
-            is_buy = direction in ("BUY", "STRONG_BUY")
-            if is_buy and not price_above_sma50:
-                neutral_skipped += 1
-                continue
-            if not is_buy and price_above_sma50:
-                neutral_skipped += 1
-                continue
+        # Trend-alignment filter for commodities (skip for unified - has its own filters)
+        if not using_unified:
+            sma_50 = ind.get("sma_50")
+            asset_class = inst_config.get("asset_class", "crypto")
+            if asset_class == "commodity" and sma_50:
+                price_above_sma50 = current_price > sma_50
+                is_buy = direction in ("BUY", "STRONG_BUY")
+                if is_buy and not price_above_sma50:
+                    neutral_skipped += 1
+                    continue
+                if not is_buy and price_above_sma50:
+                    neutral_skipped += 1
+                    continue
 
         # Determine TP/SL using ATR
         # With trailing stop: wider initial SL (3×ATR emergency) since trailing will tighten

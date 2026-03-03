@@ -1806,7 +1806,7 @@ async def set_dynamic_positions(enabled: bool = True):
 from fastapi import Body, Query
 
 # All available indicators
-ALL_INDICATORS = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM", "WILLIAMS_R"]
+ALL_INDICATORS = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM", "WILLIAMS_R", "DIVERGENCE", "HTF_CANDLE"]
 
 
 @app.get("/api/settings/indicators/{symbol}")
