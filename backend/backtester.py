@@ -27,6 +27,14 @@ from typing import Dict, List, Optional, Tuple
 
 from indicators import TechnicalIndicators
 
+# Try to import analyze_with_new_strategy for unified signal generation
+try:
+    from main import analyze_with_new_strategy as analyze_strategy
+    HAS_UNIFIED_ANALYSIS = True
+except ImportError:
+    HAS_UNIFIED_ANALYSIS = False
+    analyze_strategy = None
+
 # ── Signal scoring — extracted from main.py to run standalone ──
 
 
@@ -243,6 +251,8 @@ def run_backtest(
     max_concurrent: int = 1,
     verbose: bool = False,
     htf_candles: Optional[List[Dict]] = None,
+    use_unified_strategy: bool = False,
+    strategy_id: Optional[str] = None,
 ) -> BacktestResult:
     """
     Run backtest over historical candle data.
@@ -251,7 +261,15 @@ def run_backtest(
     generating signals, and simulating trades with TP/SL exits.
 
     htf_candles: optional higher-timeframe (e.g. daily) candles for multi-TF filter.
+    use_unified_strategy: if True, use analyze_with_new_strategy() for signal generation
+    strategy_id: specific JSON strategy to use (e.g., "btc_v3_exp")
     """
+    # Track if we're using unified strategy
+    using_unified = use_unified_strategy and HAS_UNIFIED_ANALYSIS and analyze_strategy is not None
+    
+    if using_unified:
+        print(f"[BACKTEST] Using unified strategy: {strategy_id or 'default'}")
+    
     if len(candles) < LOOKBACK + 10:
         raise ValueError(f"Need at least {LOOKBACK + 10} candles, got {len(candles)}")
 
@@ -380,35 +398,85 @@ def run_backtest(
         if len(open_trades) >= max_concurrent:
             continue
 
-        # Compute indicators on trailing window
-        ind = TechnicalIndicators.calculate_all(window, period=14)
-        if not ind:
-            continue
-        ind["_closes"] = [c["close"] for c in window]
+        # Use unified strategy if requested
+        if using_unified:
+            # Try to get signal from unified strategy
+            try:
+                # Also compute indicators for filters
+                ind = TechnicalIndicators.calculate_all(window, period=14)
+                if not ind:
+                    continue
+                ind["_closes"] = [c["close"] for c in window]
+                
+                # Volatility filter (same as production)
+                atr = ind.get("atr_14", current_price * 0.01)
+                atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
+                if atr_pct > 3.0:
+                    continue
+                
+                # Get signal from unified strategy
+                result = analyze_strategy(
+                    symbol=symbol,
+                    candles=window,  # trailing window
+                    current_price=current_price,
+                    balance=initial_balance,
+                    requested_strategy=strategy_id
+                )
+                
+                if result and result.get('direction'):
+                    # Convert to format expected by backtester
+                    direction = result['direction']
+                    score = result.get('score', 0)
+                    direction_str = 'BUY' if direction == 'long' else 'SELL'
+                    component_scores = [score]  # Simplified
+                    total_signals += 1
+                else:
+                    continue  # No signal from unified strategy
+            except Exception as e:
+                # Fall back to traditional scoring
+                if verbose:
+                    print(f"[BACKTEST] Unified strategy error: {e}, falling back")
+                using_unified = False  # Disable for rest of run
+                ind = TechnicalIndicators.calculate_all(window, period=14)
+                if not ind:
+                    continue
+                ind["_closes"] = [c["close"] for c in window]
+                score, component_scores = calculate_signal_score(ind)
+                total_signals += 1
+        else:
+            # Original logic: compute indicators and calculate score
+            # Compute indicators on trailing window
+            ind = TechnicalIndicators.calculate_all(window, period=14)
+            if not ind:
+                continue
+            ind["_closes"] = [c["close"] for c in window]
 
-        # Volatility filter (same as production)
-        atr = ind.get("atr_14", current_price * 0.01)
-        atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
-        if atr_pct > 3.0:
-            continue
+            # Volatility filter (same as production)
+            atr = ind.get("atr_14", current_price * 0.01)
+            atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
+            if atr_pct > 3.0:
+                continue
 
-        score, component_scores = calculate_signal_score(ind)
-        total_signals += 1
+            score, component_scores = calculate_signal_score(ind)
+            total_signals += 1
 
         # Blend in higher-TF bias (if available)
-        if abs(htf_bias) > 0.1:
+        if not using_unified and abs(htf_bias) > 0.1:
             score = score * 0.85 + htf_bias * 0.15
             score = max(-1, min(1, score))
 
-        # Multi-TF alignment filter: halve score if opposing daily trend
-        if abs(htf_bias) > 0.3:
+        # Multi-TF alignment filter: halve score if opposing daily trend (not for unified - it has its own filters)
+        if not using_unified and abs(htf_bias) > 0.3:
             if (score > 0) != (htf_bias > 0):
                 score *= 0.5
 
-        # Per-instrument threshold
-        inst_config = INSTRUMENT_CONFIG.get(symbol, {})
-        min_score = inst_config.get("min_score", 0.15)
-        asset_class = inst_config.get("asset_class", "equity")
+        # Per-instrument threshold - use from unified result or config
+        if using_unified:
+            # Unified strategy already applies its own thresholds
+            min_score = 0.0
+        else:
+            inst_config = INSTRUMENT_CONFIG.get(symbol, {})
+            min_score = inst_config.get("min_score", 0.15)
 
         direction = get_direction(score, min_score=min_score)
 
