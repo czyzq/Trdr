@@ -1000,7 +1000,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 news_score=0.0,
                 components=[],
                 current_price=last_known_price,
-                time_horizon="1h",
+                time_horizon=timeframe,
                 entry_point=last_known_price,
                 take_profit=0.0,
                 stop_loss=0.0,
@@ -1009,9 +1009,14 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
 
         current_price = quote["price"]
 
-        # Use cached candles with 30s TTL
+        # Get timeframe from selected strategy for this symbol
+        selected_strategy = get_symbol_strategy(symbol)
+        strategy_obj = get_strategy(selected_strategy)
+        timeframe = strategy_obj.timeframe if hasattr(strategy_obj, 'timeframe') else "60"
+        
+        # Use cached candles with strategy's timeframe
         async with _api_semaphore:
-            candles = await asyncio.wait_for(_get_cached_candles(symbol, "60", 100), timeout=10.0)
+            candles = await asyncio.wait_for(_get_cached_candles(symbol, timeframe, 100), timeout=10.0)
         if not candles or len(candles) < 20:
             return Signal(
                 symbol=symbol,
@@ -1023,7 +1028,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 news_score=0.0,
                 components=[],
                 current_price=current_price,
-                time_horizon="1h",
+                time_horizon=timeframe,
                 entry_point=current_price,
                 take_profit=0.0,
                 stop_loss=0.0,
@@ -1042,7 +1047,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 news_score=0.0,
                 components=[],
                 current_price=current_price,
-                time_horizon="1h",
+                time_horizon=timeframe,
                 entry_point=current_price,
                 take_profit=0.0,
                 stop_loss=0.0,
@@ -1131,7 +1136,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 news_score=0.0,
                 components=[],
                 current_price=current_price,
-                time_horizon="1h",
+                time_horizon=timeframe,
                 entry_point=current_price,
                 take_profit=0.0,
                 stop_loss=0.0,
@@ -1180,7 +1185,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 news_score=0.0,
                 components=new_result["components"],
                 current_price=current_price,
-                time_horizon="1h",
+                time_horizon=timeframe,
                 entry_point=current_price,
                 take_profit=new_result["take_profit"],
                 stop_loss=new_result["stop_loss"],
@@ -1217,7 +1222,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             news_score=news_score,
             components=result["components"],
             current_price=current_price,
-            time_horizon="1h",
+            time_horizon=timeframe,
             entry_point=current_price,
             take_profit=result["take_profit"],
             stop_loss=result["stop_loss"],
@@ -1238,7 +1243,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             news_score=0.0,
             components=[],
             current_price=0.0,
-            time_horizon="1h",
+            time_horizon=timeframe,
             entry_point=0.0,
             take_profit=0.0,
             stop_loss=0.0,
@@ -2058,7 +2063,7 @@ async def backtest_from_json(
 ):
     """
     Run backtest using strategy config from JSON body.
-    Send JSON with strategy configuration matching memory/strategies.json format.
+    Send JSON with strategy configuration matching memoos.path.join(os.path.dirname(__file__), "..", "strategies.json") format.
     """
     import time
     start_time = time.time()
@@ -4305,8 +4310,8 @@ def get_strategy_manager(force_reload: bool = False):
             from strategy import load_strategies_from_file
             import os
             
-            # Try to load from workspace memory
-            json_path = os.path.expanduser("~/.openclaw/workspace/memory/strategies.json")
+            # Load from local strategies.json in project root
+            json_path = os.path.join(os.path.dirname(__file__), "..", "strategies.json")
             if os.path.exists(json_path):
                 _strategy_manager = load_strategies_from_file(json_path)
                 print(f"[STRATEGY] Loaded {len(_strategy_manager.strategies)} strategies from JSON")

@@ -140,7 +140,7 @@ class Strategy:
         self.id = config.get('id')
         self.name = config.get('name')
         self.symbol = config.get('symbol')
-        self.timeframe = config.get('timeframe', '5m')
+        self.timeframe = config.get('timeframe', '5m')  # Default to 5m (need to fetch this data)
         self.enabled = config.get('enabled', True)
         self.trade_direction = config.get('trade_direction', 'long_only')
         
