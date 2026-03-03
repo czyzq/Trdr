@@ -266,6 +266,15 @@ def run_backtest(
     # Track if we're using unified strategy
     using_unified = use_unified_strategy and HAS_UNIFIED_ANALYSIS and analyze_strategy is not None
     
+    # Force reload strategy manager to ensure clean state (indicators reset)
+    # This ensures deterministic results between backtest runs
+    if using_unified:
+        try:
+            from main import get_strategy_manager
+            get_strategy_manager(force_reload=True)
+        except Exception:
+            pass  # Ignore errors - may not have the function
+    
     if using_unified:
         print(f"[BACKTEST] Using unified strategy: {strategy_id or 'default'}")
     

@@ -84,7 +84,9 @@ from settings import (
     get_all_settings,
     get_current_broker_settings,
 )
-from strategies import get_strategy, list_strategies, mms_on_trade_result
+from timeframes import TimeFrame, DEFAULT_TIMEFRAME
+from strategy import load_strategies_from_file
+from strategies import list_strategies as old_list_strategies, mms_on_trade_result
 
 _timing_stats: dict[str, dict] = {}
 
@@ -1009,10 +1011,26 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
 
         current_price = quote["price"]
 
-        # Get timeframe from selected strategy for this symbol
+        # Get timeframe from selected strategy (convert to db_resolution for compatibility)
         selected_strategy = get_symbol_strategy(symbol)
-        strategy_obj = get_strategy(selected_strategy)
-        timeframe = strategy_obj.timeframe if hasattr(strategy_obj, 'timeframe') else "60"
+        
+        # Use StrategyManager from JSON (supports timeframe)
+        manager = get_strategy_manager()
+        strategy_obj = manager.strategies.get(selected_strategy)
+        if not strategy_obj:
+            strategy_obj = manager.strategies.get('xau_v3_exp')
+        
+        # Handle both string and TimeFrame enum
+        tf_value = strategy_obj.timeframe if strategy_obj and hasattr(strategy_obj, 'timeframe') else "5m"
+        if hasattr(tf_value, 'value'):
+            tf_value = tf_value.value
+        
+        # Convert to db_resolution (e.g., "5m" -> "5")
+        try:
+            tf_enum = TimeFrame(tf_value)
+            timeframe = tf_enum.db_resolution
+        except ValueError:
+            timeframe = "5"  # fallback
         
         # Use cached candles with strategy's timeframe
         async with _api_semaphore:
@@ -1122,26 +1140,10 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             print(f"[VIX] Could not fetch VIX for {symbol}: {e}")
 
         # ── Volatility filter ──
+        # NOTE: Volatility check now handled by Strategy's filter config
+        # The strategy.json defines volatility filter per-strategy
         atr = indicators.get("atr_14", current_price * 0.01)
         atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
-        if atr_pct > 3.0:
-            # Return neutral but with price
-            return Signal(
-                symbol=symbol,
-                direction=SignalDirection.NEUTRAL,
-                score=0.0,
-                confidence=0.0,
-                technical_score=0.0,
-                price_action_score=0.0,
-                news_score=0.0,
-                components=[],
-                current_price=current_price,
-                time_horizon=timeframe,
-                entry_point=current_price,
-                take_profit=0.0,
-                stop_loss=0.0,
-                risk_reward_ratio=0.0,
-            )
 
         # ── News sentiment (disabled to speed up - optional feature) ──
         news_score = 0.0
@@ -1167,7 +1169,9 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             candles, 
             current_price, 
             account.get("balance_usd", 3000),
-            requested_strategy=selected_strategy if selected_strategy.startswith("JSON:") else None
+            requested_strategy=selected_strategy if selected_strategy.startswith("JSON:") else None,
+            atr_percent=atr_pct,
+            vix_value=vix_data.get('value') if vix_data else None
         )
         
         if new_result:
@@ -3207,6 +3211,7 @@ async def run_backtest(
     else:
         strategy_id = get_symbol_strategy(symbol_key)
 
+    from strategies import get_strategy
     strategy = get_strategy(strategy_id)
     instrument_info = INSTRUMENTS.get(symbol_key, {})
 
@@ -4325,7 +4330,9 @@ def get_strategy_manager(force_reload: bool = False):
     return _strategy_manager
 
 
-def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, balance: float, requested_strategy: str = None) -> dict:
+def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, balance: float, 
+                            requested_strategy: str = None, atr_percent: float = None, 
+                            vix_value: float = None) -> dict:
     """
     Analyze using new JSON-based strategy module.
     Returns dict with direction, score, confidence, etc. or None if not available.
@@ -4336,6 +4343,8 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, 
         current_price: Current price
         balance: Account balance
         requested_strategy: Specific JSON strategy ID to use (e.g., "JSON:btc_v2_core")
+        atr_percent: ATR percent for volatility filter
+        vix_value: Current VIX value for VIX filter
     """
     manager = get_strategy_manager()
     if not manager:
@@ -4400,6 +4409,16 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, 
     # Check if we have enough indicator data
     has_data = all(ind.value() is not None for ind in strategy.indicators.values())
     if not has_data:
+        return None
+    
+    # Check filters (includes volatility and VIX from strategy config)
+    filters_passed, failed_filters = strategy.filters.check_all(
+        candle_data, symbol, 'long', 
+        atr_percent=atr_percent, 
+        vix_value=vix_value
+    )
+    if not filters_passed:
+        print(f"[FILTERS] {symbol}: Failed filters: {failed_filters}")
         return None
     
     # Get signal

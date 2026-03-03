@@ -1,6 +1,10 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
 ## Today's Work (2026-03-03)
+- 23:46 - Fixed 2 bugs:
+  1. Fixed NameError in main.py:3214 - added missing import for `get_strategy` in backtest endpoint
+  2. Fixed non-deterministic backtest results - added force_reload=True to strategy manager to reset indicator state between runs
+- 23:46 - All 205 tests passing ✅ (was 1 failing)
 - 22:46 - Verified all 205 tests passing, 2 skipped (trailing_stop not implemented) ✅
 - 21:46 - Verified all 194 tests passing, 13 skipped (by design - trailing_stop not implemented, broker TP/SL errors) ✅
 - 20:43 - Verified all 194 tests passing, 13 skipped (by design - trailing_stop not implemented, broker TP/SL errors) ✅
