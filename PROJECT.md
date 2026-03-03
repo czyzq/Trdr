@@ -170,6 +170,112 @@ Data Sources (Yahoo/Alpha/Binance)
 - ✅ Sample data removed
 - ⚠️ Need to verify backtester reads from backtest_cache first
 
+### 6. ✅ STRATEGY-DRIVEN FILTER ARCHITECTURE (FIXED 2026-03-04)
+**Problem:** Volatility and VIX filters were hardcoded in main.py, violating separation of concerns.
+
+**Changes Made:**
+
+1. **New filter classes added to `backend/strategy/filters.py`:**
+   - `VolatilityFilter` - Checks ATR% against strategy config
+   - `VixFilter` - Checks VIX level against strategy config
+
+2. **Filter configuration added to all strategies in `strategies.json`:**
+   ```json
+   "filters": {
+     "volatility": {
+       "enabled": true,
+       "max_atr_percent": 3.0
+     },
+     "vix": {
+       "enabled": false,
+       "max_vix": 30
+     }
+   }
+   ```
+
+3. **Updated signal flow:**
+   - `analyze_with_new_strategy()` now passes `atr_percent` and `vix_value` to strategy filters
+   - Filters checked INSIDE strategy, not in main.py
+   - Strategy is now the single source of truth
+
+4. **Benefits:**
+   - Each strategy can have different filter thresholds
+   - No code changes needed to adjust filters
+   - Better testability and maintainability
+**Problem:** In `rsi_momentum` direction mode, momentum logic was inverted:
+- **Before (WRONG):** momentum < 0 → BUY, momentum > 0 → SELL
+- **After (FIXED):** momentum > 0 → BUY (price rising), momentum < 0 → SELL (price falling)
+
+**Location:** `backend/strategy/strategy.py` - `_get_signal_rsi_momentum()`
+
+**Impact:** BTC, XAU, XAG strategies using `direction_mode: "rsi_momentum"` (btc_v3_exp, xau_v3_exp, xag_v3_exp) were generating opposite signals.
+
+### 7. ⚠️ US100 STRATEGY FALLBACK ISSUE
+**Problem:** When strategy for US100 (`htf_divergence_test`) not found, falls back to `xau_v3_exp` instead of proper default.
+
+**Location:** `main.py` line ~1015 - fallback logic
+
+### 8. ⚠️ REMOVED DEFAULT VALUES
+**Problem:** Removed default values for `timeframe` and `trade_direction` in Strategy class, could cause None errors.
+
+**Location:** `backend/strategy/strategy.py` lines 143-144
+
+### 9. ⚠️ SIGNAL GENERATION FLOW COMPLEXITY
+**Problem:** Signal generation has multiple paths that could behave differently:
+- New JSON strategy: `analyze_with_new_strategy()` 
+- Legacy strategy: `calculate_signal_score()` in backtester.py
+- Both use different normalization/weighting
+
+**Recommendation:** Ensure both paths produce consistent results
+
+---
+
+## Signal Generation Flow (Detailed)
+
+```
+_analyze_single_symbol(symbol, info, news_client)
+    │
+    ├─→ 1. Get quote from cache
+    │
+    ├─→ 2. Get strategy from DB (get_symbol_strategy)
+    │       └─→ Falls back to 'xau_v3_exp' if not found (BUG!)
+    │
+    ├─→ 3. Get timeframe from strategy config
+    │       └─→ Convert "5m" → "5" for db_resolution
+    │
+    ├─→ 4. Fetch candles (100 bars)
+    │       └─→ Return NEUTRAL if < 20 candles
+    │
+    ├─→ 5. Calculate indicators (TechnicalIndicators.calculate_all)
+    │       └─→ Return NEUTRAL if indicators fail
+    │
+    ├─→ 6. Filter indicators by per-symbol settings
+    │
+    ├─→ 7. Fetch HTF (daily) candles for trend bias
+    │
+    ├─→ 8. VIX filter
+    │       └─→ Return NEUTRAL if ATR% > 3%
+    │
+    ├─→ 9. Try JSON strategy (analyze_with_new_strategy)
+    │       └─→ NEW PATH: Uses strategy/strategy.py ScoreEngine
+    │
+    ├─→ 10. Fallback to legacy strategy
+    │       └─→ OLD PATH: Uses strategies.py AdaptiveRegimeStrategy
+    │
+    └─→ Return Signal with direction, score, confidence
+```
+
+### When Signal Returns None (No Trade)
+
+| Check | Location | Reason |
+|-------|----------|--------|
+| Insufficient candles | `_analyze_single_symbol` | < 20 candles |
+| Indicator calculation failed | `_analyze_single_symbol` | TechnicalIndicators returned None |
+| High volatility | `_analyze_single_symbol` | ATR% > 3% |
+| No signal from strategy | `analyze_with_new_strategy` | Score below min_score |
+| Filters failed | `Strategy.on_bar()` | Volume low, position exists, etc. |
+| Wrong direction | `Strategy.on_bar()` | long_only mode but sell signal |
+
 ---
 
 ## What's Working
