@@ -511,10 +511,15 @@ class TestCandleAggregation:
 
     def test_store_and_load_candles_in_memory(self):
         """Test in-memory candle accumulation (no MongoDB)."""
-        from database import _candle_history_mem, count_candles, load_candle_history, store_candles
+        from database import _candle_history_mem, count_candles, load_candle_history, store_candles, get_db
 
-        # Clear any existing state
+        # Clear any existing state - both in-memory and MongoDB
         _candle_history_mem.clear()
+        
+        db = get_db()
+        if db is not None:
+            # Clear ALL BTC/60 candles (not just test source - there may be existing data)
+            db.candles.delete_many({"symbol": "BTC", "resolution": "60"})
 
         # BTC trades 24h so we get many candles per day
         candles = generate_sample_data("BTC", days=10, base_price=95000.0, resolution="60")
@@ -539,6 +544,8 @@ class TestCandleAggregation:
 
         # Clean up
         _candle_history_mem.clear()
+        if db is not None:
+            db.candles.delete_many({"symbol": "BTC", "resolution": "60"})
 
 
 # ── CSV loader tests ──
