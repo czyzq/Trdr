@@ -251,7 +251,7 @@ def run_backtest(
     max_concurrent: int = 1,
     verbose: bool = False,
     htf_candles: Optional[List[Dict]] = None,
-    use_unified_strategy: bool = False,
+    use_unified_strategy: bool = True,
     strategy_id: Optional[str] = None,
 ) -> BacktestResult:
     """
@@ -431,7 +431,16 @@ def run_backtest(
                     component_scores = [score]  # Simplified
                     total_signals += 1
                 else:
-                    continue  # No signal from unified strategy
+                    # No signal from unified strategy (no strategy found for symbol)
+                    # Fall back to traditional scoring
+                    if verbose:
+                        print(f"[BACKTEST] No unified strategy for {symbol}, falling back")
+                    ind = TechnicalIndicators.calculate_all(window, period=14)
+                    if not ind:
+                        continue
+                    ind["_closes"] = [c["close"] for c in window]
+                    score, component_scores = calculate_signal_score(ind)
+                    total_signals += 1
             except Exception as e:
                 # Fall back to traditional scoring
                 if verbose:

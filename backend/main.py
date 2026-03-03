@@ -4344,7 +4344,10 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, 
         json_id = requested_strategy.replace("JSON:", "")
         if json_id in manager.strategies:
             strategy = manager.strategies[json_id]
-            print(f"[STRATEGY] Using requested JSON strategy: {json_id}")
+            # Only print on first call (check if already printed this session)
+            if not getattr(analyze_with_new_strategy, '_logged', False):
+                print(f"[STRATEGY] Using requested JSON strategy: {json_id}")
+                analyze_with_new_strategy._logged = True
     else:
         # Default: use enabled strategy for this symbol
         for s in manager.get_enabled_strategies():

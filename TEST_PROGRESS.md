@@ -1,6 +1,12 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
 ## Today's Work (2026-03-03)
+- 10:41 - Verified all 194 tests passing, 13 skipped (by design - trailing_stop not implemented, broker TP/SL errors) ✅
+- 09:41 - Fixed 2 bugs causing 3 backtester tests to fail:
+  1. Fixed MACD indicator buffer size bug (strategy/indicators.py) - was using signal period (9) instead of slow period (26) for buffer, causing MACD to never compute
+  2. Added fallback to traditional scoring when no unified strategy found (backtester.py) - XAG/US100 now fall back to old method
+- 09:41 - All 194 tests passing ✅ (was 3 failing)
+- 08:41 - Verified all 194 tests passing, 13 skipped (by design - trailing_stop not implemented, broker TP/SL errors) ✅
 - 07:41 - Fixed test_store_and_load_candles_in_memory (assert 80 -> >= 80 for timing variance) - all 194 tests passing ✅
 - 06:40 - Verified all 194 tests passing, 13 skipped (by design - trailing_stop not implemented, broker TP/SL errors) ✅
 - 05:40 - Verified all 194 tests passing, 13 skipped (by design - trailing_stop not implemented, broker TP/SL errors) ✅

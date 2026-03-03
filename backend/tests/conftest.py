@@ -304,6 +304,49 @@ def sample_indicators():
     }
 
 
+# ── Broker Fixtures ──
+
+
+@pytest.fixture
+def fresh_broker():
+    """Create a fresh broker with 10000 balance for each test.
+    
+    IMPORTANT: This clears any existing positions from the database
+    to ensure test isolation.
+    """
+    from broker_sim import SimulatedBroker
+    broker = SimulatedBroker(initial_balance=10000.0)
+    # Clear any existing positions loaded from DB
+    broker.open_positions.clear()
+    broker.closed_positions.clear()
+    # Reset account to known state
+    broker.account["balance_usd"] = 10000.0
+    broker.account["equity_usd"] = 10000.0
+    broker.account["available_usd"] = 10000.0
+    broker.account["positions"] = 0
+    broker.account["open_trades"] = 0
+    return broker
+
+
+@pytest.fixture
+def broker_with_balance():
+    """Create a broker with custom initial balance. Usage: broker_with_balance(50000)"""
+    def _create_broker(balance=10000.0):
+        from broker_sim import SimulatedBroker
+        broker = SimulatedBroker(initial_balance=balance)
+        # Clear any existing positions loaded from DB
+        broker.open_positions.clear()
+        broker.closed_positions.clear()
+        # Reset account to known state
+        broker.account["balance_usd"] = balance
+        broker.account["equity_usd"] = balance
+        broker.account["available_usd"] = balance
+        broker.account["positions"] = 0
+        broker.account["open_trades"] = 0
+        return broker
+    return _create_broker
+
+
 # ── Price Fixtures ──
 
 
