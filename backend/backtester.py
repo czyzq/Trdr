@@ -433,8 +433,9 @@ def run_backtest(
                 else:
                     # No signal from unified strategy (no strategy found for symbol)
                     # Fall back to traditional scoring
+                    # Don't disable unified - it may work on next bar
                     if verbose:
-                        print(f"[BACKTEST] No unified strategy for {symbol}, falling back")
+                        print(f"[BACKTEST] No unified signal for {symbol} (result={result}), falling back")
                     ind = TechnicalIndicators.calculate_all(window, period=14)
                     if not ind:
                         continue
@@ -442,10 +443,11 @@ def run_backtest(
                     score, component_scores = calculate_signal_score(ind)
                     total_signals += 1
             except Exception as e:
-                # Fall back to traditional scoring
+                # Fall back to traditional scoring but keep unified enabled
+                # (exception may be transient)
                 if verbose:
                     print(f"[BACKTEST] Unified strategy error: {e}, falling back")
-                using_unified = False  # Disable for rest of run
+                # Don't disable unified - it may work on next bar
                 ind = TechnicalIndicators.calculate_all(window, period=14)
                 if not ind:
                     continue
