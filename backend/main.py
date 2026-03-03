@@ -1306,7 +1306,7 @@ async def price_cache_loop():
 
 
 AUTO_TRADE_INTERVAL_SEC = 300  # Scan every 5 minutes
-AUTO_TRADE_ENABLED = True  # Master switch - can be toggled via API (disabled until async-signals ready)
+AUTO_TRADE_ENABLED = False  # Default: OFF until manually enabled  # Master switch - can be toggled via API (disabled until async-signals ready)
 _trading_task = None  # Reference to the background task
 
 

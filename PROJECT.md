@@ -22,7 +22,7 @@ AI-powered trading bot for Polymarket that uses deep research from Perplexity (v
 ### Backend
 - **Framework:** FastAPI (Python)
 - **Database:** MongoDB
-- **Port:** 8000
+- **Port:** 8001
 - **Key Features:**
   - Polymarket API integration (websocket for live updates)
   - MCP client for Perplexity research

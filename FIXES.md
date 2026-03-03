@@ -39,7 +39,7 @@ src/components/MainTab.tsx(441,77): error TS18047: 'pos' is possibly 'null'.
 **Problem:** Need automated error checking every 30 minutes.
 
 **Solution:** Created `/Users/pinchr/dev/cfd-trading-bot/fixer.sh` that:
-- Checks if frontend (port 5173) and backend (port 8000) are running
+- Checks if frontend (port 5173) and backend (port 8001) are running
 - Restarts services if not running
 - Checks backend API health
 - Runs TypeScript build to catch errors
@@ -155,8 +155,8 @@ set_setting('TREND_REVERSAL_EXIT', 1, 'user')
 
 **Użycie:**
 ```bash
-curl -X POST "http://localhost:8000/api/strategy/XAU?strategy_id=JSON:xau_scalp_trend"
-curl -X POST "http://localhost:8000/api/strategy/BTC?strategy_id=JSON:btc_scalp_trend"
+curl -X POST "http://localhost:8001/api/strategy/XAU?strategy_id=JSON:xau_scalp_trend"
+curl -X POST "http://localhost:8001/api/strategy/BTC?strategy_id=JSON:btc_scalp_trend"
 ```
 
 ---
@@ -257,7 +257,7 @@ curl -X POST "http://localhost:8000/api/strategy/BTC?strategy_id=JSON:btc_scalp_
 }
 ```
 
-**Test:** `curl "http://localhost:8000/api/backtest?symbol=XAU&resolution=60&days=30&min_score=0.1"`
+**Test:** `curl "http://localhost:8001/api/backtest?symbol=XAU&resolution=60&days=30&min_score=0.1"`
 
 **TODO:**
 - [x] Equity curve chart w UI
