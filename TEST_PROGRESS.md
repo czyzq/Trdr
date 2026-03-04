@@ -1,5 +1,16 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
+## Today's Work (2026-03-04)
+- 09:51 - Fixed ImportError in services/__init__.py - added missing exports for `is_market_open` and `get_market_hours` from market_hours.py
+- 09:51 - All 205 tests passing ✅ (was 18 API tests erroring + 1 test failing due to state pollution)
+- 07:51 - Verified all 205 tests still passing ✅ (2 skipped - trailing_stop not implemented by design)
+- 05:51 - Verified all 205 tests still passing ✅ (2 skipped - trailing_stop not implemented by design)
+- 03:51 - Verified all 205 tests still passing ✅ (2 skipped - trailing_stop not implemented by design)
+- 02:51 - Verified all 205 tests still passing ✅ (2 skipped - trailing_stop not implemented by design)
+- 01:51 - Verified all 205 tests still passing ✅ (2 skipped - trailing_stop not implemented by design)
+- 01:51 - Note: ongoing refactoring (backend/app/, backend/api/, backend/services/ modules being created)
+- 00:51 - Verified all 205 tests still passing ✅ (2 skipped - trailing_stop not implemented by design)
+
 ## Today's Work (2026-03-03)
 - 23:46 - Fixed 2 bugs:
   1. Fixed NameError in main.py:3214 - added missing import for `get_strategy` in backtest endpoint
@@ -69,7 +80,7 @@
 ## Today's Work (2026-02-28)
 - 18:46 - Verified all 192 tests still passing ✅ (Fixes agent check - all tests passing)
 
-## Last Updated: 2026-03-03 22:46
+## Last Updated: 2026-03-04 09:51
 
 ## Status Summary
 - Total Tests: 207
