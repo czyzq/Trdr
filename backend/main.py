@@ -84,6 +84,11 @@ from settings import (
     get_all_settings,
     get_current_broker_settings,
 )
+# Legacy function for backward compatibility
+def get_strategy(strategy_id: str):
+    """Legacy function - use StrategyManager instead."""
+    manager = get_strategy_manager()
+    return manager.strategies.get(strategy_id)
 from timeframes import TimeFrame, DEFAULT_TIMEFRAME
 from strategy import load_strategies_from_file
 from strategies import list_strategies as old_list_strategies, mms_on_trade_result
@@ -245,13 +250,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# PLN/USD exchange rate (approximate)
-PLN_USD_RATE = 4.05
+from app import PLN_USD_RATE, event_log
+from services import is_market_open, get_market_hours, update_live_price_cache, get_live_price
 
 # Global state
-signals_cache = {}
-alpha_client = None
-event_log = db.load_event_log()  # Restore log from DB on startup
 
 # Broker abstraction - switch via BROKER_TYPE env var ("sim" or "ibkr")
 data_provider = create_data_provider()
@@ -355,53 +357,8 @@ def save_signal_cache():
         pass  # File write is best-effort fallback
 
 
-# Instruments to monitor - with per-instrument signal tuning
-# leverage: position multiplier (x20 = 5% margin requirement)
-# min_score: minimum |score| to enter (higher = fewer but better trades)
-# asset_class: "commodity" (mean-reverting) or "equity"/"crypto" (trending)
-# trailing_stop: enable trailing SL that locks in profits once in the green
-INSTRUMENTS = {
-    "XAU": {
-        "name": "Gold",
-        "multiplier": 1,
-        "pip_size": 0.01,
-        "lot_size": 0.003,
-        "leverage": 20,
-        "min_score": 0.30,
-        "asset_class": "commodity",
-        "trailing_stop": True,
-    },
-    "XAG": {
-        "name": "Silver",
-        "multiplier": 1,
-        "pip_size": 0.001,
-        "lot_size": 0.003,
-        "leverage": 20,
-        "min_score": 0.28,
-        "asset_class": "commodity",
-        "trailing_stop": True,
-    },
-    "US100": {
-        "name": "Nasdaq-100",
-        "multiplier": 1,
-        "pip_size": 0.01,
-        "lot_size": 0.003,
-        "leverage": 20,
-        "min_score": 0.20,
-        "asset_class": "equity",
-        "trailing_stop": True,
-    },
-    "BTC": {
-        "name": "Bitcoin",
-        "multiplier": 1,
-        "pip_size": 1.0,
-        "lot_size": 0.001,
-        "leverage": 5,
-        "min_score": 0.20,
-        "asset_class": "crypto",
-        "trailing_stop": True,
-    },
-}
+from app.config import INSTRUMENTS, get_instrument_config
+from app.logging import log_event, event_log
 
 
 # Live price cache - updated every few seconds in background
@@ -443,7 +400,7 @@ async def _update_live_price_cache():
     _live_price_cache_last_update = time.time()
 
 
-def get_live_price(symbol: str) -> Optional[float]:
+# def get_live_price (moved to services)(symbol: str) -> Optional[float]:
     """Get cached live price for a symbol."""
     cached = _live_price_cache.get(symbol)
     if cached:
@@ -451,86 +408,8 @@ def get_live_price(symbol: str) -> Optional[float]:
     return None
 
 
-def is_market_open(symbol: str) -> bool:
-    """
-    Check if market is currently open for trading.
-    Uses Europe/Warsaw time.
 
-    XAU/XAG/US100: Mon-Fri 01:00-22:59 Warsaw (CET/CEST)
-    BTC: Always open (24/7)
-    """
-    now = now_warsaw()
-    weekday = now.weekday()  # 0=Monday, 6=Sunday
-    hour = now.hour
-
-    if symbol == "BTC":
-        # Crypto never closes
-        return True
-
-    if symbol in ("XAU", "XAG", "US100"):
-        # Forex commodities: Mon 00:00 - Fri 22:00 UTC
-        # Weekend closed (Fri 22:00 - Sun 23:00)
-        if weekday == 5:  # Saturday
-            return False
-        if weekday == 6:  # Sunday - opens at 23:00
-            return hour >= 23
-        if weekday == 4 and hour >= 22:  # Friday after 22:00
-            return False
-        return True
-
-    # this is for nasdaq but nasdaq options are not traded in this bot, so we can keep it simple for now, and use upper^
-    # if symbol == "US100":
-    #     # Nasdaq: Mon-Fri 14:30-21:00 UTC (9:30-16:00 EST)
-    #     # Weekend closed
-    #     if weekday >= 5:  # Saturday or Sunday
-    #         return False
-    #     # Trading hours 14:30-21:00 UTC
-    #     if hour < 14 or hour >= 21:
-    #         return False
-    #     if hour == 14 and now.minute < 30:
-    #         return False  # Before 14:30
-    #     return True
-
-    # Default: allow trading
-    return True
-
-
-def get_market_hours(symbol: str) -> str:
-    """Get human-readable market hours for a symbol."""
-    if symbol == "BTC":
-        return "24/7"
-    if symbol in ("XAU", "XAG"):
-        return "Mon-Fri 00:00-22:00 UTC"
-    if symbol == "US100":
-        return "Mon-Fri 14:30-21:00 UTC"
-    return "Unknown"
-
-
-_log_counter = 0
-
-
-def log_event(message: str, log_type: str = "info"):
-    """Log events for the console. Persists to DB every 10 entries."""
-    global _log_counter
-    event_log.append(
-        {
-            "id": str(len(event_log)),
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "message": message,
-            "type": log_type,
-        }
-    )
-    if len(event_log) > 200:
-        event_log.pop(0)
-    print(f"[{log_type.upper()}] {message}")
-    # Persist periodically (every 10 log entries) to avoid excessive DB writes
-    _log_counter += 1
-    if _log_counter % 10 == 0:
-        # Run DB save in background - don't block
-        asyncio.create_task(async_save_event_log(event_log))
-
-
-def calculate_signal_score(indicators: dict, symbol: str = "") -> tuple[float, List[Component]]:
+# def calculate_signal_score (moved to services)(indicators: dict, symbol: str = "") -> tuple[float, List[Component]]:
     """
     Multi-factor signal scoring with regime-adaptive weighting.
     Uses: RSI (corrected), MACD, Bollinger Bands, SMA trend, ADX trend strength,
@@ -822,27 +701,12 @@ async def sync_account_from_closed_trades():
     )
 
 
-def get_signal_direction(score: float, min_score: float = 0.15) -> SignalDirection:
-    """Determine signal direction from score with per-instrument thresholds."""
-    strong_threshold = max(0.45, min_score + 0.20)
-    if score > strong_threshold:
-        return SignalDirection.STRONG_BUY
-    elif score > min_score:
-        return SignalDirection.BUY
-    elif score < -strong_threshold:
-        return SignalDirection.STRONG_SELL
-    elif score < -min_score:
-        return SignalDirection.SELL
-    else:
-        return SignalDirection.NEUTRAL
-
-
 # ── Risk Management ──────────────────────────────────────────────────
 # Dynamic settings from DB (fallback to defaults)
 # MAX_DRAWDOWN_PCT, MAX_OPEN_POSITIONS, MAX_RISK_PER_TRADE_PCT, INITIAL_BALANCE_USD
 
 
-def check_circuit_breaker() -> tuple[bool, str]:
+# def check_circuit_breaker (moved to services)() -> tuple[bool, str]:
     """Check if trading should be adjusted due to drawdown or position limits.
 
     Instead of blocking trading entirely when drawdown is high, we:
@@ -889,7 +753,7 @@ def check_circuit_breaker() -> tuple[bool, str]:
     return True, "OK"
 
 
-def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -> float:
+# def calculate_position_size (moved to services)(symbol: str, entry_price: float, stop_loss: float) -> float:
     """
     Calculate position size based on risk per trade and leverage.
     Risks MAX_RISK_PER_TRADE_PCT of account balance per trade.
