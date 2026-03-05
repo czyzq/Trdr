@@ -1,5 +1,16 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
+## Today's Work (2026-03-06)
+- 00:20 - Fixed circular import errors in API routes:
+  1. api/routes/account.py - removed unused imports from main, fixed naming conflicts with _get_account/_set_account aliases
+  2. api/routes/trades.py - converted to lazy imports for broker/data_provider/TechnicalIndicators
+  3. api/routes/market.py - converted to lazy imports, fixed naming conflict with _get_instruments
+  4. api/routes/strategies.py - converted to lazy import, fixed extra () call
+  5. api/routes/root.py - fixed health endpoint to use get_db() instead of importing non-existent db
+  6. api/routes/trades.py - fixed async_load_closed_positions() call (only takes limit, not offset)
+  7. api/routes/account.py - added balance_usd/available_usd to response for backward compatibility
+- All 205 tests passing ✅ (2 skipped by design - trailing_stop)
+
 ## Today's Work (2026-03-05)
 - 23:19 - Fixed UnboundLocalError in main.py - added default timeframe='5' at start of _analyze_single_symbol() for early returns - all 205 tests passing ✅
 - 22:19 - Verified all 205 tests passing ✅ (2 skipped by design - trailing_stop) - TypeErrors/AttributeErrors previously fixed
