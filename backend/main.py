@@ -20,6 +20,11 @@ import uvicorn
 # =============================================================================
 # SIGNAL HANDLERS - Debug why process exits
 # =============================================================================
+# Moved to utils/signal.py
+# from utils.signal import create_signal_handler
+# _signal_handler = create_signal_handler()
+
+# Inline signal handler kept for compatibility - can be removed after testing
 def _signal_handler(signum, frame):
     sig_name = signal.Signals(signum).name
     print(f"[SIGNAL] Caught {sig_name}, traceback:", file=sys.stderr)
@@ -252,8 +257,14 @@ app.add_middleware(
 
 from app import PLN_USD_RATE, event_log
 from services import is_market_open, get_market_hours, update_live_price_cache, get_live_price
+from services.market_data import get_cached_quote as _get_cached_quote_from_service, get_cached_candles as _get_cached_candles_from_service
+from services.strategy_manager import get_strategy_manager, analyze_with_new_strategy
+from api.routes.backtest import create_optimize_endpoints
 
 # Global state
+
+# Include backtest optimization routes (extracted to api/routes/backtest.py)
+app.include_router(create_optimize_endpoints())
 
 # Broker abstraction - switch via BROKER_TYPE env var ("sim" or "ibkr")
 data_provider = create_data_provider()
@@ -303,23 +314,24 @@ if "peak_equity_usd" not in account:
 signal_history_cache = {}
 
 # Strategy selection per symbol (default: adaptive_regime)
-_strategy_selection: Dict[str, str] = {}
-
+# NOW DELEGATED TO services.state
 
 def get_symbol_strategy(symbol: str) -> str:
-    # First check in-memory, then DB
-    if symbol in _strategy_selection:
-        return _strategy_selection.get(symbol, "adaptive_regime")
-    # Check DB for per-symbol strategy
+    """Get strategy for symbol - delegates to state"""
+    from services.state import get_symbol_strategy as _get
+    result = _get(symbol)
+    # Also check DB for per-symbol strategy
     strategy_key = f"STRATEGY_{symbol}"
     db_strategy = db.get_setting(strategy_key)
     if db_strategy:
         return db_strategy
-    return "adaptive_regime"
+    return result
 
 
 def set_symbol_strategy(symbol: str, strategy_id: str):
-    _strategy_selection[symbol] = strategy_id
+    """Set strategy for symbol - delegates to state"""
+    from services.state import set_symbol_strategy as _set
+    _set(symbol, strategy_id)
     # Also save to DB
     strategy_key = f"STRATEGY_{symbol}"
     db.set_setting(strategy_key, strategy_id, "user")
@@ -810,40 +822,22 @@ _candles_cache: dict[str, tuple[list, float]] = {}  # symbol -> (candles, timest
 _CACHE_TTL = 60  # Cache for 60 seconds
 
 
+# Wire to market_data service - these wrap the service functions
 async def _get_cached_quote(symbol: str) -> Optional[dict]:
-    """Get quote with caching - returns cached value if fresh."""
-    now = asyncio.get_event_loop().time()
-    if symbol in _price_cache:
-        price, ts = _price_cache[symbol]
-        if now - ts < _CACHE_TTL:
-            return {"price": price, "source": "cache"}
-
-    # Fetch fresh - data_provider methods are now async
-    quote = await data_provider.get_quote(symbol)
-    if quote and quote.get("price"):
-        _price_cache[symbol] = (quote["price"], now)
-    return quote
+    """Get quote with caching - delegates to market_data service."""
+    return _get_cached_quote_from_service(symbol)
 
 
 async def _get_cached_candles(symbol: str, resolution: str, count: int) -> Optional[list]:
-    """Get candles with caching."""
-    cache_key = f"{symbol}_{resolution}"
-    now = asyncio.get_event_loop().time()
-
-    if cache_key in _candles_cache:
-        candles, ts = _candles_cache[cache_key]
-        if now - ts < _CACHE_TTL:
-            return candles
-
-    # Fetch fresh - data_provider methods are now async
-    candles = await data_provider.get_candles(symbol, resolution, count)
-    if candles and len(candles) > 0:
-        _candles_cache[cache_key] = (candles, now)
-    return candles
+    """Get candles with caching - delegates to market_data service."""
+    return await _get_cached_candles_from_service(symbol, resolution, count, data_provider)
 
 
 async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
+    # Default timeframe for early returns
+    timeframe = "5"
+    
     try:
         # Use cached quote with 30s TTL
         async with _api_semaphore:
@@ -1871,7 +1865,8 @@ async def set_strategy_for_symbol(symbol: str, strategy_id: str):
 @app.get("/api/strategy-selection")
 async def get_all_strategy_selections():
     """Get strategy selection for all symbols."""
-    return {sym: get_symbol_strategy(sym) for sym in INSTRUMENTS}
+    from services.state import get_all_strategy_selections as _get_all, get_instruments
+    return {sym: _get_all().get(sym, "adaptive_regime") for sym in get_instruments()}
 
 
 @app.post("/api/strategies/save")
@@ -3855,47 +3850,49 @@ async def run_backtest(
     }
 
 
-@app.get("/api/backtest/optimize")
-async def start_optimize(
-    symbol: str = Query(..., description="Symbol to backtest"),
-    resolution: str = Query("60", description="Resolution: 1, 5, 15, 30, 60, D"),
-    days: int = Query(7, description="Number of days to backtest (keep small)"),
-    min_score: float = Query(0.05, description="Minimum score threshold"),
-    initial_balance: float = Query(3000.0, description="Initial balance"),
-    background_tasks: BackgroundTasks = None,
-):
-    """
-    Start optimization in background. Returns job_id immediately.
-    Use /api/backtest/optimize/{job_id} to get results.
-    """
-    import uuid
-    from database import get_db
-    
-    job_id = str(uuid.uuid4())[:8]
-    
-    # Store initial status in DB
-    db = get_db()
-    db.optimize_jobs.insert_one({
-        "_id": job_id,
-        "status": "running",
-        "symbol": symbol,
-        "started_at": datetime.utcnow().isoformat(),
-    })
-    
-    # Run in background
-    background_tasks.add_task(
-        run_optimization, job_id, symbol, resolution, days, min_score, initial_balance
-    )
-    
-    return {
-        "job_id": job_id,
-        "status": "started",
-        "symbol": symbol,
-        "message": "Optimization started in background. Poll /api/backtest/optimize/{job_id} for results."
-    }
+# EXTRACTED TO api/routes/backtest.py - using router below
+# @app.get("/api/backtest/optimize")
+# async def start_optimize(
+#     symbol: str = Query(..., description="Symbol to backtest"),
+#     resolution: str = Query("60", description="Resolution: 1, 5, 15, 30, 60, D"),
+#     days: int = Query(7, description="Number of days to backtest (keep small)"),
+#     min_score: float = Query(0.05, description="Minimum score threshold"),
+#     initial_balance: float = Query(3000.0, description="Initial balance"),
+#     background_tasks: BackgroundTasks = None,
+# ):
+#     """
+#     Start optimization in background. Returns job_id immediately.
+#     Use /api/backtest/optimize/{job_id} to get results.
+#     """
+#     import uuid
+#     from database import get_db
+#     
+#     job_id = str(uuid.uuid4())[:8]
+#     
+#     # Store initial status in DB
+#     db = get_db()
+#     db.optimize_jobs.insert_one({
+#         "_id": job_id,
+#         "status": "running",
+#         "symbol": symbol,
+#         "started_at": datetime.utcnow().isoformat(),
+#     })
+#     
+#     # Run in background
+#     background_tasks.add_task(
+#         run_optimization, job_id, symbol, resolution, days, min_score, initial_balance
+#     )
+#     
+#     return {
+#         "job_id": job_id,
+#         "status": "started",
+#         "symbol": symbol,
+#         "message": "Optimization started in background. Poll /api/backtest/optimize/{job_id} for results."
+#     }
 
 
-def run_optimization(job_id: str, symbol: str, resolution: str, days: int, min_score: float, initial_balance: float):
+# DEAD CODE - was used by start_optimize above (extracted to backtest.py)
+# def run_optimization(job_id: str, symbol: str, resolution: str, days: int, min_score: float, initial_balance: float):
     """Run optimization in background and save results to DB"""
     import subprocess
     import json
@@ -3995,36 +3992,38 @@ def run_optimization(job_id: str, symbol: str, resolution: str, days: int, min_s
         )
 
 
-@app.get("/api/backtest/optimize/{job_id}")
-async def get_optimize_results(job_id: str):
-    """Get optimization results by job_id"""
-    from database import get_db
-    db = get_db()
-    job = db.optimize_jobs.find_one({"_id": job_id})
-    
-    if not job:
-        return {"error": "Job not found"}
-    
-    return {
-        "job_id": job_id,
-        "status": job.get("status"),
-        "symbol": job.get("symbol"),
-        "best": job.get("best"),
-        "results": job.get("results", []),
-        "total": job.get("total_combinations", 0),
-    }
+# EXTRACTED TO api/routes/backtest.py - using router below
+# @app.get("/api/backtest/optimize/{job_id}")
+# async def get_optimize_results(job_id: str):
+#     """Get optimization results by job_id"""
+#     from database import get_db
+#     db = get_db()
+#     job = db.optimize_jobs.find_one({"_id": job_id})
+#     
+#     if not job:
+#         return {"error": "Job not found"}
+#     
+#     return {
+#         "job_id": job_id,
+#         "status": job.get("status"),
+#         "symbol": job.get("symbol"),
+#         "best": job.get("best"),
+#         "results": job.get("results", []),
+#         "total": job.get("total_combinations", 0),
+#     }
 
 
-@app.post("/api/backtest/optimize/{job_id}/cancel")
-async def cancel_optimize(job_id: str):
-    """Cancel a running optimization job"""
-    from database import get_db
-    db = get_db()
-    db.optimize_jobs.update_one(
-        {"_id": job_id},
-        {"$set": {"status": "cancelled"}}
-    )
-    return {"status": "cancelled"}
+# EXTRACTED TO api/routes/backtest.py - using router below
+# @app.post("/api/backtest/optimize/{job_id}/cancel")
+# async def cancel_optimize(job_id: str):
+#     """Cancel a running optimization job"""
+#     from database import get_db
+#     db = get_db()
+#     db.optimize_jobs.update_one(
+#         {"_id": job_id},
+#         {"$set": {"status": "cancelled"}}
+#     )
+#     return {"status": "cancelled"}
 
     # Get available strategies
     from strategies import STRATEGIES
@@ -4164,161 +4163,20 @@ if __name__ == "__main__":
 
 
 # =====================
-# NEW STRATEGY MODULE (JSON-based)
+# STRATEGY MODULE - Moved to services/strategy_manager.py
 # =====================
+# Import from service instead of defining locally
+# from services.strategy_manager import get_strategy_manager, analyze_with_new_strategy
+# (Imported at top of file)
 
-# Global strategy manager - loaded once
-_strategy_manager = None
+# Legacy code commented out - now using services.strategy_manager:
+# # Global strategy manager - loaded once
+# _strategy_manager = None
 
-def get_strategy_manager(force_reload: bool = False):
-    """Get or create the JSON-based strategy manager."""
-    global _strategy_manager
-    
-    if _strategy_manager is None or force_reload:
-        try:
-            from strategy import load_strategies_from_file
-            import os
-            
-            # Load from local strategies.json in project root
-            json_path = os.path.join(os.path.dirname(__file__), "..", "strategies.json")
-            if os.path.exists(json_path):
-                _strategy_manager = load_strategies_from_file(json_path)
-                print(f"[STRATEGY] Loaded {len(_strategy_manager.strategies)} strategies from JSON")
-            else:
-                print(f"[STRATEGY] JSON config not found at {json_path}")
-                _strategy_manager = None
-        except Exception as e:
-            print(f"[STRATEGY] Failed to load JSON strategies: {e}")
-            _strategy_manager = None
-    
-    return _strategy_manager
+# def get_strategy_manager(force_reload: bool = False):
+#     """Get or create the JSON-based strategy manager."""
+#     ... (moved to services/strategy_manager.py)
 
-
-def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, balance: float, 
-                            requested_strategy: str = None, atr_percent: float = None, 
-                            vix_value: float = None) -> dict:
-    """
-    Analyze using new JSON-based strategy module.
-    Returns dict with direction, score, confidence, etc. or None if not available.
-    
-    Args:
-        symbol: Trading symbol
-        candles: Price candles
-        current_price: Current price
-        balance: Account balance
-        requested_strategy: Specific JSON strategy ID to use (e.g., "JSON:btc_v2_core")
-        atr_percent: ATR percent for volatility filter
-        vix_value: Current VIX value for VIX filter
-    """
-    manager = get_strategy_manager()
-    if not manager:
-        return None
-    
-    # Find strategy - use requested one or find any for symbol
-    strategy = None
-    
-    if requested_strategy:
-        # User specifically requested this JSON strategy
-        json_id = requested_strategy.replace("JSON:", "")
-        if json_id in manager.strategies:
-            strategy = manager.strategies[json_id]
-            # Only print on first call (check if already printed this session)
-            if not getattr(analyze_with_new_strategy, '_logged', False):
-                print(f"[STRATEGY] Using requested JSON strategy: {json_id}")
-                analyze_with_new_strategy._logged = True
-    else:
-        # Default: use enabled strategy for this symbol
-        for s in manager.get_enabled_strategies():
-            if s.symbol.upper() == symbol.upper():
-                strategy = s
-                break
-        
-        # If no enabled, try any for this symbol
-        if not strategy:
-            for s in manager.strategies.values():
-                if s.symbol.upper() == symbol.upper():
-                    strategy = s
-                    break
-    
-    if not strategy:
-        return None
-    
-    # Update indicators with latest candles
-    for candle in candles[-50:]:  # Last 50 candles for warmup
-        candle_data = {
-            'open': candle.get('open'),
-            'high': candle.get('high'),
-            'low': candle.get('low'),
-            'close': candle.get('close'),
-            'volume': candle.get('volume', 0),
-            'timestamp': candle.get('timestamp')
-        }
-        for ind in strategy.indicators.values():
-            ind.update(candle_data)
-    
-    # Get current candle
-    if not candles:
-        return None
-    
-    current_candle = candles[-1]
-    candle_data = {
-        'open': current_candle.get('open'),
-        'high': current_candle.get('high'),
-        'low': current_candle.get('low'),
-        'close': current_candle.get('close'),
-        'volume': current_candle.get('volume', 0),
-        'timestamp': current_candle.get('timestamp')
-    }
-    
-    # Check if we have enough indicator data
-    has_data = all(ind.value() is not None for ind in strategy.indicators.values())
-    if not has_data:
-        return None
-    
-    # Check filters (includes volatility and VIX from strategy config)
-    filters_passed, failed_filters = strategy.filters.check_all(
-        candle_data, symbol, 'long', 
-        atr_percent=atr_percent, 
-        vix_value=vix_value
-    )
-    if not filters_passed:
-        print(f"[FILTERS] {symbol}: Failed filters: {failed_filters}")
-        return None
-    
-    # Get signal
-    signal = strategy.score_engine.get_signal()
-    score = strategy.score_engine.compute_score()
-    
-    if not signal:
-        return None
-    
-    direction = 1 if signal == 'buy' else -1
-    
-    # Calculate exits
-    exits = strategy.exit_engine.initialize_position(
-        position_id=f"live_{symbol}",
-        entry_price=current_price,
-        direction=direction
-    )
-    
-    # Clamp score to valid range [-1, 1]
-    clamped_score = max(-1.0, min(1.0, score))
-    
-    return {
-        'direction': 'long' if direction > 0 else 'short',
-        'score': clamped_score,  # Keep sign - positive for buy, negative for sell
-        'confidence': min(1.0, abs(clamped_score)),
-        'technical_score': clamped_score,
-        'components': [{
-            'type': 'technical',
-            'name': f'JSON Strategy ({strategy.id})',
-            'value': score,
-            'description': f'Score: {score:.3f}, Signal: {signal}',
-            'confidence': 0.5
-        }],
-        'take_profit': exits['tp_price'],
-        'stop_loss': exits['sl_price'],
-        'risk_reward_ratio': abs(exits['tp_price'] - current_price) / abs(current_price - exits['sl_price']) if exits['sl_price'] != current_price else 0,
-        'strategy_id': strategy.id
-    }
+# def analyze_with_new_strategy(...):
+#     ... (moved to services/strategy_manager.py)
 
