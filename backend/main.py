@@ -257,6 +257,9 @@ if "peak_equity_usd" not in account:
 
 
 
+# run_backtest imported from backtester
+from backtester import run_backtest as _run_backtest
+
 async def run_backtest(
     symbol: str = Query(..., description="Symbol to backtest"),
     resolution: str = Query("5", description="Resolution: 1, 5, 15, 30, 60, D"),
