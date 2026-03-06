@@ -24,7 +24,7 @@ import uvicorn
 from utils.signal import create_signal_handler
 _signal_handler = create_signal_handler()
 
-from database import async_sync_account_from_closed_trades
+from database import async_load_open_positions, async_sync_account_from_closed_trades
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -97,6 +97,7 @@ INITIAL_BALANCE_USD = db.get_setting("INITIAL_BALANCE_USD", 3000.0)  # DB-driven
 
 # Timing decorators - NOW IMPORTED FROM utils.decorators
 from utils.decorators import async_timed, sync_timed
+from app.logging import log_event
 
 
 # =============================================================================
@@ -122,7 +123,7 @@ async def lifespan(app: FastAPI):
         db.ensure_trades_indexes()
         log_event("Trades indexes ensured", "info")
         db.list_settings()  # triggers migration of defaults
-        await sync_account_from_closed_trades()
+        await async_sync_account_from_closed_trades()
     else:
         log_event("MongoDB not configured - using in-memory storage (set MONGO_URI)", "warning")
 
