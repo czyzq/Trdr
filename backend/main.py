@@ -1014,42 +1014,8 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         )
 
 
-@async_timed("generate_signals")
-async def generate_signals() -> List[Signal]:
-    """Generate trading signals for all instruments using regime-adaptive scoring - PARALLEL"""
-    global alpha_client, account
-
-    now = datetime.utcnow().isoformat()
-    account["last_scan"] = now
-    print(f"[DEBUG] generate_signals set last_scan to {now}")
-
-    # Track peak equity (balance + unrealized P&L) for drawdown calculation
-    current_equity = account.get("equity_usd", account["balance_usd"])
-    if current_equity > account.get("peak_equity_usd", INITIAL_BALANCE_USD):
-        account["peak_equity_usd"] = current_equity
-    # Keep peak_balance_usd for backward compatibility
-    if account["balance_usd"] > account.get("peak_balance_usd", INITIAL_BALANCE_USD):
-        account["peak_balance_usd"] = account["balance_usd"]
-
-    news_client_instance = get_news_client()
-
-    # Run all symbol analysis in PARALLEL
-    tasks = [_analyze_single_symbol(symbol, info, news_client_instance) for symbol, info in INSTRUMENTS.items()]
-    signals = await asyncio.gather(*tasks)
-
-    # Log results
-    # Log results
-    for signal in signals:
-        if signal.direction != SignalDirection.NEUTRAL:
-            log_event(
-                f"[SIGNAL] {signal.symbol}: {signal.direction.value} | Score: {signal.score:.2f} | Conf: {signal.confidence:.0%} | ${signal.current_price:.2f}",
-                "event",
-            )
-
-    # Update equity after signals
-    await sync_account_from_closed_trades()
-
-    return signals
+# generate_signals moved to services.trading_engine
+from services.trading_engine import generate_signals
 
 
 # =====================
@@ -1060,17 +1026,8 @@ async def generate_signals() -> List[Signal]:
 _price_cache_task = None
 
 
-async def price_cache_loop():
-    """Background loop: keep live prices fresh for all instruments every few seconds."""
-    global _price_cache_task
-    log_event("[PRICE-CACHE] Live price cache background task started", "info")
-
-    while True:
-        try:
-            await _update_live_price_cache()
-        except Exception as e:
-            log_event(f"[PRICE-CACHE] Error updating prices: {e}", "warning")
-        await asyncio.sleep(PRICE_CACHE_REFRESH_SEC)
+# price_cache_loop moved to services.market_data
+from services.market_data import price_cache_loop
 
 
 AUTO_TRADE_INTERVAL_SEC = 300  # Scan every 5 minutes
