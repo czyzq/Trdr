@@ -10,6 +10,11 @@ from models import Signal, SignalDirection
 # Import async_timed decorator
 from utils.decorators import async_timed
 
+# Import account and constants from main
+from main import account, INITIAL_BALANCE_USD, INSTRUMENTS
+from main import get_news_client, sync_account_from_closed_trades, log_event
+from main import _analyze_single_symbol
+
 
 async def auto_trade_loop():
     """
