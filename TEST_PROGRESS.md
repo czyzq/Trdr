@@ -1,6 +1,10 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
 ## Today's Work (2026-03-06)
+- 02:22 - Fixed 3 failing tests:
+  1. Added settings routes to api/router.py (was missing import and include_router for settings_routes)
+  2. /api/settings and /api/trading-mode endpoints now working (GET + POST)
+- All 205 tests passing ✅ (2 skipped by design - trailing_stop)
 - 01:20 - Verified all 205 tests passing ✅ (2 skipped by design - trailing_stop)
   1. api/routes/account.py - removed unused imports from main, fixed naming conflicts with _get_account/_set_account aliases
   2. api/routes/trades.py - converted to lazy imports for broker/data_provider/TechnicalIndicators
