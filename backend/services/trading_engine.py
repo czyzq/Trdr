@@ -4,6 +4,12 @@ import time
 from typing import Dict, List, Optional
 from datetime import datetime
 
+# Import Signal and SignalDirection from models
+from models import Signal, SignalDirection
+
+# Import async_timed decorator
+from utils.decorators import async_timed
+
 
 async def auto_trade_loop():
     """

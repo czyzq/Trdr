@@ -5,6 +5,7 @@ router = APIRouter()
 
 # Routes
 from .routes import (
+    signals as signals_routes,
     logs,
     control,
     news,
@@ -33,3 +34,4 @@ router.include_router(alerts_routes.router)
 router.include_router(status_routes.router)
 router.include_router(backtest_routes.router)
 router.include_router(settings_routes.router)
+router.include_router(signals_routes.router)

@@ -1,4 +1,5 @@
 """trades API routes - extracted from main.py"""
+from typing import Optional
 from fastapi import APIRouter, Query, Body
 from services.state import (
     get_open_positions,
@@ -156,3 +157,28 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = 
     closed = await async_load_closed_positions(limit)
     total = await async_count_closed_positions()
     return {"trades": closed, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/api/trades/update/{position_id}")
+async def update_trade_position(
+    position_id: str, stop_loss: Optional[float] = Query(None), take_profit: Optional[float] = Query(None)
+):
+    """
+    Update SL/TP for position
+    """
+    broker = get_broker()
+    positions = broker.get_open_positions()
+    position = next((p for p in positions if p["id"] == position_id), None)
+    if not position:
+        return {"error": "Position not found"}
+    updated = False
+    if stop_loss is not None:
+        position["stop_loss"] = stop_loss
+        updated = True
+    if take_profit is not None:
+        position["take_profit"] = take_profit
+        updated = True
+    if updated:
+        log_event(f"[UPDATE] Position {position_id}: SL/TP updated", "info")
+        await async_save_trade(position)
+    return {"status": "updated", "position": position}
