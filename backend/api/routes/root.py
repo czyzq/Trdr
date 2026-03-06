@@ -30,7 +30,7 @@ async def health():
     """Health check with MongoDB status"""
     from database import get_db
     db = get_db()
-    mongo_status = "connected" if db is not None else "disconnected"
+    mongo_status = "connected" if (db is not None and hasattr(db, 'is_connected') and db.is_connected()) else "disconnected"
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat(), "mongodb": mongo_status, "version": "0.2.0"}
 
 
