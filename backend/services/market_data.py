@@ -91,23 +91,3 @@ def get_cache_stats() -> dict:
         "candles_cache_size": len(_candles_cache),
         "last_price_update": _live_price_cache_last_update,
     }
-
-
-async def price_cache_loop():
-    """
-    Background loop: keep live prices fresh for all instruments every few seconds.
-    
-    NOTE: Imports from main.py - follows the same pattern as trading_engine.py
-    """
-    # Import from main.py - same pattern as trading_engine
-    from main import data_provider, INSTRUMENTS, log_event, PRICE_CACHE_REFRESH_SEC
-    import settings
-    
-    log_event("[PRICE-CACHE] Live price cache background task started", "info")
-
-    while True:
-        try:
-            await update_live_price_cache(data_provider, INSTRUMENTS)
-        except Exception as e:
-            log_event(f"[PRICE-CACHE] Error updating prices: {e}", "warning")
-        await asyncio.sleep(PRICE_CACHE_REFRESH_SEC)

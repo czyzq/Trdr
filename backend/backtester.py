@@ -28,13 +28,11 @@ from indicators import TechnicalIndicators
 
 # Try to import analyze_with_new_strategy for unified signal generation
 try:
-    from services.strategy_manager import analyze_with_new_strategy as analyze_strategy
-    from services.strategy_manager import get_strategy_manager
+    from main import analyze_with_new_strategy as analyze_strategy
     HAS_UNIFIED_ANALYSIS = True
 except ImportError:
     HAS_UNIFIED_ANALYSIS = False
     analyze_strategy = None
-    get_strategy_manager = None
 
 # ── Signal scoring — extracted from main.py to run standalone ──
 
@@ -270,8 +268,9 @@ def run_backtest(
     
     # Force reload strategy manager to ensure clean state (indicators reset)
     # This ensures deterministic results between backtest runs
-    if using_unified and get_strategy_manager:
+    if using_unified:
         try:
+            from main import get_strategy_manager
             get_strategy_manager(force_reload=True)
         except Exception:
             pass  # Ignore errors - may not have the function
@@ -408,31 +407,9 @@ def run_backtest(
             continue
 
         # Use unified strategy if requested
-        using_unified_result = False  # Track if we actually got a unified result
-        strategy_exists_for_symbol = False  # Track if any strategy exists for this symbol
         if using_unified:
             # Try to get signal from unified strategy
             try:
-                # First, check if any strategy exists for this symbol (before calling analyze)
-                # This helps us distinguish between "no strategy" vs "filters failed"
-                if analyze_strategy and get_strategy_manager:
-                    try:
-                        mgr = get_strategy_manager()
-                        if mgr:
-                            # Check both enabled and disabled strategies
-                            for s in mgr.strategies.values():
-                                if s.symbol.upper() == symbol.upper():
-                                    strategy_exists_for_symbol = True
-                                    break
-                            # Also check enabled strategies
-                            if not strategy_exists_for_symbol:
-                                for s in mgr.get_enabled_strategies():
-                                    if s.symbol.upper() == symbol.upper():
-                                        strategy_exists_for_symbol = True
-                                        break
-                    except Exception:
-                        pass
-                
                 # Also compute indicators for filters
                 ind = TechnicalIndicators.calculate_all(window, period=14)
                 if not ind:
@@ -461,36 +438,18 @@ def run_backtest(
                     direction_str = 'BUY' if direction == 'long' else 'SELL'
                     component_scores = [score]  # Simplified
                     total_signals += 1
-                    using_unified_result = True  # Mark that unified strategy gave us a valid signal
-                elif result is None:
-                    # Strategy returned None - could be no strategy OR filters failed
-                    # Only fall back if NO strategy exists for this symbol
-                    # If strategy exists but returned None, it means filters failed - SKIP, don't fall back
-                    if not strategy_exists_for_symbol:
-                        # No strategy at all for this symbol - fall back to traditional scoring
-                        if verbose:
-                            print(f"[BACKTEST] No strategy found for {symbol}, falling back to traditional scoring")
-                        ind = TechnicalIndicators.calculate_all(window, period=14)
-                        if not ind:
-                            continue
-                        ind["_closes"] = [c["close"] for c in window]
-                        score, component_scores = calculate_signal_score(ind)
-                        total_signals += 1
-                        using_unified_result = False  # Fell back to traditional
-                    else:
-                        # Strategy exists but filters failed or no signal - skip this bar
-                        # Do NOT fall back - use the strategy's filtering
-                        if verbose:
-                            print(f"[BACKTEST] Strategy exists for {symbol} but no signal (filters/data), skipping bar")
-                        neutral_skipped += 1
-                        continue
                 else:
-                    # Result returned but filters failed (no direction) - skip this bar
-                    # Do NOT fall back - use the strategy's filtering
+                    # No signal from unified strategy (no strategy found for symbol)
+                    # Fall back to traditional scoring
+                    # Don't disable unified - it may work on next bar
                     if verbose:
-                        print(f"[BACKTEST] Filters failed for {symbol}, skipping bar")
-                    neutral_skipped += 1
-                    continue
+                        print(f"[BACKTEST] No unified signal for {symbol} (result={result}), falling back")
+                    ind = TechnicalIndicators.calculate_all(window, period=14)
+                    if not ind:
+                        continue
+                    ind["_closes"] = [c["close"] for c in window]
+                    score, component_scores = calculate_signal_score(ind)
+                    total_signals += 1
             except Exception as e:
                 # Fall back to traditional scoring but keep unified enabled
                 # (exception may be transient)
@@ -503,7 +462,6 @@ def run_backtest(
                 ind["_closes"] = [c["close"] for c in window]
                 score, component_scores = calculate_signal_score(ind)
                 total_signals += 1
-                using_unified_result = False  # Fell back to traditional
         else:
             # Original logic: compute indicators and calculate score
             # Compute indicators on trailing window
@@ -532,13 +490,10 @@ def run_backtest(
                 score *= 0.5
 
         # Per-instrument threshold - use from unified result or config
-        # Only use min_score=0.0 if we actually got a unified strategy result
-        # If we fell back to traditional scoring, use the config threshold
-        if using_unified and using_unified_result:
+        if using_unified:
             # Unified strategy already applies its own thresholds
             min_score = 0.0
         else:
-            # Fell back to traditional scoring - use config thresholds
             inst_config = INSTRUMENT_CONFIG.get(symbol, {})
             min_score = inst_config.get("min_score", 0.15)
 
@@ -808,7 +763,6 @@ def main():
     parser.add_argument("--csv", type=str, help="Path to CSV file with OHLCV data")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show individual trade entries")
-    parser.add_argument("--sample", action="store_true", help="Use synthetic/sample data if no real data available")
     args = parser.parse_args()
 
     from historical_data import (

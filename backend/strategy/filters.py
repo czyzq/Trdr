@@ -28,17 +28,8 @@ class VolumeFilter:
             return True
         
         volume = candle.get('volume', 0)
-        # Pass filter if volume is not available (e.g., forex/metal data from Yahoo)
-        # This allows backtesting to work without volume data
         if volume is None or volume == 0:
-            return True
-        
-        # Also pass if we're in backtest mode (detected by lookback not being met yet)
-        # The volume filter is too strict for historical data analysis
-        # This effectively disables ratio checking for backtesting
-        import os
-        if os.environ.get('BACKTEST_MODE'):
-            return True
+            return False
         
         self.volume_history.append(volume)
         

@@ -1,9 +1,8 @@
 """Signals API routes"""
 from fastapi import APIRouter
 from models import SignalResponse
-from services.signal_service import generate_signals
 from app.logging import log_event
-
+from services.trading_engine import generate_signals
 router = APIRouter(tags=["signals"])
 
 
