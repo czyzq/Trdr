@@ -7,7 +7,7 @@ from app.logging import log_event
 router = APIRouter(tags=["signals"])
 
 
-@router.get("/signals", response_model=SignalResponse)
+@router.get("/api/signals", response_model=SignalResponse)
 async def get_signals():
     """Fetch real trading signals."""
     log_event("Generating signals via API...", "info")
