@@ -1,6 +1,7 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
 ## Today's Work (2026-03-06)
+- 23:22 - Fixed NameError in trading_engine.py - added imports for account, INITIAL_BALANCE_USD, INSTRUMENTS, get_news_client, sync_account_from_closed_trades, log_event, and _analyze_single_symbol from main - all 205 tests passing ✅
 - 23:15 - Verified all 205 tests passing ✅ (2 skipped by design - trailing_stop) - Fixed stale pytest cache causing transient errors
 - 22:15 - Verified all 205 tests passing ✅ (2 skipped by design - trailing_stop) - Hourly cron check - indicator tests (TypeErrors) and API tests (AttributeErrors) working correctly
 - 19:29 - Verified all 205 tests passing ✅ (2 skipped by design - trailing_stop) - Hourly cron check
