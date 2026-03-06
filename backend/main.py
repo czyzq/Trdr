@@ -14,7 +14,8 @@ import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-
+from services.trading_engine import auto_trade_loop
+from services.market_data import price_cache_loop
 import uvicorn
 
 # =============================================================================
@@ -130,7 +131,7 @@ async def lifespan(app: FastAPI):
     alpha_client = get_alpha_vantage_client()
     if alpha_client:
         log_event("Connected to Alpha Vantage API", "success")
-    load_signal_cache()
+    await async_load_signal_cache_db()
     try:
         get_news_client()
         log_event("Web scraping news client initialized", "success")

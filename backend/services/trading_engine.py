@@ -10,10 +10,8 @@ from models import Signal, SignalDirection
 # Import async_timed decorator
 from utils.decorators import async_timed
 
-# Import account and constants from main
-from main import account, INITIAL_BALANCE_USD, INSTRUMENTS
-from main import get_news_client, sync_account_from_closed_trades, log_event
-from main import _analyze_single_symbol
+# Lazy imports used inside functions to avoid circular dependency
+# (imported from main.py at function call time)
 
 
 async def auto_trade_loop():
@@ -23,26 +21,11 @@ async def auto_trade_loop():
     2. Generates fresh signals for all instruments
     3. Opens trades automatically when signal is strong enough
     4. Persists account state to DB
-    
-    NOTE: This function imports from main.py - needs refactoring to avoid circular deps
     """
-    # Import from main.py - will be refactored
+    # Lazy imports to avoid circular dependency
     from main import (
-        AUTO_TRADE_ENABLED,
-        AUTO_TRADE_INTERVAL_SEC,
-        broker,
-        data_provider,
-        account,
-        open_positions,
-        closed_positions,
-        signals_cache,
-        SignalDirection,
-        INSTRUMENTS,
-        db,
-        async_save_account,
-        async_save_signal_cache_db,
-        log_event,
-        generate_signals,
+        account, INSTRUMENTS, get_news_client, sync_account_from_closed_trades, 
+        async_save_account, log_event
     )
     from circuit_breaker import check_circuit_breaker
     from market_hours import is_market_open, get_market_hours
@@ -247,15 +230,16 @@ def check_circuit_breaker() -> bool:
 
 async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
-    # Default timeframe for early returns
+    # Lazy imports to avoid circular dependency
+    from main import _price_cache, _api_semaphore, get_symbol_strategy, get_strategy_manager
+    from services.market_data import get_cached_quote as _get_cached_quote
+    
     timeframe = "5"
     
     try:
-        # Use cached quote with 30s TTL
         async with _api_semaphore:
             quote = await asyncio.wait_for(_get_cached_quote(symbol), timeout=5.0)
 
-        # Get last known price from cache even if quote failed
         last_known_price = 0.0
         if symbol in _price_cache:
             last_known_price = _price_cache[symbol][0]
@@ -527,8 +511,10 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
 @async_timed("generate_signals")
 async def generate_signals() -> List[Signal]:
     """Generate trading signals for all instruments using regime-adaptive scoring - PARALLEL"""
-    global alpha_client, account
-
+    # Lazy imports to avoid circular dependency
+    from main import account, INITIAL_BALANCE_USD, get_news_client, sync_account_from_closed_trades, log_event, INSTRUMENTS
+    from services.trading_engine import _analyze_single_symbol
+    
     now = datetime.utcnow().isoformat()
     account["last_scan"] = now
     print(f"[DEBUG] generate_signals set last_scan to {now}")
