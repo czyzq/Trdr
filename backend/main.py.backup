@@ -1671,7 +1671,7 @@ ALL_INDICATORS = ["RSI", "MACD", "BB", "SMA", "ADX", "STOCH", "MOMENTUM", "WILLI
 # =====================
 
 
-# @app.get("/api/strategies")  # EXTRACTED to api/routes/strategies.py
+@app.get("/api/strategies")
 async def get_strategies():
     """List all available trading strategies (OLD + JSON)."""
     from strategies import list_strategies as old_list_strategies
@@ -1702,13 +1702,13 @@ async def get_strategies():
     return {"strategies": all_strategies}
 
 
-# @app.get("/api/strategy/{symbol}")  # EXTRACTED
+@app.get("/api/strategy/{symbol}")
 async def get_strategy_for_symbol(symbol: str):
     """Get the active strategy for a symbol."""
     return {"symbol": symbol, "strategy": get_symbol_strategy(symbol)}
 
 
-# @app.post("/api/strategy/{symbol}")  # EXTRACTED
+@app.post("/api/strategy/{symbol}")
 async def set_strategy_for_symbol(symbol: str, strategy_id: str):
     """Set the active strategy for a symbol."""
     from strategies import STRATEGIES
@@ -1740,7 +1740,7 @@ async def set_strategy_for_symbol(symbol: str, strategy_id: str):
 #     return {sym: _get_all().get(sym, "adaptive_regime") for sym in get_instruments()}
 
 
-# @app.post("/api/strategies/save")  # EXTRACTED
+@app.post("/api/strategies/save")
 async def save_strategy_config(
     strategy_id: str = Body(..., description="Strategy ID to save (e.g., adaptive_regime_mytest)"),
     name_suffix: str = Body("", description="Suffix to add (e.g., _v1)"),
@@ -1775,7 +1775,7 @@ async def save_strategy_config(
     return {"status": "saved", "strategy_id": saved_id}
 
 
-# @app.get("/api/strategies/load/{strategy_id}")  # EXTRACTED
+@app.get("/api/strategies/load/{strategy_id}")
 async def load_strategy_config(strategy_id: str):
     """Load a saved strategy from database"""
     from strategies import BaseStrategy
@@ -1787,7 +1787,7 @@ async def load_strategy_config(strategy_id: str):
     return {"status": "loaded", "strategy_id": strategy_id}
 
 
-# @app.post("/api/strategies/backtest-json")  # EXTRACTED
+@app.post("/api/strategies/backtest-json")
 async def backtest_from_json(
     request: Request,
     symbol: str = Query(..., description="Symbol to backtest"),

@@ -706,10 +706,11 @@ def run_single_backtest(
     original = INSTRUMENT_CONFIG.get(symbol, {}).copy()
     INSTRUMENT_CONFIG[symbol] = symbol_config
     
-    # Check if this is a JSON strategy config - use analyze_with_new_strategy()
+    # Always use analyze_with_new_strategy() - it will fallback to traditional scoring 
+    # only if no strategy is found for the symbol
     config_name = config.get('name', '')
     json_strategy_prefixes = ('btc_v2_', 'btc_v3_', 'xau_v2_', 'xau_v3_', 'xag_v3_', 'xau_scalp_', 'btc_scalp_', 'htf_divergence_')
-    use_unified = config_name.startswith(json_strategy_prefixes) or 'JSON:' in config.get('description', '')
+    use_unified = True  # Always try unified strategy first
     
     # Extract base strategy ID from config name (e.g., "btc_v3_exp_base" -> "btc_v3_exp")
     if use_unified:
@@ -886,6 +887,9 @@ def main():
     if args.mongo_uri:
         os.environ["MONGO_URI"] = args.mongo_uri
         print(f"[INFO] MONGO_URI set from CLI")
+    
+    # Enable backtest mode - relaxes some filters for historical data
+    os.environ["BACKTEST_MODE"] = "1"
     
     symbols = args.symbols.split(",")
     base_config = CONFIG_PRESETS.get(args.config, CONFIG_PRESETS["base"]).copy()

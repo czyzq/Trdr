@@ -1,7 +1,21 @@
 """Signal generation service - extracted from main.py"""
+import asyncio
+from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
+
+# Import from main.py or other modules
+from models import Signal, SignalDirection
+from indicators import TechnicalIndicators
+from timeframes import TimeFrame
+from services.market_data import get_cached_quote, get_cached_candles
+from services.strategy_manager import get_strategy_manager, analyze_with_new_strategy
+from services.state import get_symbol_strategy as _get_symbol_strategy
+import database as db
+
+# Settings
+from settings import get_all_settings
 
 class SignalDirection(str, Enum):
     BUY = "buy"

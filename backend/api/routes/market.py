@@ -90,14 +90,75 @@ async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
 async def get_candle_history(
     symbol: str,
     resolution: str = Query("60", description="Resolution: 1, 5, 15, 30, 60, D"),
-    count: int = Query(100, ge=1, le=1000),
+    count: int = Query(100, ge=1, le=5000),
     from_time: str = Query(None, description="ISO timestamp or YYYY-MM-DD"),
     to_time: str = Query(None, description="ISO timestamp or YYYY-MM-DD"),
 ):
-    """Get historical candle data."""
+    """Get historical candle data with aggregation from smaller intervals."""
     try:
+        from database import get_db
         async_load_candle_history = get_async_load_candle_history()
+        
+        # Direct fetch from accumulated history
         candles = await async_load_candle_history(symbol, resolution, count, from_time, to_time)
+
+        # Try aggregation from smaller intervals if not enough data
+        if len(candles) < min(10, count):
+            source_candidates = {
+                "5": ["1"],
+                "15": ["5", "1"],
+                "30": ["15", "5", "1"],
+                "60": ["30", "15", "5", "1"],
+                "240": ["60", "30", "15"],
+                "D": ["60", "30", "15", "5", "1"],
+            }
+            db = get_db()
+            for src_res in source_candidates.get(resolution, []):
+                stored = await async_load_candle_history(symbol, src_res, count, from_time, to_time)
+                if stored and len(stored) >= 2:
+                    aggregated = db.aggregate_candles(stored, resolution)
+                    if len(aggregated) > len(candles):
+                        candles = aggregated[-count:]
+                        break
+
         return {"symbol": symbol, "resolution": resolution, "candles": candles, "count": len(candles)}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.get("/candles/stats")
+async def get_candle_stats():
+    """Get stored candle history statistics for all instruments."""
+    async_count_candles = get_async_count_candles()
+    async_get_candle_date_range = get_async_get_candle_date_range()
+    instruments = _get_instruments()
+    
+    stats = {}
+    resolutions = ["1", "5", "15", "30", "60", "D"]
+    for symbol in instruments:
+        symbol_stats = {}
+        for res in resolutions:
+            cnt = await async_count_candles(symbol, res)
+            if cnt > 0:
+                date_range = await async_get_candle_date_range(symbol, res)
+                symbol_stats[res] = {"count": cnt, "range": date_range}
+        if symbol_stats:
+            stats[symbol] = symbol_stats
+    return {"stats": stats}
+
+
+@router.delete("/candles/{symbol}")
+async def delete_candles(
+    symbol: str,
+    resolution: str = "60",
+):
+    """Delete cached candles for a symbol (to force fresh fetch)"""
+    from database import get_db
+    db = get_db()
+    
+    result = db.candles.delete_many({
+        "symbol": symbol.upper(),
+        "resolution": resolution,
+    })
+    
+    return {"deleted": result.deleted_count, "symbol": symbol.upper(), "resolution": resolution}
