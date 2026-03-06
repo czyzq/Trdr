@@ -1,6 +1,8 @@
 # TEST_PROGRESS.md - Progress on Test Plan
 
 ## Today's Work (2026-03-06)
+- 13:27 - Fixed missing /api/trades/open endpoint in api/routes/trades.py - added alias to existing /api/trades endpoint - all 205 tests passing ✅
+- 12:26 - Fixed SyntaxError in api/routes/strategies.py (line 40 had duplicate broken line ': s.timeframe,') - all 205 tests passing ✅
 - 11:25 - Verified all 205 tests passing ✅ (2 skipped by design - trailing_stop) - Hourly cron check
 - 10:25 - Verified all 205 tests passing ✅ (2 skipped by design - trailing_stop) - Hourly cron check
 - 09:25 - Verified all 205 tests passing ✅ (2 skipped by design - trailing_stop)

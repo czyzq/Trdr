@@ -143,6 +143,13 @@ async def get_open_trades():
     return {"positions": positions, "count": len(positions)}
 
 
+@router.get("/api/trades/open")
+async def get_open_trades_alias():
+    """Get all open trades (alias for /api/trades)"""
+    positions = get_open_positions()
+    return {"positions": positions, "count": len(positions)}
+
+
 @router.get("/api/trades/history")
 async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
     """Get trade history"""
