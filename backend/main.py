@@ -2043,7 +2043,7 @@ async def backtest_from_json(
 # =====================
 
 
-@app.post("/api/trade/open")
+# @app.post("/api/trade/open")  # EXTRACTED to api/routes/
 async def open_trade(
     symbol: str, direction: str, size: float = 0, take_profit: Optional[float] = None, stop_loss: Optional[float] = None
 ):
@@ -2164,7 +2164,7 @@ async def open_trade(
         return {"error": f"Internal error: {str(e)}"}
 
 
-@app.get("/api/trade/size")
+# @app.get("/api/trade/size")  # EXTRACTED to api/routes/
 async def get_position_size(symbol: str, entry_price: float, stop_loss: float):
     """Calculate suggested position size for a trade"""
     if symbol not in INSTRUMENTS:
@@ -2181,7 +2181,7 @@ async def get_position_size(symbol: str, entry_price: float, stop_loss: float):
     }
 
 
-@app.get("/api/trade/proposal")
+# @app.get("/api/trade/proposal")  # EXTRACTED to api/routes/
 async def get_trade_proposal(symbol: str, direction: str):
     """Get proposed SL/TP for a trade based on live market data.
 
@@ -2244,7 +2244,7 @@ async def get_trade_proposal(symbol: str, direction: str):
     }
 
 
-@app.post("/api/trade/update/{position_id}")
+# @app.post("/api/trade/update/{position_id}")  # EXTRACTED to api/routes/
 async def update_position(
     position_id: str,
     stop_loss: Optional[float] = Query(None),
@@ -2291,7 +2291,7 @@ async def update_position(
     return {"status": "updated", "position": position}
 
 
-@app.post("/api/trade/close/{position_id}")
+# @app.post("/api/trade/close/{position_id}")  # EXTRACTED to api/routes/
 async def close_trade(position_id: str):
     """Close an open trade position via broker - uses same price source as chart"""
     global open_positions
@@ -2363,7 +2363,7 @@ async def close_trade(position_id: str):
     return result
 
 
-@app.get("/api/trades/open")
+# @app.get("/api/trades/open")  # EXTRACTED to api/routes/
 async def get_open_trades():
     """Get all open positions with live P&L - fetch from DB, calculate in real-time."""
     # Load from DB
@@ -2396,7 +2396,7 @@ async def get_open_trades():
     return {"positions": positions[:20], "count": len(positions)}
 
 
-@app.get("/api/trades/history")
+# @app.get("/api/trades/history")  # EXTRACTED to api/routes/
 async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
     """Get closed trade history - always from DB for consistency"""
     # Always query DB - don't rely on in-memory cache that clears on restart
@@ -2416,7 +2416,7 @@ async def get_trade_history(limit: int = Query(50, ge=1, le=500), offset: int = 
     }
 
 
-@app.post("/api/trades/close/{position_id}")
+# @app.post("/api/trades/close/{position_id}")  # EXTRACTED to api/routes/
 async def trades_close_position(position_id: str):
     """
     Close position - simple broker call
@@ -2863,7 +2863,7 @@ async def trades_update_position(
 #     return {"deleted": result.deleted_count, "symbol": symbol.upper(), "resolution": resolution}
 
 
-@app.get("/api/backtest")
+# @app.get("/api/backtest")  # EXTRACTED to api/routes/
 async def run_backtest(
     symbol: str = Query(..., description="Symbol to backtest"),
     resolution: str = Query("5", description="Resolution: 1, 5, 15, 30, 60, D"),
