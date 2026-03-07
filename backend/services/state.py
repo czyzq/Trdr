@@ -65,8 +65,69 @@ AUTO_TRADE_INTERVAL_SEC: int = 300
 
 
 def get_account() -> Dict[str, Any]:
-    """Get current account state from broker"""
-    return broker.account if hasattr(broker, 'account') else account
+    """Get current account state from broker with unrealized P&L"""
+    acct = broker.account if hasattr(broker, 'account') else account
+    
+    # Calculate unrealized P&L from open positions - fetch fresh prices
+    positions = broker.get_open_positions() if hasattr(broker, 'get_open_positions') else []
+    unrealized_pnl = 0
+    
+    # Try to get fresh prices
+    try:
+        from services.market_data import data_provider
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're in async context - schedule a quick price fetch
+            pass
+        else:
+            # Sync context - get prices directly
+            for pos in positions:
+                symbol = pos.get("symbol")
+                try:
+                    candles = loop.run_until_complete(data_provider.get_candles(symbol, "60", 1))
+                    if candles and len(candles) > 0:
+                        current_price = candles[-1]["close"]
+                    else:
+                        current_price = pos.get("entry_price", 0)
+                except:
+                    current_price = pos.get("entry_price", 0)
+                
+                entry = pos.get("entry_price", 0)
+                size = pos.get("size", 0)
+                leverage = pos.get("leverage", 1)
+                direction = pos.get("direction", "buy")
+                
+                if current_price and entry:
+                    if direction == "buy":
+                        pnl = (current_price - entry) * size * leverage
+                    else:  # sell
+                        pnl = (entry - current_price) * size * leverage
+                    unrealized_pnl += pnl
+    except Exception as e:
+        print(f"[get_account] Error calculating unrealized P&L: {e}")
+        # Fallback: use positions' current_price
+        for pos in positions:
+            entry = pos.get("entry_price", 0)
+            current_price = pos.get("current_price", entry)
+            size = pos.get("size", 0)
+            leverage = pos.get("leverage", 1)
+            direction = pos.get("direction", "buy")
+            
+            if current_price and entry:
+                if direction == "buy":
+                    pnl = (current_price - entry) * size * leverage
+                else:
+                    pnl = (entry - current_price) * size * leverage
+                unrealized_pnl += pnl
+    
+    # Update equity to include unrealized P&L
+    if "equity_usd" in acct:
+        acct["equity_usd"] = round(acct.get("balance_usd", 0) + unrealized_pnl, 2)
+    if "unrealized_pnl_usd" in acct:
+        acct["unrealized_pnl_usd"] = round(unrealized_pnl, 2)
+    
+    return acct
 
 
 def set_account(new_account: Dict[str, Any]) -> None:
@@ -76,8 +137,41 @@ def set_account(new_account: Dict[str, Any]) -> None:
 
 
 def get_open_positions() -> list:
-    """Get open positions"""
-    return open_positions
+    """Get open positions from broker with updated prices"""
+    positions = broker.get_open_positions() if hasattr(broker, 'get_open_positions') else open_positions
+    
+    # Update current_price from live price cache
+    from services.market_data import _live_price_cache
+    
+    for pos in positions:
+        symbol = pos["symbol"]
+        
+        # Try cache first
+        if symbol in _live_price_cache:
+            cached = _live_price_cache[symbol]
+            price = cached.get("price") or cached.get("candle", {}).get("close")
+            if price:
+                pos["current_price"] = price
+                # Also update unrealized P&L
+                entry = pos.get("entry_price", 0)
+                size = pos.get("size", 0)
+                leverage = pos.get("leverage", 1)
+                direction = pos.get("direction", "buy")
+                if direction == "buy":
+                    pos["unrealized_pnl_usd"] = round((price - entry) * size * leverage, 2)
+                else:
+                    pos["unrealized_pnl_usd"] = round((entry - price) * size * leverage, 2)
+                # Calculate unrealized P&L
+                entry = pos["entry_price"]
+                size = pos["size"]
+                leverage = pos.get("leverage", 1)
+                if pos["direction"] == "buy":
+                    pnl = (price - entry) * size * leverage
+                else:
+                    pnl = (entry - price) * size * leverage
+                pos["unrealized_pnl_usd"] = round(pnl, 2)
+    
+    return positions
 
 
 def set_open_positions(positions: list) -> None:
@@ -87,8 +181,8 @@ def set_open_positions(positions: list) -> None:
 
 
 def get_closed_positions() -> list:
-    """Get closed positions"""
-    return closed_positions
+    """Get closed positions from broker"""
+    return broker.get_closed_positions() if hasattr(broker, 'get_closed_positions') else closed_positions
 
 
 def set_closed_positions(positions: list) -> None:

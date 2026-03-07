@@ -452,8 +452,8 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 current_price=current_price,
                 time_horizon=timeframe,
                 entry_point=current_price,
-                take_profit=new_result.get("take_profit") or new_result.get("exits", {}).get("take_profit", 0) or 0,
-                stop_loss=new_result.get("stop_loss") or new_result.get("exits", {}).get("stop_loss", 0) or 0,
+                take_profit=new_result.get("exits", {}).get("tp_price", 0) or 0,
+                stop_loss=new_result.get("exits", {}).get("sl_price", 0) or 0,
                 risk_reward_ratio=new_result.get("risk_reward_ratio") or 0,
             )
 

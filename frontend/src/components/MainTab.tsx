@@ -6,12 +6,12 @@ import { apiUrl } from "../api";
 
 // Interval-appropriate display candle counts (visible candles, reduced for BB visibility)
 const CANDLE_COUNTS: Record<string, number> = {
-  "1": 40, // 40 min of 1m candles
-  "5": 50, // ~4 hours of 5m candles
-  "15": 55, // ~14 hours of 15m candles
-  "30": 55, // ~27 hours of 30m candles
-  "60": 48, // 2 days of 1h candles
-  "D": 60, // ~2 months of daily candles
+  "1": 60, // 60 min of 1m candles
+  "5": 80, // ~7 hours of 5m candles
+  "15": 80, // ~20 hours of 15m candles
+  "30": 80, // ~40 hours of 30m candles
+  "60": 100, // ~4 days of 1h candles
+  "D": 90, // ~3 months of daily candles
 };
 
 interface MainTabProps {
@@ -157,16 +157,22 @@ export const MainTab: React.FC<MainTabProps> = ({
     try {
       setLoading(true);
       const count = CANDLE_COUNTS[resolution] || 100;
-      const response = await fetch(
-        `${apiUrl(`chart/${symbol}`)}?resolution=${resolution}&count=${count}`,
-      );
+      const url = apiUrl("chart/" + symbol) + "?resolution=" + resolution + "&count=" + count;
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
-        if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-          const validData = data.data.filter(
+        // Handle both data.data (old format) and data.candles (new format)
+        const candleData = data.candles || data.data;
+        if (candleData && Array.isArray(candleData) && candleData.length > 0) {
+          // Transform candles to have 'time' field if only 'timestamp' exists
+          const transformedData = candleData.map((c: any) => ({
+            ...c,
+            time: c.time || c.timestamp,
+          }));
+          const validData = transformedData.filter(
             (candle: any) =>
               candle &&
-              typeof candle.time === "string" &&
+              (typeof candle.time === "string" || typeof candle.timestamp === "string") &&
               typeof candle.open === "number" &&
               typeof candle.high === "number" &&
               typeof candle.low === "number" &&

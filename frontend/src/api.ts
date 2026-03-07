@@ -1,11 +1,12 @@
-// API configuration - auto-detects base path from current URL
+// API configuration - points to backend on port 8001
 const getBasePath = () => {
   // Check if we're running at a subpath (e.g., /cfd)
   const pathname = window.location.pathname;
   if (pathname.startsWith("/cfd/")) {
-    return "/cfd";
+    return "http://localhost:8001/cfd";
   }
-  return "";
+  // For local development, use backend on port 8001
+  return "http://localhost:8001";
 };
 
 export const API_BASE = getBasePath();

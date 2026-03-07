@@ -180,7 +180,7 @@ class AsyncSimulatedDataProvider:
 class AsyncSimulatedBroker(Broker):
     """Async paper-trading broker."""
 
-    def __init__(self, initial_balance: Optional[float] = None):
+    def __init__(self, initial_balance: Optional[float] = None, data_provider=None):
         self.account: Dict[str, Any] = db.load_account()
         # Allow overriding initial balance for testing
         if initial_balance is not None:
@@ -190,7 +190,8 @@ class AsyncSimulatedBroker(Broker):
             self.account["peak_equity_usd"] = initial_balance
         self.open_positions: List[Dict[str, Any]] = db.load_open_positions()
         self.closed_positions: List[Dict[str, Any]] = db.load_closed_positions()
-        self._data_provider = AsyncSimulatedDataProvider()
+        # Use external data_provider if provided, otherwise create mock
+        self._data_provider = data_provider if data_provider else AsyncSimulatedDataProvider()
         self._max_positions = 3  # Default max positions
         self._dynamic_exit_enabled = False
         self._signal_decay_threshold = 0.3  # Close if signal drops by 30%

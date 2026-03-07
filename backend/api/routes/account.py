@@ -1,6 +1,6 @@
 """account API routes - extracted from main.py"""
 from fastapi import APIRouter
-from services.state import get_account as _get_account, set_account as _set_account, get_instruments
+from services.state import get_account as _get_account, set_account as _set_account, get_instruments, get_open_positions
 from database import async_load_open_positions, async_sync_account_from_closed_trades
 from app.logging import log_event
 
@@ -12,11 +12,11 @@ async def get_account():
     """Get account info with USD balance."""
     await async_sync_account_from_closed_trades()
     account = _get_account()
-    open_positions = await async_load_open_positions()
+    open_positions = get_open_positions()
     
     unrealized_pnl = 0.0
     for pos in open_positions:
-        unrealized_pnl += pos.get("pnl_usd", 0)
+        unrealized_pnl += pos.get("unrealized_pnl_usd", 0)
     
     equity = account.get("balance_usd", 0) + unrealized_pnl
     

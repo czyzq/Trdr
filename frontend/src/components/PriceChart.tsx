@@ -60,7 +60,19 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       const response = await fetch(`/api/chart/${symbol}?resolution=60&count=100`);
       if (response.ok) {
         const data = await response.json();
-        setChartData(data);
+        // Extract candles array from response and transform to chart format
+        const candles = data.candles || data;
+        if (candles && candles.length > 0) {
+          const chartData = candles.map((candle: any) => ({
+            time: candle.time,
+            price: candle.close,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            volume: candle.volume,
+          }));
+          setChartData(chartData);
+        }
       } else {
         setChartData(mockChartData);
       }

@@ -13,10 +13,11 @@ interface ChartData {
 
 interface ChartResponse {
   symbol: string;
-  data: ChartData[];
-  resolution: string;
-  count: number;
-  source: string;
+  candles?: ChartData[];
+  data?: ChartData[];
+  resolution?: string;
+  count?: number;
+  source?: string;
   fetched_at?: string;
   vix?: {
     value: number;
@@ -102,7 +103,13 @@ export const ChartsTab: React.FC = () => {
         );
         if (response.ok) {
           const data = await response.json();
-          if (data.data) chartData.push(data);
+          // Transform candles to data format for compatibility
+          if (data.candles) {
+            chartData.push({
+              ...data,
+              data: data.candles
+            });
+          }
         }
       }
       setCharts(chartData);
@@ -336,10 +343,10 @@ export const ChartsTab: React.FC = () => {
                   })()}
               </div>
               <div className="p-1 md:p-2">
-                {chartData && chartData.data.length > 0 ? (
+                {chartData && (chartData.data || chartData.candles) && (chartData.data?.length ?? chartData.candles?.length ?? 0) > 0 ? (
                   <CandlestickChart
                     symbol={instrument.symbol}
-                    data={chartData.data}
+                    data={chartData.candles || chartData.data || []}
                     height={220}
                     showVolume={true}
                     showRSI={true}
