@@ -1,4 +1,30 @@
-# Refactoring Progress - 2026-03-06 23:43
+# Refactoring Progress - 2026-03-07 01:13
+
+## 2026-03-07 01:13 - Phase: COMPLETE ✓
+
+Checked at 1:13 AM:
+- Phase: COMPLETE
+- main.py: 1456 lines (original was ~4324, ~2868 lines saved - 66% reduction)
+- Bot verified: imports and starts correctly ✅
+
+**Additional fix:** Fixed circular import between database.py and main.py (database.py was importing global_broker at module level)
+
+**Final verification:**
+- All API routes extracted to api/routes/ (14 route files)
+- All services extracted to services/ (10 service files)
+- Remaining code in main.py:
+  - FastAPI app definition and lifespan handler
+  - Global state initialization (account, positions, broker)
+  - run_backtest function (865 lines) - tightly coupled to app state
+  - Frontend static file serving
+- The run_backtest function is used by api/routes/backtest.py but is tightly coupled to global state
+- No further simple extractions possible without major architectural refactoring
+
+**Status: COMPLETE** - Major structural refactoring complete
+
+Done: COMPLETE
+
+---
 
 ## 2026-03-06 23:43 - Phase: COMPLETE (FINAL) ✓
 
@@ -238,3 +264,27 @@ Done: COMPLETE
       28
 ---
 Checked at 2026-03-06 23:30
+## 2026-03-07 01:00 - Check
+
+=== 2026-03-07 01:00 - Phase: COMPLETE ===
+Phase COMPLETE - skipping
+Done: COMPLETE
+- main.py:     1456 lines
+- TODOs/FIXMEs: 0
+0
+- Modules:
+      28
+---
+Checked at 2026-03-07 01:00
+## 2026-03-07 01:30 - Check
+
+- main.py:     1456 lines
+- TODOs/FIXMEs: 0
+0
+- Modules:
+=== 2026-03-07 01:30 - Phase: COMPLETE ===
+Phase COMPLETE - skipping
+Done: COMPLETE
+      29
+---
+Checked at 2026-03-07 01:30

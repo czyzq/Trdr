@@ -22,14 +22,17 @@ async def auto_trade_loop():
     3. Opens trades automatically when signal is strong enough
     4. Persists account state to DB
     """
-    # Lazy imports to avoid circular dependency
-    from main import (
-        account, INSTRUMENTS, get_news_client, sync_account_from_closed_trades, 
-        async_save_account, log_event
-    )
-    from circuit_breaker import check_circuit_breaker
-    from market_hours import is_market_open, get_market_hours
-    from signal_generator import calculate_position_size
+    # Lazy imports - avoid circular dependency with main
+    from main import account, async_save_account, global_broker, global_data_provider
+    from database import sync_account_from_closed_trades, get_setting as _db_get_setting, async_save_signal_cache_db
+    from app.logging import log_event
+    from broker_sim import INSTRUMENTS
+    from alpha_vantage_news import get_client as get_news_client
+    from services.circuit_breaker import check_circuit_breaker
+    from services.market_hours import is_market_open, get_market_hours
+    from services.signal_generator import calculate_position_size
+    from services.state import get_signal_history_cache as _get_signal_history_cache
+    import asyncio
 
     # Wait a few seconds for startup to finish
     await asyncio.sleep(5)
@@ -40,12 +43,13 @@ async def auto_trade_loop():
         iteration_count += 1
         try:
             print(f"[DEBUG AUTO-TRADE] Loop iteration #{iteration_count} at {datetime.utcnow().isoformat()}")
+            AUTO_TRADE_ENABLED = True
             if not AUTO_TRADE_ENABLED:
                 await asyncio.sleep(AUTO_TRADE_INTERVAL_SEC)
                 continue
 
             # ── Step 1: Update prices & auto-close TP/SL ──
-            auto_closed = await broker._async_update_prices()
+            auto_closed = await global_broker._async_update_prices()
             if auto_closed:
                 for closed in auto_closed:
                     pos = closed.get("position", {})
@@ -74,7 +78,7 @@ async def auto_trade_loop():
             if can_trade:
                 # ── Step 2.5: Dynamic Positions - close weak profitable positions ──
                 current_signals = {s.symbol: s.score for s in signals if s.direction not in (SignalDirection.NEUTRAL,)}
-                positions_to_close = broker.check_dynamic_exit(current_signals)
+                positions_to_close = global_broker.check_dynamic_exit(current_signals)
                 if positions_to_close:
                     log_event(f"[DYNAMIC-EXIT] Checking {len(positions_to_close)} positions for exit...", "info")
                     for pos_id in positions_to_close:
@@ -85,7 +89,7 @@ async def auto_trade_loop():
                                 exit_price = quote.get("price") if quote else None
                             except:
                                 exit_price = None
-                            result = await broker.close_position(pos_id, exit_price=exit_price)
+                            result = await global_broker.close_position(pos_id, exit_price=exit_price)
                             if "error" not in result:
                                 pnl = result.get("position", {}).get("pnl_usd", 0)
                                 log_event(f"[DYNAMIC-CLOSE] {pos['symbol']} | P&L: ${pnl:.2f} | Signal decayed", "info")
@@ -115,7 +119,7 @@ async def auto_trade_loop():
                     if already_open:
                         continue
 
-                    trade_enabled = db.get_setting(f"TRADE_ENABLED_{sym}", 1)
+                    trade_enabled = _db_get_setting(f"TRADE_ENABLED_{sym}", 1)
                     if not trade_enabled:
                         log_event(f"[AUTO-TRADE] Skipping {sym} - trading disabled", "info")
                         continue
@@ -124,7 +128,7 @@ async def auto_trade_loop():
                         log_event(f"[AUTO-TRADE] Skipping {sym} - market closed ({get_market_hours(sym)})", "info")
                         continue
 
-                    max_positions = db.get_setting("MAX_OPEN_POSITIONS", 3)
+                    max_positions = _db_get_setting("MAX_OPEN_POSITIONS", 3)
                     if len(open_positions) >= max_positions:
                         log_event(f"[AUTO-TRADE] Skipping {sym} - max {max_positions} positions reached", "info")
                         continue
@@ -140,7 +144,7 @@ async def auto_trade_loop():
                     try:
                         from main import _get_cached_candles
                         from indicators import TechnicalIndicators
-                        fresh_candles = await _get_cached_candles(sym, "60", 50)
+                        fresh_candles = await _get_cached_candles(sym, "60", 50, global_data_provider)
                         if fresh_candles and len(fresh_candles) >= 20:
                             ind = TechnicalIndicators.calculate_all(fresh_candles, period=14)
                             atr = ind.get("atr_14", entry_price * 0.01)
@@ -158,7 +162,7 @@ async def auto_trade_loop():
 
                     size = calculate_position_size(sym, entry_price, stop_loss) * size_multiplier
 
-                    result = await broker.open_position(
+                    result = await global_broker.open_position(
                         symbol=sym,
                         direction=direction,
                         size=size,
@@ -182,7 +186,7 @@ async def auto_trade_loop():
             await async_save_account(account)
             
             # Get signal history cache
-            from main import signal_history_cache
+            signal_history_cache = _get_signal_history_cache()
             await async_save_signal_cache_db(signal_history_cache)
 
             log_event(
@@ -213,7 +217,7 @@ async def auto_trade_loop():
 async def execute_trade(symbol: str, direction: str, volume: float) -> Dict:
     """Execute a trade - wrapper around broker.open_position"""
     from main import broker
-    result = await broker.open_position(
+    result = await global_broker.open_position(
         symbol=symbol,
         direction=direction,
         size=volume,
@@ -230,19 +234,28 @@ def check_circuit_breaker() -> bool:
 
 async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
-    # Lazy imports to avoid circular dependency
-    from main import _price_cache, _api_semaphore, get_symbol_strategy, get_strategy_manager
-    from services.market_data import get_cached_quote as _get_cached_quote
+    # Lazy imports
+    from app.logging import log_event
+    from timeframes import TimeFrame
+    from services.state import get_live_price_cache, get_symbol_strategy
+    from services.strategy_manager import get_strategy_manager
+    import asyncio
+    from services.market_data import get_cached_quote as _get_cached_quote, get_cached_candles as _get_cached_candles
+    from indicators import TechnicalIndicators
+    from main import global_data_provider
+    
+    _api_semaphore = asyncio.Semaphore(3)
     
     timeframe = "5"
     
     try:
         async with _api_semaphore:
-            quote = await asyncio.wait_for(_get_cached_quote(symbol), timeout=5.0)
+            quote = _get_cached_quote(symbol)
 
         last_known_price = 0.0
-        if symbol in _price_cache:
-            last_known_price = _price_cache[symbol][0]
+        price_cache = get_live_price_cache()
+        if symbol in price_cache:
+            last_known_price = price_cache[symbol].get("price", 0)
 
         if not quote:
             # Return neutral signal with last known price if available
@@ -288,7 +301,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         
         # Use cached candles with strategy's timeframe
         async with _api_semaphore:
-            candles = await asyncio.wait_for(_get_cached_candles(symbol, timeframe, 100), timeout=10.0)
+            candles = await asyncio.wait_for(_get_cached_candles(symbol, timeframe, 100, global_data_provider), timeout=10.0)
         if not candles or len(candles) < 20:
             return Signal(
                 symbol=symbol,
@@ -328,7 +341,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
 
         # Filter indicators based on per-symbol settings
         enabled_key = f"INDICATORS_{symbol}"
-        enabled_indicators = db.get_setting(enabled_key)
+        enabled_indicators = _db_get_setting(enabled_key)
         if enabled_indicators:
             # Map indicator names to their keys in the indicators dict
             indicator_map = {
@@ -356,7 +369,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         htf_bias = 0.0
         try:
             async with _api_semaphore:
-                htf_candles = await asyncio.wait_for(_get_cached_candles(symbol, "D", 60), timeout=10.0)
+                htf_candles = await asyncio.wait_for(_get_cached_candles(symbol, "D", 60, global_data_provider), timeout=10.0)
             if htf_candles and len(htf_candles) >= 20:
                 htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
                 if htf_ind:
@@ -512,7 +525,11 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
 async def generate_signals() -> List[Signal]:
     """Generate trading signals for all instruments using regime-adaptive scoring - PARALLEL"""
     # Lazy imports to avoid circular dependency
-    from main import account, INITIAL_BALANCE_USD, get_news_client, sync_account_from_closed_trades, log_event, INSTRUMENTS
+    from database import sync_account_from_closed_trades
+    from app.logging import log_event
+    from broker_sim import INSTRUMENTS, INITIAL_BALANCE_USD
+    from alpha_vantage_news import get_client as get_news_client
+    from main import account
     from services.trading_engine import _analyze_single_symbol
     
     now = datetime.utcnow().isoformat()

@@ -8,8 +8,8 @@ import os
 from collections import OrderedDict
 from datetime import datetime
 from typing import Any, List, Optional
-
 from timezone import now_warsaw
+from app.logging import log_event
 
 _db = None
 _connected = False
@@ -687,6 +687,29 @@ async def async_ensure_trades_indexes():
     """Async: Ensure trades indexes."""
     return await asyncio.to_thread(ensure_trades_indexes)
 
+async def sync_account_from_closed_trades():
+    """Fast sync using MongoDB aggregation - no full trade load."""
+    global db
+    if 'db' not in globals():
+        db = get_db()
+    from main import global_broker  # Lazy import to avoid circular imports
+    stats = await async_sync_account_from_closed_trades()
+    account = global_broker.get_account()
+    account.update(
+        {
+            "total_pnl_usd": stats["total_pnl_usd"],
+            "win_count": stats["win_count"],
+            "loss_count": stats["loss_count"],
+            "win_rate": round(stats["win_count"] / stats["closed_trades"] * 100, 1) if stats["closed_trades"] else 0,
+            "closed_trades": stats["closed_trades"],
+        }
+    )
+    initial = get_setting("INITIAL_BALANCE_USD", 3000.0)
+    account["balance_usd"] = initial + stats["total_pnl_usd"]
+    await async_save_account(account)
+    log_event(
+        f"Account synced from closed trades: ${account['balance_usd']:.2f} (PnL ${stats['total_pnl_usd']:+.2f})", "info"
+    )
 
 def sync_account_from_closed_trades_sync() -> dict:
     """Fast sync of account stats from closed trades using MongoDB aggregation.

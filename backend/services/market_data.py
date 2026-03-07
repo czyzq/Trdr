@@ -100,14 +100,16 @@ async def price_cache_loop():
     NOTE: Imports from main.py - follows the same pattern as trading_engine.py
     """
     # Import from main.py - same pattern as trading_engine
-    from main import data_provider, INSTRUMENTS, log_event, PRICE_CACHE_REFRESH_SEC
+    from main import PRICE_CACHE_REFRESH_SEC  # Global state
+    from broker_sim import INSTRUMENTS
+    from app.logging import log_event
     import settings
-    
+    from globals import global_data_provider
     log_event("[PRICE-CACHE] Live price cache background task started", "info")
 
     while True:
         try:
-            await update_live_price_cache(data_provider, INSTRUMENTS)
+            await update_live_price_cache(global_data_provider, INSTRUMENTS)
         except Exception as e:
             log_event(f"[PRICE-CACHE] Error updating prices: {e}", "warning")
         await asyncio.sleep(PRICE_CACHE_REFRESH_SEC)

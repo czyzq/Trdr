@@ -5,14 +5,9 @@ from services.state import get_instruments as _get_instruments
 from services import is_market_open, get_market_hours
 from app.logging import log_event
 from timezone import now_warsaw
+from globals import global_data_provider
 
 router = APIRouter(prefix="/api")
-
-
-def get_data_provider():
-    """Lazy import data_provider to avoid circular import"""
-    from main import data_provider
-    return data_provider
 
 
 def get_async_load_candle_history():
@@ -68,8 +63,7 @@ async def set_leverage(symbol: str, leverage: int):
 async def get_quote(symbol: str):
     """Get current quote for a symbol."""
     try:
-        data_provider = get_data_provider()
-        quote = await data_provider.get_quote(symbol)
+        quote = await global_data_provider.get_quote(symbol)
         return quote
     except Exception as e:
         return {"error": str(e)}

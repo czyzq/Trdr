@@ -10,6 +10,8 @@ from backend.database import (
     async_load_open_positions, 
     async_load_closed_positions,
     )
+from services.trading_engine import generate_signals
+
 router = APIRouter(tags=["dashboard"])
 
 

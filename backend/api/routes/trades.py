@@ -12,20 +12,9 @@ from services.state import (
 from services import calculate_position_size, check_circuit_breaker, is_market_open, get_market_hours
 from app.logging import log_event
 from database import async_save_trade, async_load_open_positions, async_load_closed_positions, async_count_closed_positions
+from globals import global_broker, global_data_provider
 
 router = APIRouter(prefix="", tags=["trades"])
-
-
-def get_broker():
-    """Lazy import broker to avoid circular import"""
-    from main import broker
-    return broker
-
-
-def get_data_provider():
-    """Lazy import data_provider to avoid circular import"""
-    from main import data_provider
-    return data_provider
 
 
 def get_technical_indicators():
@@ -65,8 +54,7 @@ async def get_trade_proposal(symbol: str, direction: str):
         return {"error": f"Unknown instrument: {symbol}"}
     
     try:
-        data_provider = get_data_provider()
-        quote = await data_provider.get_quote(symbol)
+        quote = await global_data_provider.get_quote(symbol)
         current_price = quote["price"]
     except Exception as e:
         return {"error": f"Failed to get quote: {e}"}
@@ -106,9 +94,8 @@ async def open_trade(
     if not can_trade:
         return {"error": f"Trading blocked: {reason}"}
     
-    broker = get_broker()
     sync_account = get_sync_account()
-    result = await broker.open_position(
+    result = await global_broker.open_position(
         symbol=symbol,
         direction=direction,
         size=size,
