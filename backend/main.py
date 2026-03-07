@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from services.trading_engine import auto_trade_loop
 from services.market_data import price_cache_loop
+from services.state import broker, account, open_positions, closed_positions, INSTRUMENTS, INITIAL_BALANCE_USD
 import uvicorn
 
 # =============================================================================
@@ -46,7 +47,6 @@ import database as db
 from alpha_vantage import get_async_client
 from alpha_vantage import get_client as get_alpha_vantage_client
 from alpha_vantage_news import get_client as get_news_client
-from broker_factory import create_broker, create_data_provider
 from database import (
     async_count_candles,
     async_count_closed_positions,
@@ -93,7 +93,6 @@ from strategies import list_strategies as old_list_strategies, mms_on_trade_resu
 # Use timing stats from services.state
 from services.state import _timing_stats
 
-INITIAL_BALANCE_USD = db.get_setting("INITIAL_BALANCE_USD", 3000.0)  # DB-driven!
 
 
 # Timing decorators - NOW IMPORTED FROM utils.decorators
@@ -201,10 +200,6 @@ from api.router import router as api_router
 
 # Include API routes from router (includes backtest optimization routes)
 app.include_router(api_router)
-
-# Broker abstraction - switch via BROKER_TYPE env var ("sim" or "ibkr")
-data_provider = create_data_provider()
-broker = create_broker(data_provider)
 
 # Enable Dynamic Positions feature
 try:

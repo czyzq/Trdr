@@ -1,8 +1,12 @@
 """Central state management for CFD Trading Bot
 Replaces global variables in main.py - provides clean API for all services
 """
-from typing import Dict, Any, Optional
-from datetime import datetime
+from typing import Dict, Any
+
+from broker_factory import create_broker, create_data_provider
+
+data_provider = create_data_provider()
+broker = create_broker(data_provider)
 
 # Core state
 account: Dict[str, Any] = {}
@@ -52,6 +56,7 @@ _live_price_cache_last_update: float = 0
 
 # Settings
 INSTRUMENTS: Dict[str, Dict[str, Any]] = {}
+
 INITIAL_BALANCE_USD: float = 3000.0
 
 # Trading state

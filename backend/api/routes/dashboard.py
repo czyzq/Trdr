@@ -11,7 +11,8 @@ from backend.database import (
     async_load_closed_positions,
     )
 from services.trading_engine import generate_signals
-
+from api.routes.market import get_chart_data
+from api.routes.news import get_news
 router = APIRouter(tags=["dashboard"])
 
 

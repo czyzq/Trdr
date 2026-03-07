@@ -3,16 +3,13 @@ from typing import Optional
 from fastapi import APIRouter, Query, Body
 from services.state import (
     get_open_positions,
-    set_open_positions,
-    get_account,
-    set_account,
     get_instruments,
-    get_symbol_strategy,
+    broker, 
+    data_provider
 )
 from services import calculate_position_size, check_circuit_breaker, is_market_open, get_market_hours
 from app.logging import log_event
 from database import async_save_trade, async_load_open_positions, async_load_closed_positions, async_count_closed_positions
-from globals import global_broker, global_data_provider
 
 router = APIRouter(prefix="", tags=["trades"])
 
@@ -54,7 +51,7 @@ async def get_trade_proposal(symbol: str, direction: str):
         return {"error": f"Unknown instrument: {symbol}"}
     
     try:
-        quote = await global_data_provider.get_quote(symbol)
+        quote = await data_provider.get_quote(symbol)
         current_price = quote["price"]
     except Exception as e:
         return {"error": f"Failed to get quote: {e}"}
@@ -95,7 +92,7 @@ async def open_trade(
         return {"error": f"Trading blocked: {reason}"}
     
     sync_account = get_sync_account()
-    result = await global_broker.open_position(
+    result = await broker.open_position(
         symbol=symbol,
         direction=direction,
         size=size,
@@ -113,7 +110,6 @@ async def open_trade(
 @router.post("/api/trade/{position_id}/close")
 async def close_trade(position_id: str):
     """Close an existing trade"""
-    broker = get_broker()
     sync_account = get_sync_account()
     result = await broker.close_position(position_id)
     
@@ -153,7 +149,6 @@ async def update_trade_position(
     """
     Update SL/TP for position
     """
-    broker = get_broker()
     positions = broker.get_open_positions()
     position = next((p for p in positions if p["id"] == position_id), None)
     if not position:

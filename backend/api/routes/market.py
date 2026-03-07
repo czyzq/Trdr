@@ -1,11 +1,8 @@
 """market API routes - extracted from main.py"""
 from fastapi import APIRouter, Query
-from datetime import datetime
-from services.state import get_instruments as _get_instruments
+
+from services.state import get_instruments, data_provider
 from services import is_market_open, get_market_hours
-from app.logging import log_event
-from timezone import now_warsaw
-from globals import global_data_provider
 
 router = APIRouter(prefix="/api")
 
@@ -29,9 +26,9 @@ def get_async_get_candle_date_range():
 
 
 @router.get("/instruments")
-async def get_instruments():
+async def _get_instruments():
     """Get all instruments with their settings."""
-    instruments = _get_instruments()
+    instruments = get_instruments()
     return {
         symbol: {
             "name": info.get("name", symbol),
@@ -63,7 +60,7 @@ async def set_leverage(symbol: str, leverage: int):
 async def get_quote(symbol: str):
     """Get current quote for a symbol."""
     try:
-        quote = await global_data_provider.get_quote(symbol)
+        quote = await data_provider.get_quote(symbol)
         return quote
     except Exception as e:
         return {"error": str(e)}
@@ -73,7 +70,6 @@ async def get_quote(symbol: str):
 async def get_chart_data(symbol: str, resolution: str = "60", count: int = 100):
     """Get OHLCV chart data for a symbol."""
     try:
-        data_provider = get_data_provider()
         candles = await data_provider.get_candles(symbol, resolution, count)
         return {"symbol": symbol, "candles": candles, "count": len(candles)}
     except Exception as e:
