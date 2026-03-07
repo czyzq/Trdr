@@ -18,12 +18,6 @@ router = APIRouter(tags=["dashboard"])
 @async_timed_decorator("dashboard")
 async def get_dashboard(resolution: str = Query("60"), count: int = Query(50)):
     """Get dashboard data with account, signals, positions, charts, and news."""
-    # Import at request time to avoid circular imports
-    from main import (
-        generate_signals,
-        get_chart_data,
-        get_news,
-    )
     
     symbols = list(INSTRUMENTS.keys())
     
