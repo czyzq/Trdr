@@ -48,6 +48,7 @@ def get_live_price(symbol: str) -> Optional[float]:
 
 
 def get_cached_quote(symbol: str) -> Optional[dict]:
+    from services.state import broker
     """Get cached quote data."""
     return _live_price_cache.get(symbol)
 
@@ -100,7 +101,9 @@ async def price_cache_loop():
     NOTE: Imports from main.py - follows the same pattern as trading_engine.py
     """
     # Import from main.py - same pattern as trading_engine
-    from main import data_provider, INSTRUMENTS, log_event, PRICE_CACHE_REFRESH_SEC
+    from services.state import data_provider, broker, INSTRUMENTS
+    from app.logging import log_event
+    from settings import PRICE_CACHE_REFRESH_SEC
     import settings
     
     log_event("[PRICE-CACHE] Live price cache background task started", "info")

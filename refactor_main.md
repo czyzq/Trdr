@@ -1,4 +1,5 @@
 # Refactoring Plan: CFD Trading Bot (main.py)
+NEVER REVERT TO OLD GIT WORKING VERSION,IT'S NOT REAL FIX!!!
 
 ## Executive Summary
 

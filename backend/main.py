@@ -136,6 +136,9 @@ async def lifespan(app: FastAPI):
         log_event("Web scraping news client initialized", "success")
     except Exception as e:
         log_event(f"Failed to initialize news client: {e}", "error")
+    # Update global account in services.state
+    from services.state import account as state_account
+    state_account.update(account)
     account["last_scan"] = datetime.utcnow().isoformat()
     log_event(f"Account loaded: ${account['balance_usd']:.2f} USD", "success")
 
@@ -1429,23 +1432,4 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8001")))
     args = parser.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)
-
-
-# =====================
-# STRATEGY MODULE - Moved to services/strategy_manager.py
-# =====================
-# Import from service instead of defining locally
-# from services.strategy_manager import get_strategy_manager, analyze_with_new_strategy
-# (Imported at top of file)
-
-# Legacy code commented out - now using services.strategy_manager:
-# # Global strategy manager - loaded once
-# _strategy_manager = None
-
-# def get_strategy_manager(force_reload: bool = False):
-#     """Get or create the JSON-based strategy manager."""
-#     ... (moved to services/strategy_manager.py)
-
-# def analyze_with_new_strategy(...):
-#     ... (moved to services/strategy_manager.py)
 

@@ -49,7 +49,7 @@ def get_strategy_manager(force_reload: bool = False):
     return _strategy_manager
 
 
-def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, balance: float, 
+def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
                             requested_strategy: str = None, atr_percent: float = None, 
                             vix_value: float = None) -> dict:
     """
@@ -60,7 +60,6 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, 
         symbol: Trading symbol
         candles: Price candles
         current_price: Current price
-        balance: Account balance
         requested_strategy: Specific JSON strategy ID to use (e.g., "JSON:btc_v2_core")
         atr_percent: ATR percent for volatility filter
         vix_value: Current VIX value for VIX filter
@@ -172,5 +171,5 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float, 
             'confidence': 0.5
         }],
         'exits': exits,
-        'strategy_id': strategy.id
+        'strategy_id': strategy.id,
     }

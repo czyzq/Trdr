@@ -2,8 +2,8 @@
 Replaces global variables in main.py - provides clean API for all services
 """
 from typing import Dict, Any
-
 from broker_factory import create_broker, create_data_provider
+from broker_sim import INSTRUMENTS as _BROKER_INSTRUMENTS
 
 data_provider = create_data_provider()
 broker = create_broker(data_provider)
@@ -55,7 +55,7 @@ _live_price_cache: Dict[str, Dict[str, Any]] = {}
 _live_price_cache_last_update: float = 0
 
 # Settings
-INSTRUMENTS: Dict[str, Dict[str, Any]] = {}
+INSTRUMENTS: Dict[str, Dict[str, Any]] = _BROKER_INSTRUMENTS
 
 INITIAL_BALANCE_USD: float = 3000.0
 
@@ -65,8 +65,8 @@ AUTO_TRADE_INTERVAL_SEC: int = 300
 
 
 def get_account() -> Dict[str, Any]:
-    """Get current account state"""
-    return account
+    """Get current account state from broker"""
+    return broker.account if hasattr(broker, 'account') else account
 
 
 def set_account(new_account: Dict[str, Any]) -> None:

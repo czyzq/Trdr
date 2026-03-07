@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import database as db
 from timeframes import TimeFrame
-
+from database import async_save_account
 # Import Signal and SignalDirection from models
 from app.logging import log_event
 from models import Signal, SignalDirection
@@ -17,6 +17,7 @@ from utils.decorators import async_timed
 from strategies import get_strategy
 # Lazy imports used inside functions to avoid circular dependency
 # (imported from main.py at function call time)
+from services.market_data import get_cached_candles
 
 
 async def auto_trade_loop():
@@ -28,11 +29,13 @@ async def auto_trade_loop():
     4. Persists account state to DB
     """
     # Lazy imports to avoid circular dependency
-
-    from circuit_breaker import check_circuit_breaker
-    from market_hours import is_market_open, get_market_hours
-    from signal_generator import calculate_position_size
+    from services.state import broker
+    
+    from services.circuit_breaker import check_circuit_breaker
+    from services.market_hours import is_market_open, get_market_hours
+    from services.signal_generator import calculate_position_size
     account = broker.get_account()
+    closed_positions = broker.get_closed_positions()
     # Wait a few seconds for startup to finish
     await asyncio.sleep(5)
     log_event("[AUTO-TRADE] Background trading loop started", "event")
@@ -140,9 +143,8 @@ async def auto_trade_loop():
 
                     # Recalculate TP/SL from fresh ATR
                     try:
-                        from main import _get_cached_candles
-                        from indicators import TechnicalIndicators
-                        fresh_candles = await _get_cached_candles(sym, "60", 50)
+                        
+                        fresh_candles = await get_cached_candles(sym, "60", 50, data_provider)
                         if fresh_candles and len(fresh_candles) >= 20:
                             ind = TechnicalIndicators.calculate_all(fresh_candles, period=14)
                             atr = ind.get("atr_14", entry_price * 0.01)
@@ -225,7 +227,7 @@ async def execute_trade(symbol: str, direction: str, volume: float) -> Dict:
 
 def check_circuit_breaker() -> bool:
     """Check if trading should be allowed - wrapper"""
-    from circuit_breaker import check_circuit_breaker as _cb
+    from services.circuit_breaker import check_circuit_breaker as _cb
     allowed, _ = _cb()
     return allowed
 
@@ -233,19 +235,22 @@ def check_circuit_breaker() -> bool:
 async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
     # Lazy imports to avoid circular dependency
-    from main import _price_cache, _api_semaphore, get_symbol_strategy, get_strategy_manager
-    from services.market_data import get_cached_quote as _get_cached_quote
+    from services.state import get_live_price_cache as _price_cache, get_symbol_strategy, broker
+    from services.strategy_manager import get_strategy_manager, analyze_with_new_strategy
+    import asyncio
+    _api_semaphore = asyncio.Semaphore(3)
+    from services.market_data import get_cached_quote as _get_cached_quote, get_cached_candles as _get_cached_candles
     
     timeframe = "5"
     account = broker.get_account()
     
     try:
-        async with _api_semaphore:
-            quote = await asyncio.wait_for(_get_cached_quote(symbol), timeout=5.0)
+        quote = _get_cached_quote(symbol)
 
         last_known_price = 0.0
-        if symbol in _price_cache:
-            last_known_price = _price_cache[symbol][0]
+        price_cache = _price_cache()
+        if symbol in price_cache:
+            last_known_price = price_cache[symbol].get('price', 0)
 
         if not quote:
             # Return neutral signal with last known price if available
@@ -291,7 +296,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         
         # Use cached candles with strategy's timeframe
         async with _api_semaphore:
-            candles = await asyncio.wait_for(_get_cached_candles(symbol, timeframe, 100), timeout=10.0)
+            candles = await asyncio.wait_for(_get_cached_candles(symbol, timeframe, 100, data_provider), timeout=10.0)
         if not candles or len(candles) < 20:
             return Signal(
                 symbol=symbol,
@@ -359,7 +364,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         htf_bias = 0.0
         try:
             async with _api_semaphore:
-                htf_candles = await asyncio.wait_for(_get_cached_candles(symbol, "D", 60), timeout=10.0)
+                htf_candles = await asyncio.wait_for(_get_cached_candles(symbol, "D", 60, data_provider), timeout=10.0)
             if htf_candles and len(htf_candles) >= 20:
                 htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
                 if htf_ind:
@@ -425,7 +430,6 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             symbol, 
             candles, 
             current_price, 
-            account.get("balance_usd", 3000),
             requested_strategy=selected_strategy if selected_strategy.startswith("JSON:") else None,
             atr_percent=atr_pct,
             vix_value=vix_data.get('value') if vix_data else None
@@ -448,9 +452,9 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
                 current_price=current_price,
                 time_horizon=timeframe,
                 entry_point=current_price,
-                take_profit=new_result["take_profit"],
-                stop_loss=new_result["stop_loss"],
-                risk_reward_ratio=new_result["risk_reward_ratio"],
+                take_profit=new_result.get("take_profit") or new_result.get("exits", {}).get("take_profit", 0) or 0,
+                stop_loss=new_result.get("stop_loss") or new_result.get("exits", {}).get("stop_loss", 0) or 0,
+                risk_reward_ratio=new_result.get("risk_reward_ratio") or 0,
             )
 
         # ── Fallback: OLD strategy (DEPRECATED - see strategies.py) ──
@@ -493,6 +497,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         return signal
 
     except Exception as e:
+        raise e
         log_event(f"Error analyzing {symbol}: {e}", "error")
         return Signal(
             symbol=symbol,

@@ -9,7 +9,7 @@ from services.state import (
 )
 from services import calculate_position_size, check_circuit_breaker, is_market_open, get_market_hours
 from app.logging import log_event
-from database import async_save_trade, async_load_open_positions, async_load_closed_positions, async_count_closed_positions
+from database import async_save_trade, async_sync_account_from_closed_trades, async_load_closed_positions, async_count_closed_positions
 
 router = APIRouter(prefix="", tags=["trades"])
 
@@ -18,12 +18,6 @@ def get_technical_indicators():
     """Lazy import TechnicalIndicators to avoid circular import"""
     from main import TechnicalIndicators
     return TechnicalIndicators
-
-
-def get_sync_account():
-    """Lazy import sync_account_from_closed_trades to avoid circular import"""
-    from main import sync_account_from_closed_trades
-    return sync_account_from_closed_trades
 
 
 @router.get("/api/trade/size")
@@ -85,23 +79,25 @@ async def open_trade(
     size: float = Body(...),
     take_profit: float = Body(0),
     stop_loss: float = Body(0),
+    entry_price: float = Body(0),
 ):
     """Open a new trade"""
     can_trade, reason = check_circuit_breaker()
     if not can_trade:
         return {"error": f"Trading blocked: {reason}"}
     
-    sync_account = get_sync_account()
+    # Using imported function directly
     result = await broker.open_position(
         symbol=symbol,
         direction=direction,
         size=size,
-        take_profit=take_profit,
-        stop_loss=stop_loss,
+        take_profit=take_profit if take_profit > 0 else None,
+        stop_loss=stop_loss if stop_loss > 0 else None,
+        entry_price=entry_price if entry_price > 0 else None,
     )
     
     if "error" not in result:
-        await sync_account()
+        await async_sync_account_from_closed_trades()
         log_event(f"[TRADE] Opened {direction} {symbol} size={size}", "success")
     
     return result
@@ -110,11 +106,11 @@ async def open_trade(
 @router.post("/api/trade/{position_id}/close")
 async def close_trade(position_id: str):
     """Close an existing trade"""
-    sync_account = get_sync_account()
+    # Using imported function directly
     result = await broker.close_position(position_id)
     
     if "error" not in result:
-        await sync_account()
+        await async_sync_account_from_closed_trades()
         log_event(f"[TRADE] Closed position {position_id}", "info")
     
     return result
