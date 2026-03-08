@@ -158,12 +158,14 @@ curl -s http://localhost:8001/api/trades/open | jq '[.positions[].unrealized_pnl
    - **Entry line** (yellow/dashed) - horizontal line at entry_price
    - **TP line** (green) - horizontal line at take_profit price
    - **SL line** (red) - horizontal line at stop_loss price
+5. Changing to other symbol rest cl, tp entry lines - lines dont stay as wwe select other symbol chart
 
 **Verification:**
 - Entry price should be visible as a line on the chart
 - TP should be above entry (for BUY) or below (for SELL)
 - SL should be below entry (for BUY) or above (for SELL)
 - **Position must be between SL and TP** (entry is between stop_loss and take_profit)
+- changing to other symbol results in showing correct chart, and not lines from position open on other chart/symbol
 
 **API Check:**
 ```bash
@@ -197,6 +199,82 @@ curl -s http://localhost:8001/api/trades/open | jq '.positions[0]'
 2. Wait 1 minute for price to change
 3. Click CLOSE
 4. Check: Position gone, Balance changed, Trade in history
+
+#### 3.4 Position Selection & Line Interaction (CRITICAL)
+**Test: Click position → shows lines + navigates to chart**
+
+**Prerequisites:** At least one open position
+
+**Test Steps:**
+1. Go to Open Positions tab
+2. Click on a position row (not the close button)
+3. **Verify:**
+   - [ ] Lines appear on chart (Entry, TP, SL)
+   - [ ] View automatically navigates to that symbol's chart
+   - [ ] Position is highlighted/selected in the list
+
+**Test: Click again to hide lines**
+4. Click the same position again (or click elsewhere)
+5. **Verify:**
+   - [ ] Lines disappear from chart
+   - [ ] Position is no longer highlighted
+
+**Test: Cancel/Discard edit hides lines**
+6. Click on a position (lines appear)
+7. Click "Cancel" or outside the edit area
+8. **Verify:**
+   - [ ] Lines disappear
+   - [ ] No changes made
+
+#### 3.5 SL/TP Editing with +/- Buttons
+**Test: Edit SL/TP using +/- buttons**
+
+1. Click on an open position to select it
+2. Find SL/TP edit controls (+/- buttons)
+3. **Test SL:**
+   - Click "+" to increase SL
+   - Click "-" to decrease SL
+   - Verify SL value updates in Open Positions list
+4. **Test TP:**
+   - Click "+" to increase TP  
+   - Click "-" to decrease TP
+   - Verify TP value updates in Open Positions list
+5. **API Verification:**
+   ```bash
+   curl -s http://localhost:8001/api/trades/open | jq '.positions[0]'
+   # stop_loss and take_profit should reflect changes
+   ```
+
+#### 3.6 Drag SL/TP Lines on Chart (CRITICAL)
+**Test: Drag lines on chart to adjust SL/TP**
+
+1. Click on an open position (lines appear)
+2. On the chart, locate the TP line (green dashed)
+3. **Drag TP line:**
+   - Click and hold on TP line
+   - Drag upward (increases TP) or downward (decreases TP)
+   - Release
+4. **Verify:**
+   - [ ] TP value in Open Positions updates in real-time
+   - [ ] TP line moves to new position on chart
+   - [ ] API reflects new TP: `curl -s http://localhost:8001/api/trades/open | jq '.positions[0].take_profit'`
+5. **Drag SL line:**
+   - Click and hold on SL line (red dashed)
+   - Drag upward or downward
+6. **Verify:**
+   - [ ] SL value in Open Positions updates in real-time
+   - [ ] SL line moves to new position on chart
+   - [ ] API reflects new SL
+
+**Real-Time Update Check:**
+- While dragging, watch Open Positions list
+- Values should change as you drag (not only after release)
+- Chart line should follow cursor during drag
+
+**Boundary Tests:**
+- SL cannot be above entry (for BUY) or below (for SELL)
+- TP cannot be below entry (for BUY) or above (for SELL)
+- Visual feedback when trying to set invalid values
 
 ---
 
