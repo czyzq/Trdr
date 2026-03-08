@@ -111,6 +111,8 @@ async def price_cache_loop():
     while True:
         try:
             await update_live_price_cache(data_provider, INSTRUMENTS)
+            # Also update broker positions with fresh prices
+            await broker._async_update_prices()
         except Exception as e:
             log_event(f"[PRICE-CACHE] Error updating prices: {e}", "warning")
         await asyncio.sleep(PRICE_CACHE_REFRESH_SEC)

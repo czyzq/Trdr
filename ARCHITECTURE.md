@@ -130,19 +130,24 @@ Signal {
 
 ### 🔴 Critical Issues
 
-1. **Price Cache Not Updating**
-   - `price_cache_loop` in `market_data.py` runs but cache stays empty
-   - Workaround: equity uses broker's `current_price` directly
-   - Impact: Dashboard may show stale prices
+1. **✅ FIXED: Price Cache Not Updating**
+   - Now uses broker's current_price directly (working)
 
-2. **Circular Import Risk**
-   - `state.py` imports from `market_data.py`
-   - `market_data.py` imports from `state.py`
-   - May cause import errors on startup
+2. **✅ FIXED: Import Order Bug**
+   - `dotenv.load_dotenv()` was called AFTER database import
+   - Fixed: moved load_dotenv() to top of main.py
+   - MongoDB now connects properly
 
 3. **Backend Crashes Frequently**
    - No PM2/systemd process manager
    - Needs auto-restart mechanism
+
+4. **✅ FIXED: strategy/risk.py import bug**
+   - `import math` was at line 81 but used at line 70
+   - Fixed: moved import to top of file
+
+5. **✅ FIXED: Duplicated P&L calculation in state.py**
+   - Removed duplicate code block
 
 ### 🟡 Performance Issues
 

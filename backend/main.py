@@ -22,18 +22,18 @@ import uvicorn
 # =============================================================================
 # SIGNAL HANDLERS - Debug why process exits
 # =============================================================================
+# Load env vars BEFORE importing modules that need them
+from dotenv import load_dotenv
+load_dotenv()
+
 # Use signal handler from utils
 from utils.signal import create_signal_handler
 _signal_handler = create_signal_handler()
 
 from database import async_load_open_positions, async_sync_account_from_closed_trades
-from dotenv import load_dotenv
 from fastapi import Body, FastAPI, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from timezone import WARSAW_TZ, now_warsaw
-
-# Load env vars BEFORE importing modules that need them
-load_dotenv()
 
 import functools
 
@@ -116,6 +116,19 @@ async def lifespan(app: FastAPI):
     if db.is_connected():
         log_event("MongoDB connected - trades & account persisted", "success")
         log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
+        
+        # Load settings from MongoDB on startup
+        from services.state import set_auto_trade_enabled, set_auto_trade_interval
+        
+        db_settings = db.list_settings()
+        auto_trade_val = db_settings.get("AUTO_TRADE_ENABLED", 0)
+        set_auto_trade_enabled(bool(auto_trade_val))
+        log_event(f"Loaded AUTO_TRADE_ENABLED={auto_trade_val} from MongoDB", "info")
+        
+        interval = db_settings.get("AUTO_TRADE_INTERVAL_SEC", 30)
+        set_auto_trade_interval(int(interval))
+        log_event(f"Loaded AUTO_TRADE_INTERVAL_SEC={interval} from MongoDB", "info")
+        
         db.ensure_candle_indexes()
         log_event("Candle history indexes ensured", "info")
         db.ensure_settings_indexes()
@@ -186,7 +199,7 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

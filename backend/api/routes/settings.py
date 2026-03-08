@@ -20,9 +20,17 @@ async def get_settings():
 
 @router.post("/api/settings")
 async def save_setting(key: str = Body(...), value: float = Body(...), note: str = Body("")):
-    """Save a setting to DB."""
+    """Save a setting to DB and update in-memory state if needed."""
     db.set_setting(key, value, note)
     log_event(f"[SETTINGS] Saved {key}={value}", "info")
+    
+    # Update in-memory state for critical settings
+    from services.state import set_auto_trade_enabled, set_auto_trade_interval
+    if key == "AUTO_TRADE_ENABLED":
+        set_auto_trade_enabled(bool(value))
+    elif key == "AUTO_TRADE_INTERVAL_SEC":
+        set_auto_trade_interval(int(value))
+    
     return {"key": key, "value": value}
 
 

@@ -63,8 +63,12 @@ export const Dashboard: React.FC = () => {
   const [accountData, setAccountData] = useState<any>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeName>(getStoredTheme());
-  const [broker, setBroker] = useState<"simulation" | "ibkr">("simulation");
-  const [autoTrade, setAutoTrade] = useState<boolean>(false);
+  const [broker, setBroker] = useState<"simulation" | "ibkr">(() => {
+    return (localStorage.getItem("cfd_broker") as "simulation" | "ibkr") || "simulation";
+  });
+  const [autoTrade, setAutoTrade] = useState<boolean>(() => {
+    return localStorage.getItem("cfd_autoTrade") === "true";
+  });
   const [backtestRunning, setBacktestRunning] = useState(false);
   const [backtestResults, setBacktestResults] = useState<any>(null);
   const [strategies, setStrategies] = useState<any[]>([]);
@@ -111,10 +115,12 @@ export const Dashboard: React.FC = () => {
         const res = await fetch(apiUrl("trading-mode"));
         if (res.ok) {
           const data = await res.json();
-          setBroker(data.broker);
-          setAutoTrade(data.autoTrade);
-          localStorage.setItem("cfd_broker", data.broker);
-          localStorage.setItem("cfd_autoTrade", String(data.autoTrade));
+          // Always use API value to sync state
+          setBroker(data.mode || "simulation");
+          setAutoTrade(data.auto_trade || false);
+          // Save to localStorage for persistence
+          localStorage.setItem("cfd_broker", data.mode || "simulation");
+          localStorage.setItem("cfd_autoTrade", String(data.auto_trade || false));
         }
         
         // Strategies with indicators

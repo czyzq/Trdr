@@ -61,65 +61,31 @@ INITIAL_BALANCE_USD: float = 3000.0
 
 # Trading state
 AUTO_TRADE_ENABLED: bool = False
-AUTO_TRADE_INTERVAL_SEC: int = 300
+AUTO_TRADE_INTERVAL_SEC: int = 30
 
 
 def get_account() -> Dict[str, Any]:
     """Get current account state from broker with unrealized P&L"""
     acct = broker.account if hasattr(broker, 'account') else account
     
-    # Calculate unrealized P&L from open positions - fetch fresh prices
+    # Calculate unrealized P&L from open positions - use broker's current prices
     positions = broker.get_open_positions() if hasattr(broker, 'get_open_positions') else []
     unrealized_pnl = 0
     
-    # Try to get fresh prices
-    try:
-        from services.market_data import data_provider
-        import asyncio
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're in async context - schedule a quick price fetch
-            pass
-        else:
-            # Sync context - get prices directly
-            for pos in positions:
-                symbol = pos.get("symbol")
-                try:
-                    candles = loop.run_until_complete(data_provider.get_candles(symbol, "60", 1))
-                    if candles and len(candles) > 0:
-                        current_price = candles[-1]["close"]
-                    else:
-                        current_price = pos.get("entry_price", 0)
-                except:
-                    current_price = pos.get("entry_price", 0)
-                
-                entry = pos.get("entry_price", 0)
-                size = pos.get("size", 0)
-                leverage = pos.get("leverage", 1)
-                direction = pos.get("direction", "buy")
-                
-                if current_price and entry:
-                    if direction == "buy":
-                        pnl = (current_price - entry) * size * leverage
-                    else:  # sell
-                        pnl = (entry - current_price) * size * leverage
-                    unrealized_pnl += pnl
-    except Exception as e:
-        print(f"[get_account] Error calculating unrealized P&L: {e}")
-        # Fallback: use positions' current_price
-        for pos in positions:
-            entry = pos.get("entry_price", 0)
-            current_price = pos.get("current_price", entry)
-            size = pos.get("size", 0)
-            leverage = pos.get("leverage", 1)
-            direction = pos.get("direction", "buy")
-            
-            if current_price and entry:
-                if direction == "buy":
-                    pnl = (current_price - entry) * size * leverage
-                else:
-                    pnl = (entry - current_price) * size * leverage
-                unrealized_pnl += pnl
+    # Use current_price from position (updated by broker's _async_update_prices)
+    for pos in positions:
+        entry = pos.get("entry_price", 0)
+        current_price = pos.get("current_price", entry)
+        size = pos.get("size", 0)
+        leverage = pos.get("leverage", 1)
+        direction = pos.get("direction", "buy")
+        
+        if current_price and entry:
+            if direction == "buy":
+                pnl = (current_price - entry) * size * leverage
+            else:  # sell
+                pnl = (entry - current_price) * size * leverage
+            unrealized_pnl += pnl
     
     # Update equity to include unrealized P&L
     if "equity_usd" in acct:
@@ -137,39 +103,25 @@ def set_account(new_account: Dict[str, Any]) -> None:
 
 
 def get_open_positions() -> list:
-    """Get open positions from broker with updated prices"""
+    """Get open positions from broker - trigger price update synchronously"""
     positions = broker.get_open_positions() if hasattr(broker, 'get_open_positions') else open_positions
     
-    # Update current_price from live price cache
-    from services.market_data import _live_price_cache
-    
-    for pos in positions:
-        symbol = pos["symbol"]
-        
-        # Try cache first
-        if symbol in _live_price_cache:
-            cached = _live_price_cache[symbol]
-            price = cached.get("price") or cached.get("candle", {}).get("close")
-            if price:
-                pos["current_price"] = price
-                # Also update unrealized P&L
-                entry = pos.get("entry_price", 0)
-                size = pos.get("size", 0)
-                leverage = pos.get("leverage", 1)
-                direction = pos.get("direction", "buy")
-                if direction == "buy":
-                    pos["unrealized_pnl_usd"] = round((price - entry) * size * leverage, 2)
-                else:
-                    pos["unrealized_pnl_usd"] = round((entry - price) * size * leverage, 2)
-                # Calculate unrealized P&L
-                entry = pos["entry_price"]
-                size = pos["size"]
-                leverage = pos.get("leverage", 1)
-                if pos["direction"] == "buy":
-                    pnl = (price - entry) * size * leverage
-                else:
-                    pnl = (entry - price) * size * leverage
-                pos["unrealized_pnl_usd"] = round(pnl, 2)
+    # Always trigger price update when positions are requested
+    # This ensures P&L is current
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if not loop.is_running():
+            # Sync context - run async update
+            async def update_and_get():
+                await broker._async_update_prices()
+                return broker.get_open_positions()
+            positions = loop.run_until_complete(update_and_get())
+        else:
+            # Async context - just return positions, they'll be updated by background task
+            pass
+    except Exception as e:
+        print(f"[get_open_positions] Error: {e}")
     
     return positions
 

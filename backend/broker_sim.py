@@ -425,28 +425,37 @@ class AsyncSimulatedBroker(Broker):
             return []
 
     async def _async_update_prices(self) -> List[Dict[str, Any]]:
-        """Async price update with auto-close - always gets fresh prices for real-time P&L."""
+        """Async price update with auto-close - uses quotes for real-time prices."""
+        print(f"[PRICE-UPDATE] Updating prices for {len(self.open_positions)} positions")
         auto_closed = []
         to_close = []
 
         for pos in self.open_positions:
             symbol = pos["symbol"]
 
-            # Always get fresh price from candles for real-time P&L updates
+            # Use quote API for real-time prices (not candles which may be stale)
             price = None
             try:
-                candles = await self._data_provider.get_candles(symbol, "60", 1)
-                if candles and len(candles) > 0:
-                    price = candles[-1]["close"]
-            except Exception:
-                pass
-
-            # Fallback to quote if candles unavailable
-            if price is None:
                 quote = await self._data_provider.get_quote(symbol)
-                if not quote:
-                    continue
-                price = quote["price"]
+                if quote and "price" in quote:
+                    price = quote["price"]
+                    print(f"[PRICE-UPDATE] {symbol}: got quote price = {price}")
+            except Exception as e:
+                print(f"[PRICE-UPDATE] Error getting quote for {symbol}: {e}")
+
+            # Fallback to candles if quote unavailable
+            if price is None:
+                try:
+                    candles = await self._data_provider.get_candles(symbol, "60", 1)
+                    if candles and len(candles) > 0:
+                        price = candles[-1]["close"]
+                except Exception as e:
+                    print(f"[PRICE-UPDATE] Error getting candles for {symbol}: {e}")
+
+            if price is None:
+                print(f"[PRICE-UPDATE] Could not get price for {symbol}")
+                continue
+
             pos_leverage = pos.get("leverage", 1)
             if pos["direction"] == "buy":
                 pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage

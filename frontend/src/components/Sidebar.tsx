@@ -141,13 +141,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData, broker = "simulat
     }
   };
 
-  const balance = accountData?.balance_usd ?? 0;
-  const equity = accountData?.equity_usd ?? 0;
-  const openTrades = accountData?.open_trades ?? 0;
-  const closedTrades = accountData?.closed_trades ?? 0;
-  const winRate = accountData?.win_rate ?? 0;
-  const totalPnl = accountData?.total_pnl_usd ?? 0;
-  const accountMode = accountData?.mode ?? "simulate";
+  // API returns nested "account" object with stats
+  const account = accountData?.account ?? accountData;
+  const balance = account?.balance_usd ?? accountData?.balance_usd ?? 0;
+  const equity = account?.equity_usd ?? accountData?.equity_usd ?? 0;
+  const openTrades = account?.open_trades ?? accountData?.open_trades ?? 0;
+  const closedTrades = account?.closed_trades ?? 0;
+  const winRate = account?.win_rate ?? 0;
+  const totalPnl = account?.total_pnl_usd ?? 0;
+  const accountMode = account?.mode ?? accountData?.mode ?? "simulate";
 
   useEffect(() => {
     const updateScan = () => {
