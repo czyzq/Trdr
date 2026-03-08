@@ -145,6 +145,53 @@ curl -s http://localhost:8001/api/trades/open | jq '[.positions[].unrealized_pnl
 - [ ] **P&L credited** - Balance increases by profit
 - [ ] **Balance updates** - New balance reflects closed trade
 
+#### 3.3 Position Visualization on Chart (CRITICAL)
+**Test: Selected position shows correct lines on chart**
+
+**Prerequisites:** Have at least one open position
+
+**Test Steps:**
+1. Go to Dashboard or Open Positions tab
+2. Click on an open position to select it
+3. Navigate to Charts tab (or view mini-chart)
+4. Verify on the chart:
+   - **Entry line** (yellow/dashed) - horizontal line at entry_price
+   - **TP line** (green) - horizontal line at take_profit price
+   - **SL line** (red) - horizontal line at stop_loss price
+
+**Verification:**
+- Entry price should be visible as a line on the chart
+- TP should be above entry (for BUY) or below (for SELL)
+- SL should be below entry (for BUY) or above (for SELL)
+- **Position must be between SL and TP** (entry is between stop_loss and take_profit)
+
+**API Check:**
+```bash
+# Get position details
+curl -s http://localhost:8001/api/trades/open | jq '.positions[0]'
+
+# Expected: entry_price is between stop_loss and take_profit
+# For BUY:  stop_loss < entry_price < take_profit
+# For SELL: take_profit < entry_price < stop_loss
+```
+
+**Visual Check:**
+- Entry line should be visible on the candlestick chart
+- TP/SL lines should be at correct price levels (not shifted)
+- Candles around entry price should be visible
+
+**Test New Position:**
+1. Close all positions (if any open)
+2. Open a new position (e.g., BTC BUY with size 0.01)
+3. Immediately select the position from the list
+4. Go to Charts tab
+5. Verify:
+   - Entry line at current price (or slightly different)
+   - TP line above entry (green)
+   - SL line below entry (red)
+   - All lines align with actual price values on Y-axis
+   - Candles show current price range (not stale data)
+
 **Test Close Position:**
 1. Open a position (see section 4)
 2. Wait 1 minute for price to change
