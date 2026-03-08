@@ -409,7 +409,7 @@ export const ChartsTab: React.FC = () => {
                     showVolume={true}
                     showRSI={true}
                     trades={trades}
-                    selectedPosition={openPositions.find(p => p.symbol === instrument.symbol) || null}
+                    selectedPosition={selectedSymbol === instrument.symbol ? openPositions.find(p => p.symbol === instrument.symbol) || null : null}
                   />
                 ) : (
                   <div
