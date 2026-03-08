@@ -495,6 +495,53 @@ curl -s http://localhost:8001/api/trades/open | jq '.positions[] | {symbol, entr
    - [ ] API returns new TP
    - [ ] Position still open
 
+---
+
+## 🔴 CRITICAL BUGS FOUND (2026-03-08 03:45)
+
+### BUG: Position Close Not Working
+- **Issue:** Closing position fails - API returns 405 Method Not Allowed
+- **Expected:** Click CLOSE → position closes
+- **Actual:** Error in console, position stays open
+- **Status:** NEEDS FIX
+
+### BUG: TP/SL Lines Don't Hide on Deselect
+- **Issue:** When deselecting a position (click Cancel or elsewhere), TP/SL/Entry lines still visible
+- **Expected:** Deselect → lines disappear
+- **Actual:** Lines remain visible even after deselecting
+- **Status:** NEEDS FIX
+
+### BUG: Lines Show on Wrong Charts
+- **Issue:** TP/SL lines for one symbol show on charts of OTHER symbols
+- **Example:** Select BTC position → XAU chart shows BTC's TP/SL lines
+- **Expected:** Lines only show on the chart for the selected position's symbol
+- **Actual:** Lines leak to other charts
+- **Status:** NEEDS FIX
+
+---
+
+### Bug Fix Test (4.7.6)
+**Test: Position deselect clears all lines**
+
+1. Select a position (BTC) → lines appear on BTC chart
+2. Click Cancel or deselect position
+3. **Verify:**
+   - [ ] TP line disappears from chart
+   - [ ] SL line disappears from chart
+   - [ ] Entry line disappears from chart
+   - [ ] Lines don't appear on other symbol charts (XAU, XAG, US100)
+
+**Test: Close position via API**
+```bash
+# Get position ID
+POSITION_ID=$(curl -s http://localhost:8001/api/trades/open | jq -r '.positions[0].id')
+
+# Try to close
+curl -s -X POST http://localhost:8001/api/trade/close \
+  -H "Content-Type: application/json" \
+  -d "{\"position_id\":\"$POSITION_ID\"}"
+```
+
 **API Verification:**
 ```bash
 # Before edit
