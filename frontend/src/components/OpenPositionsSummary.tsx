@@ -191,7 +191,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
     // Optimistic update - remove immediately from UI
     setPositions(prev => prev.filter(p => p.id !== id));
     try {
-      const res = await fetch(apiUrl(`trade/close/${id}`), { method: "POST", cache: "no-store" });
+      const res = await fetch(apiUrl(`trade/${id}/close`), { method: "POST", cache: "no-store" });
       const data = await res.json();
       
       if (res.ok) {

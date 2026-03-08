@@ -52,8 +52,17 @@ async def get_strategy_for_symbol(symbol: str):
 
 
 @router.post("/api/strategy/{symbol}")
-async def set_strategy_for_symbol(symbol: str, strategy_id: str = Body(...)):
-    """Set the active strategy for a symbol."""
+async def set_strategy_for_symbol(
+    symbol: str, 
+    strategy_id: str = Query(None),
+    body_strategy_id: str = Body(None, embed=True)
+):
+    """Set the strategy for a symbol via query param or body."""
+    # Accept either query param or body
+    strategy_id = strategy_id or body_strategy_id
+    if not strategy_id:
+        return {"error": "strategy_id is required (query param or body)"}
+    
     from strategies import STRATEGIES
     
     # Handle JSON strategies

@@ -324,7 +324,7 @@ export const adjustPosition = async (
 };
 
 export const closePosition = async (positionId: string): Promise<void> => {
-  const response = await fetch(`${apiUrl}/trade/close/${positionId}`, {
+  const response = await fetch(`${apiUrl}/trade/${positionId}/close`, {
     method: "POST",
   });
   

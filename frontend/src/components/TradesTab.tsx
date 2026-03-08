@@ -114,7 +114,7 @@ export const TradesTab: React.FC = () => {
     // Optimistic update - remove immediately from UI
     setOpenPositions(prev => prev.filter(p => p.id !== positionId));
     try {
-      const response = await fetch(apiUrl(`trade/close/${positionId}`), {
+      const response = await fetch(apiUrl(`trade/${positionId}/close`), {
         method: "POST",
         cache: "no-store",
       });
