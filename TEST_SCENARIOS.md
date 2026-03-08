@@ -408,6 +408,162 @@ echo "Expected SL: ~$EXPECTED_SL"
 
 ---
 
+### 4.7 SL/TP Validation & Position Lifecycle (CRITICAL)
+**Test: Invalid SL/TP values are blocked, valid values work, positions close correctly**
+
+#### 4.7.1 Invalid SL/TP Validation
+**Test: Opening position with invalid SL/TP should be blocked**
+
+**Test Steps:**
+1. Go to Dashboard with a signal visible
+2. Click TRADE to open position modal
+3. Try to set invalid SL/TP values:
+   
+   **Test Case A - SL above entry (for BUY):**
+   - Entry: 50000, Current: 50000
+   - Set SL: 51000 (above entry - INVALID)
+   - Expected: Error "SL must be below entry price for BUY"
+   
+   **Test Case B - TP below entry (for BUY):**
+   - Set TP: 49000 (below entry - INVALID)
+   - Expected: Error "TP must be above entry price for BUY"
+   
+   **Test Case C - SL/TP too tight:**
+   - Set SL: 49900, TP: 50100 (within 0.2% - too tight)
+   - Expected: Error or warning about minimum distance
+   
+   **Test Case D - Negative values:**
+   - Set SL: -100 (negative - INVALID)
+   - Expected: Error "Invalid price"
+
+4. **Verification:**
+   - [ ] Error message appears for each invalid case
+   - [ ] Position does NOT open with invalid values
+   - [ ] Error is clear and helpful
+
+**API Test:**
+```bash
+# Try to open position with invalid SL
+curl -s -X POST http://localhost:8001/api/trade/open \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"BTC","direction":"buy","size":0.01,"entry_price":50000,"stop_loss":51000,"take_profit":52000}'
+# Expected: error response
+```
+
+#### 4.7.2 Valid SL/TP Position Opening
+**Test: Opening position with valid SL/TP works**
+
+**Test Steps:**
+1. Open position with valid SL/TP:
+   - Entry: current price (e.g., 50000)
+   - SL: 49000 (below entry, for BUY)
+   - TP: 52000 (above entry, for BUY)
+2. Click CONFIRM/OPEN
+3. **Verification:**
+   - [ ] Position opens successfully
+   - [ ] Position appears in Open Positions list
+   - [ ] SL = 49000 displayed correctly
+   - [ ] TP = 52000 displayed correctly
+   - [ ] Balance decreased by margin
+
+**API Verification:**
+```bash
+curl -s http://localhost:8001/api/trades/open | jq '.positions[] | {symbol, entry_price, stop_loss, take_profit, direction}'
+```
+
+#### 4.7.3 Edit SL/TP on Open Position
+**Test: Editing SL/TP on open position works and saves correctly**
+
+**Test Steps:**
+1. Find open position in list
+2. Click on position to expand/edit
+3. Modify SL value:
+   - Current SL: 49000
+   - Click "+" or set to 48500
+4. Save changes
+5. **Verification:**
+   - [ ] SL updated to new value in UI
+   - [ ] API returns new SL: `curl -s http://localhost:8001/api/trades/open | jq '.positions[0].stop_loss'`
+   - [ ] Position still open
+
+6. Modify TP value:
+   - Current TP: 52000
+   - Click "+" or set to 53000
+7. Save changes
+8. **Verification:**
+   - [ ] TP updated to new value in UI
+   - [ ] API returns new TP
+   - [ ] Position still open
+
+**API Verification:**
+```bash
+# Before edit
+curl -s http://localhost:8001/api/trades/open | jq '.positions[0] | {stop_loss, take_profit}'
+
+# After edit - values should be different
+curl -s http://localhost:8001/api/trades/open | jq '.positions[0] | {stop_loss, take_profit}'
+```
+
+#### 4.7.4 Position Auto-Close After 5.5 Minutes
+**Test: Position closes after timeout (5.5 minutes)**
+
+**Test Steps:**
+1. Open a new position with small size (0.01)
+2. Note: position opened at time T
+3. Wait 5 minutes and 30 seconds (5.5 min)
+4. **Verification:**
+   - [ ] Check API: `curl -s http://localhost:8001/api/trades/open`
+   - [ ] Position should be CLOSED (not in open positions)
+   - [ ] Position should appear in history: `curl -s http://localhost:8001/api/trades/history`
+   - [ ] Balance should be updated with P&L
+   - [ ] P&L should be calculated correctly (entry vs exit price)
+
+**Manual Close Test:**
+If auto-close is not implemented, manually close:
+1. Click CLOSE button on position
+2. **Verification:**
+   - [ ] Position removed from Open Positions
+   - [ ] Position appears in Trade History
+   - [ ] P&L credited to Balance
+   - [ ] `curl -s http://localhost:8001/api/account | jq '.account.balance_usd'` increased
+
+**API Verification:**
+```bash
+# Check position before close
+BEFORE=$(curl -s http://localhost:8001/api/account | jq -r '.account.balance_usd')
+
+# Close position manually
+curl -s -X POST http://localhost:8001/api/trade/close \
+  -H "Content-Type: application/json" \
+  -d '{"position_id":"POSITION_ID"}'
+
+# Check balance after
+AFTER=$(curl -s http://localhost:8001/api/account | jq -r '.account.balance_usd')
+
+echo "Balance before: $BEFORE, after: $AFTER"
+# Should be different (P&L added/subtracted)
+```
+
+#### 4.7.5 Position Close Verification
+**Test: Verify position actually closed correctly**
+
+**Test Steps:**
+1. After position closes (manually or by TP/SL):
+2. Check Open Positions: `curl -s http://localhost:8001/api/trades/open`
+   - [ ] Position NOT in list
+3. Check Trade History: `curl -s http://localhost:8001/api/trades/history`
+   - [ ] Position IS in history
+   - [ ] entry_price matches
+   - [ ] exit_price is populated
+   - [ ] pnl_usd is calculated
+   - [ ] closed_at timestamp exists
+4. Check Balance:
+   - [ ] Balance reflects the trade result
+   - [ ] If profit: balance increased
+   - [ ] If loss: balance decreased
+
+---
+
 ### 5. TRADES TAB (History)
 
 #### 5.1 Trade History
