@@ -51,6 +51,41 @@ curl -s "http://localhost:8001/api/chart/XAU?resolution=60&count=10"
 - [ ] **Chart updates** - Changing resolution loads new data
 - [ ] **No "Network error"** - Charts should load without errors
 
+#### 1.4 Real-Time P&L & Equity (CRITICAL)
+**Test Total P&L updates in real-time:**
+
+1. Open a position (if none open)
+2. Note initial Total P&L from Dashboard
+3. Wait 30-60 seconds for price to change
+4. Check API: `curl -s http://localhost:8001/api/trades/open`
+5. Compare:
+   - **Total P&L on Dashboard** should match **sum of unrealized_pnl_usd from open positions**
+   - NOT just closed trades P&L
+6. **Expected:** Total P&L changes as open position P&L changes
+
+**Test Equity updates in real-time:**
+
+1. With open position, note Equity from Dashboard
+2. Check API: `curl -s http://localhost:8001/api/account`
+3. Formula: `Equity = Balance + Unrealized_PnL`
+4. **Expected:** Equity = balance_usd + sum(unrealized_pnl_usd from all open positions)
+5. **NOT:** Equity calculated from closed trades only
+
+**API Verification Commands:**
+```bash
+# Get account (should show real-time equity)
+curl -s http://localhost:8001/api/account | jq '{balance_usd, equity_usd, unrealized_pnl_usd}'
+
+# Get open positions (sum their unrealized_pnl_usd)
+curl -s http://localhost:8001/api/trades/open | jq '[.positions[].unrealized_pnl_usd] | add'
+
+# Verify: equity_usd should = balance_usd + sum(unrealized_pnl)
+```
+
+**Known Issue (FIXED 2026-03-08):**
+- Previously: Equity was calculated from closed trades only
+- Fixed: Now uses real-time unrealized P&L from open positions
+
 ---
 
 ### 2. CHARTS TAB
