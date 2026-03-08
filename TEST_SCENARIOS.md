@@ -511,6 +511,18 @@ curl -s http://localhost:8001/api/trades/open | jq '.positions[] | {symbol, entr
 - **Actual:** Lines remain visible even after deselecting
 - **Status:** NEEDS FIX
 
+### BUG: Strategy Change Returns 422 Error
+- **Issue:** Changing strategy to "XAU Scalp Trend 5m" returns 422 Unprocessable Entity
+- **Expected:** Strategy changes, signals recalculate
+- **Actual:** HTTP 422 error in console
+- **Status:** NEEDS FIX
+
+### BUG: Close Position Still Returns 405
+- **Issue:** Closing position via UI returns 405 Method Not Allowed
+- **Expected:** Position closes successfully
+- **Actual:** HTTP 405 error
+- **Status:** NEEDS FIX
+
 ### BUG: Lines Show on Wrong Charts
 - **Issue:** TP/SL lines for one symbol show on charts of OTHER symbols
 - **Example:** Select BTC position → XAU chart shows BTC's TP/SL lines
