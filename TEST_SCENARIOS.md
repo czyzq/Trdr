@@ -262,15 +262,16 @@ Run these first to verify basic functionality:
 | Date | Time | Tester | Result | Issues |
 |------|------|--------|--------|--------|
 | 2026-03-08 | 01:15 | Pinchr | PENDING | - |
+| 2026-03-08 | 02:38 | Subagent | 3/5 PASS | BUG 1:PASS, BUG 2:PASS, BUG 3:FAIL, BUG 4:FAIL, BUG 5:FAIL |
 
 ---
 
 ## Known Issues (2026-03-08)
 
-### ❌ PnL Not Updating
+### ✅ PnL Not Updating
 - **Issue:** P&L shows 0.00 for open positions, doesn't change
 - **Expected:** P&L should update in real-time based on current price vs entry
-- **Status:** BUG - needs investigation
+- **Status:** ✅ FIXED - Test 2026-03-08 02:38 potwierdził aktualizację P&L
 
 ### ❌ Position Lines on Chart Wrong
 - **Issue:** SL/TP lines are shifted up, not matching reality
@@ -289,7 +290,7 @@ Run these first to verify basic functionality:
 ### ❌ Positions Don't Match Chart
 - **Issue:** Open positions don't match price on chart
 - **Expected:** Position entry price should align with candle on chart
-- **Status:** BUG - data mismatch
+- **Status:** BUG - data mismatch (chart shows stale/cached data)
 
 ### ✅ What Was Working Before Refactor
 - Chart rendering with candles
@@ -343,25 +344,30 @@ Run these first to verify basic functionality:
 - **Expected:** State should persist in MongoDB
 - **Root cause:** Broker state not loaded on init OR state saved to memory only
 - **Fix needed:** Load broker state from MongoDB on startup
+- **Test Result:** ✅ PASS - Stan zachowany po odświeżeniu (Balance $3056.59, Open 1, P&L -8.15)
 
 ### 2. P&L Always Shows 0.00
 - **Issue:** unrealized_pnl_usd is always 0 for open positions
 - **Root cause:** get_open_positions() can't create new event loop in async context
 - **Fix needed:** Use broker's _async_update_prices() properly OR cache prices
+- **Test Result:** ✅ PASS - P&L aktualizuje się poprawnie (zmieniło się z -8.15 na -5.21 po 35s)
 
 ### 3. Chart Position Lines Wrong Position
 - **Issue:** SL/TP lines shifted up, don't match actual prices
 - **Root cause:** Entry price not matching chart candles
 - **Fix needed:** Verify position entry price matches current price at open time
+- **Test Result:** ❌ FAIL - Brak widocznych linii SL/TP na wykresie
 
 ### 4. Trade Entry/Exit Markers Missing
 - **Issue:** No ▲/▼ triangles for entry, no ■ squares for exit
 - **Expected:** Triangles show buy/sell entry, squares show exit
 - **Root cause:** Frontend not rendering chart overlays OR data not passed
+- **Test Result:** ❌ FAIL - Tekst "Trades: ▲ ▼ ■" istnieje, ale trójkąty/kwadraty nie są widoczne na wykresie
 
 ### 5. Positions Don't Match Chart
 - **Issue:** Open positions don't align with chart candles
 - **Root cause:** Price data mismatch between entry_price and live price
+- **Test Result:** ❌ FAIL - Pozycja BTC entry: 67262.91, ale wykres pokazuje 65314.76 (Dashboard) lub 70527.93 (Charts - cached)
 
 ---
 

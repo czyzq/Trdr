@@ -150,6 +150,35 @@ class AsyncSimulatedDataProvider:
                 candles = cached["candles"]
                 source = "cache"
 
+        # Add live candle with current price if we have data
+        if candles and len(candles) > 0:
+            try:
+                quote = await self.get_quote(symbol)
+                if quote and quote.get("price"):
+                    current_price = quote["price"]
+                    now = datetime.utcnow()
+                    # Create timestamp for current period
+                    resolution_minutes = int(resolution) if resolution != "D" else 1440
+                    minute_quant = (now.minute // resolution_minutes) * resolution_minutes
+                    period_start = now.replace(minute=minute_quant, second=0, microsecond=0)
+                    last_ts = candles[-1].get("timestamp", "")
+                    if last_ts:
+                        last_dt = datetime.strptime(last_ts.replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
+                        if period_start > last_dt:
+                            # Add live candle
+                            live_candle = {
+                                "timestamp": period_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "open": current_price,
+                                "high": current_price,
+                                "low": current_price,
+                                "close": current_price,
+                                "volume": 0
+                            }
+                            candles.append(live_candle)
+                            source = source + "_live" if source else "live"
+            except Exception as e:
+                print(f"[get_candles] Failed to add live candle: {e}")
+
         # Save to DB
         if candles and source not in ("db_history", "aggregated", "cache"):
             await asyncio.to_thread(db.store_candles, symbol, resolution, candles, source)

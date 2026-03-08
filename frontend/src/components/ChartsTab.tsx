@@ -55,15 +55,31 @@ const resolutions = [
   { value: "D", label: "1D" },
 ];
 
+interface Position {
+  id: string;
+  symbol: string;
+  direction: "buy" | "sell";
+  entry_price: number;
+  current_price: number;
+  size: number;
+  leverage: number;
+  take_profit: number;
+  stop_loss: number;
+  opened_at: string;
+}
+
 export const ChartsTab: React.FC = () => {
   const [charts, setCharts] = useState<ChartResponse[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [openPositions, setOpenPositions] = useState<Position[]>([]);
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedResolution, setSelectedResolution] = useState(() => {
     return localStorage.getItem("cfd_chartsResolution") || "60";
   });
   const [indicatorSettingsOpen, setIndicatorSettingsOpen] = useState<string | null>(null);
   const [indicatorSettings, setIndicatorSettings] = useState<Record<string, { indicators: string[], strategy: string, available_indicators: string[] }>>({});
+  const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
 
   // Fetch indicator settings when modal opens
   useEffect(() => {
@@ -141,6 +157,7 @@ export const ChartsTab: React.FC = () => {
           openData,
         );
         if (openData.positions) {
+          setOpenPositions(openData.positions);
           allTrades.push(
             ...openData.positions.map((p: any) => ({
               ...p,
@@ -254,12 +271,20 @@ export const ChartsTab: React.FC = () => {
                     className="w-1.5 h-1.5 rounded-full"
                     style={{ backgroundColor: instrument.color }}
                   />
-                  <span
-                    className="text-[11px] font-bold"
-                    style={{ color: "var(--text-primary)" }}
+                  <button
+                    className="text-[11px] font-bold cursor-pointer hover:underline"
+                    style={{ color: selectedSymbol === instrument.symbol ? "var(--accent)" : "var(--text-primary)" }}
+                    onClick={() => setSelectedSymbol(selectedSymbol === instrument.symbol ? null : instrument.symbol)}
+                    title="Click to show SL/TP lines"
                   >
                     {instrument.symbol}
-                  </span>
+                  </button>
+                  {/* Show indicator if position is selected */}
+                  {selectedSymbol === instrument.symbol && openPositions.some(p => p.symbol === instrument.symbol) && (
+                    <span className="text-[9px] px-1 py-0.5 rounded" style={{ backgroundColor: "var(--accent)", color: "white" }}>
+                      SL/TP
+                    </span>
+                  )}
                   <span className="text-[10px]" style={{ color: "#4a5568" }}>
                     {instrument.name}
                   </span>
@@ -351,6 +376,7 @@ export const ChartsTab: React.FC = () => {
                     showVolume={true}
                     showRSI={true}
                     trades={trades}
+                    selectedPosition={openPositions.find(p => p.symbol === instrument.symbol) || null}
                   />
                 ) : (
                   <div

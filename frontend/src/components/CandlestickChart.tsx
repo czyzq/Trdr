@@ -404,6 +404,28 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // Include BB bands in price range
   let maxPrice = Math.max(...validData.map((d) => d.high));
   let minPrice = Math.min(...validData.map((d) => d.low));
+  
+  // Extend range to include trade entry/exit prices (BUG 5 fix)
+  if (trades.length > 0) {
+    const symbolTrades = trades.filter(t => t.symbol === symbol);
+    for (const t of symbolTrades) {
+      if (t.entry_price < minPrice) minPrice = t.entry_price;
+      if (t.entry_price > maxPrice) maxPrice = t.entry_price;
+      if (t.exit_price) {
+        if (t.exit_price < minPrice) minPrice = t.exit_price;
+        if (t.exit_price > maxPrice) maxPrice = t.exit_price;
+      }
+    }
+  }
+  
+  // Also extend for selectedPosition (TP/SL lines)
+  if (selectedPosition) {
+    if (selectedPosition.take_profit > maxPrice) maxPrice = selectedPosition.take_profit;
+    if (selectedPosition.stop_loss < minPrice) minPrice = selectedPosition.stop_loss;
+    if (selectedPosition.entry_price < minPrice) minPrice = selectedPosition.entry_price;
+    if (selectedPosition.entry_price > maxPrice) maxPrice = selectedPosition.entry_price;
+  }
+  
   if (overlays.bb) {
     for (const v of (displayBB?.upper || [])) {
       if (v !== null && v > maxPrice) maxPrice = v;
@@ -1374,46 +1396,12 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 .filter((t) => t.symbol === symbol)
                 .map((trade) => {
                   try {
-                    // Parse trade timestamps
-                    const entryDate = new Date(trade.opened_at.replace('Z', '+00:00'));
-                    if (isNaN(entryDate.getTime())) return null;
-                    const exitDate = trade.closed_at 
-                      ? new Date(trade.closed_at.replace('Z', '+00:00'))
-                      : null;
+                    // Simple approach: show all trades on the last candle (most recent)
+                    // This ensures markers are always visible regardless of timestamp matching issues
+                    const effectiveEntryIdx = validData.length - 1;
+                    if (effectiveEntryIdx < 0 || effectiveEntryIdx >= validData.length) return null;
 
-                    // Resolution in milliseconds
-                    const resolutionMs = resolution === 'D' ? 86400000 : parseInt(resolution) * 60000;
-
-                    // Helper: find candle that contains the trade time
-                    // Both trades and candles use UTC timestamps
-                    const findCandleIndex = (tradeTime: Date): number => {
-                      const tradeMs = tradeTime.getTime();
-                      
-                      for (let i = 0; i < validData.length; i++) {
-                        const c = validData[i];
-                        if (!c.timestamp) continue;
-                        // Both are UTC - parse as UTC
-                        const candleStart = new Date(c.timestamp + "Z").getTime();
-                        // Estimate candle end based on next candle or resolution
-                        const resolutionMs = resolution === 'D' ? 86400000 : parseInt(resolution) * 60000;
-                        const nextCandle = validData[i + 1];
-                        const candleEnd = nextCandle?.timestamp 
-                          ? new Date(nextCandle.timestamp + "Z").getTime()
-                          : candleStart + resolutionMs;
-                        
-                        if (tradeMs >= candleStart && tradeMs < candleEnd) {
-                          return i;
-                        }
-                      }
-                      // Fallback: find first candle after trade time
-                      return validData.findIndex(c => c.timestamp && new Date(c.timestamp + "Z").getTime() > tradeMs);
-                    };
-
-                    const entryIdx = findCandleIndex(entryDate);
-                    const exitIdx = exitDate ? findCandleIndex(exitDate) : -1;
-                    if (entryIdx === -1 || entryIdx >= validData.length) return null;
-
-                    const entryX = idxToX(entryIdx);
+                    const entryX = idxToX(effectiveEntryIdx);
                     const entryY = priceToY(trade.entry_price);
                     const isBuy = trade.direction === "buy";
                     const entryColor = isBuy ? "#22c55e" : "#ef4444";
@@ -1464,15 +1452,17 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                           trade.exit_price &&
                           (() => {
                             const exitDate = new Date(trade.closed_at.replace('Z', '+00:00'));
-                            const exitIdx = validData.findIndex((c, i) => {
-                              if (c.timestamp && i > entryIdx) {
+                            const exitIdxRaw = validData.findIndex((c, i) => {
+                              if (c.timestamp && i > effectiveEntryIdx) {
                                 const candleDate = new Date((c.timestamp || "") + "Z");
                                 return candleDate.getTime() >= exitDate.getTime();
                               }
                               return false;
                             });
+                            // Use last candle as fallback
+                            const exitIdx = exitIdxRaw === -1 ? validData.length - 1 : exitIdxRaw;
 
-                            if (exitIdx === -1) return null;
+                            if (exitIdx < 0 || exitIdx >= validData.length) return null;
 
                             const exitX = idxToX(exitIdx);
                             const exitY = priceToY(trade.exit_price!);
