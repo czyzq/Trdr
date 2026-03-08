@@ -197,7 +197,40 @@ export const ChartsTab: React.FC = () => {
       fetchChartData();
       fetchTrades();
     }, 30000);
-    return () => clearInterval(interval);
+
+    // Listen for TP/SL line drag events from chart
+    const handleLineAdjust = async (e: CustomEvent) => {
+      const { positionId, type, value } = e.detail;
+      console.log("[ChartsTab] Line adjust:", positionId, type, value);
+      
+      // Update local state immediately for smooth UI
+      setOpenPositions(prev => prev.map(p => 
+        p.id === positionId 
+          ? { ...p, [type === 'tp' ? 'take_profit' : 'stop_loss']: value }
+          : p
+      ));
+
+      // Also update API in background
+      try {
+        const params = new URLSearchParams({
+          [type === 'tp' ? 'take_profit' : 'stop_loss']: value.toString()
+        });
+        await fetch(apiUrl(`trade/update/${positionId}?${params.toString()}`), {
+          method: "POST",
+        });
+        // Refresh positions after update
+        fetchTrades();
+      } catch (error) {
+        console.error("Failed to update position:", error);
+      }
+    };
+
+    window.addEventListener("adjustPositionLine", handleLineAdjust as EventListener);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("adjustPositionLine", handleLineAdjust as EventListener);
+    };
   }, [selectedResolution]);
 
   if (loading && charts.length === 0) {

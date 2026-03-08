@@ -523,6 +523,59 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     setIsDragging(false);
   };
 
+  // TP/SL line dragging
+  const [draggingLine, setDraggingLine] = useState<"tp" | "sl" | null>(null);
+  const [dragLineStartY, setDragLineStartY] = useState(0);
+  const [dragLineStartValue, setDragLineStartValue] = useState(0);
+
+  const handleLineDragStart = (line: "tp" | "sl", e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingLine(line);
+    setDragLineStartY(e.clientY);
+    const currentValue = line === "tp" 
+      ? selectedPosition?.take_profit 
+      : selectedPosition?.stop_loss;
+    setDragLineStartValue(currentValue || 0);
+  };
+
+  const handleLineDragMove = useCallback((e: MouseEvent) => {
+    if (!draggingLine || !selectedPosition) return;
+    
+    const deltaY = dragLineStartY - e.clientY; // Invert: drag up = increase
+    const sensitivity = priceRange / priceChartH; // pixels to price
+    const deltaPrice = deltaY * sensitivity;
+    
+    const newValue = dragLineStartValue + deltaPrice;
+    // Round to reasonable precision
+    const roundedValue = Math.round(newValue * 100) / 100;
+    
+    // Dispatch event for parent to handle
+    window.dispatchEvent(new CustomEvent("adjustPositionLine", {
+      detail: {
+        positionId: selectedPosition.id,
+        type: draggingLine,
+        value: roundedValue
+      }
+    }));
+  }, [draggingLine, selectedPosition, dragLineStartY, dragLineStartValue, priceRange, priceChartH]);
+
+  const handleLineDragEnd = useCallback(() => {
+    setDraggingLine(null);
+  }, []);
+
+  // Add/remove global event listeners for line dragging
+  useEffect(() => {
+    if (draggingLine) {
+      window.addEventListener("mousemove", handleLineDragMove);
+      window.addEventListener("mouseup", handleLineDragEnd);
+      return () => {
+        window.removeEventListener("mousemove", handleLineDragMove);
+        window.removeEventListener("mouseup", handleLineDragEnd);
+      };
+    }
+  }, [draggingLine, handleLineDragMove, handleLineDragEnd]);
+
   // Price grid levels
   const priceLevels = [];
   const levelCount = 6;
@@ -1524,16 +1577,57 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           <g>
             <text x={chartWidth-25} y={20} fill="#666" fontSize={14} style={{cursor:"pointer"}} onClick={() => window.dispatchEvent(new CustomEvent("clearPosition"))}>✕</text>
           <g>
-                        {/* TP Line - clickable */}
-            <line x1="0" x2={chartWidth} y1={priceToY(selectedPosition.take_profit)} y2={priceToY(selectedPosition.take_profit)} stroke="#22c55e" strokeWidth="1" strokeDasharray="5,3" />
-            <text x="5" y={priceToY(selectedPosition.take_profit) - 5} fill="#22c55e" fontSize="10" fontWeight="bold" style={{pointerEvents:"none"}}>TP: {selectedPosition.take_profit.toFixed(0)} (+)</text>
+            {/* TP Line - draggable */}
+            <line 
+              x1="0" x2={chartWidth} 
+              y1={priceToY(selectedPosition.take_profit)} 
+              y2={priceToY(selectedPosition.take_profit)} 
+              stroke="#22c55e" 
+              strokeWidth={draggingLine === "tp" ? "2" : "1.5"} 
+              strokeDasharray="5,3" 
+              style={{ cursor: "ns-resize" }}
+              onMouseDown={(e) => handleLineDragStart("tp", e)}
+            />
+            {/* TP hit area - larger for easier grabbing */}
+            <line 
+              x1="0" x2={chartWidth} 
+              y1={priceToY(selectedPosition.take_profit) - 8} 
+              y2={priceToY(selectedPosition.take_profit) + 8} 
+              stroke="transparent" 
+              strokeWidth="16" 
+              style={{ cursor: "ns-resize" }}
+              onMouseDown={(e) => handleLineDragStart("tp", e)}
+            />
+            <text x="5" y={priceToY(selectedPosition.take_profit) - 8} fill="#22c55e" fontSize="11" fontWeight="bold">TP: {selectedPosition.take_profit.toFixed(2)}</text>
+            <text x={usableWidth - 5} y={priceToY(selectedPosition.take_profit) + 3} fill="#22c55e" fontSize="9" textAnchor="end" opacity="0.7">↕ drag</text>
             
-            {/* SL Line - clickable */}
-            <line x1="0" x2={chartWidth} y1={priceToY(selectedPosition.stop_loss)} y2={priceToY(selectedPosition.stop_loss)} stroke="#ef4444" strokeWidth="1" strokeDasharray="5,3" />
-            <text x="5" y={priceToY(selectedPosition.stop_loss) - 5} fill="#ef4444" fontSize="10" fontWeight="bold" style={{pointerEvents:"none"}}>SL: {selectedPosition.stop_loss.toFixed(0)} (-)</text>
+            {/* SL Line - draggable */}
+            <line 
+              x1="0" x2={chartWidth} 
+              y1={priceToY(selectedPosition.stop_loss)} 
+              y2={priceToY(selectedPosition.stop_loss)} 
+              stroke="#ef4444" 
+              strokeWidth={draggingLine === "sl" ? "2" : "1.5"} 
+              strokeDasharray="5,3" 
+              style={{ cursor: "ns-resize" }}
+              onMouseDown={(e) => handleLineDragStart("sl", e)}
+            />
+            {/* SL hit area - larger for easier grabbing */}
+            <line 
+              x1="0" x2={chartWidth} 
+              y1={priceToY(selectedPosition.stop_loss) - 8} 
+              y2={priceToY(selectedPosition.stop_loss) + 8} 
+              stroke="transparent" 
+              strokeWidth="16" 
+              style={{ cursor: "ns-resize" }}
+              onMouseDown={(e) => handleLineDragStart("sl", e)}
+            />
+            <text x="5" y={priceToY(selectedPosition.stop_loss) - 8} fill="#ef4444" fontSize="11" fontWeight="bold">SL: {selectedPosition.stop_loss.toFixed(2)}</text>
+            <text x={usableWidth - 5} y={priceToY(selectedPosition.stop_loss) + 3} fill="#ef4444" fontSize="9" textAnchor="end" opacity="0.7">↕ drag</text>
             
             {/* Entry Line */}
-            <line x1="0" x2={chartWidth} y1={priceToY(selectedPosition.entry_price)} y2={priceToY(selectedPosition.entry_price)} stroke="#fbbf24" strokeWidth="1" strokeDasharray="3,2" opacity="0.6" />
+            <line x1="0" x2={chartWidth} y1={priceToY(selectedPosition.entry_price)} y2={priceToY(selectedPosition.entry_price)} stroke="#fbbf24" strokeWidth="1" strokeDasharray="3,2" opacity="0.8" />
+            <text x="5" y={priceToY(selectedPosition.entry_price) - 5} fill="#fbbf24" fontSize="10" fontWeight="bold" opacity="0.9">ENTRY: {selectedPosition.entry_price.toFixed(2)}</text>
           </g>
           </g>
         )}

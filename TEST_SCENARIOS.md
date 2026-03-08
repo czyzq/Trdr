@@ -309,6 +309,103 @@ curl -s http://localhost:8001/api/trades/open | jq '.positions[0]'
 - [ ] **Insufficient funds** - Error when balance too low
 - [ ] **Position opens** - Success message/position appears
 
+#### 4.4 Strategy Change Impact on Signals (CRITICAL)
+**Test: Changing strategy should change signal values**
+
+**Prerequisites:** Frontend loaded, signals visible
+
+**Test Steps:**
+1. On Dashboard, locate a symbol (e.g., XAU or BTC)
+2. Note current signal values:
+   - Signal direction (BUY/SELL/NEUTRAL)
+   - Score value (e.g., "0.15")
+   - TP value
+   - SL value
+3. Find the strategy dropdown/selector for this symbol
+4. **Change strategy** to a different one (e.g., from "Adaptive Regime" to "MMS Mean-Reversion")
+5. Wait for signal to refresh (may take up to 30 seconds)
+6. Note NEW signal values
+
+**Verification:**
+- [ ] Signal direction may change (or stay same)
+- [ ] **Score value should be DIFFERENT** from before
+- [ ] **TP value should be DIFFERENT** from before
+- [ ] **SL value should be DIFFERENT** from before
+
+**API Verification:**
+```bash
+# Get signals before strategy change
+curl -s http://localhost:8001/api/signals | jq '.signals[] | select(.symbol=="XAU")'
+
+# After changing strategy, get signals again
+curl -s http://localhost:8001/api/signals | jq '.signals[] | select(.symbol=="XAU")'
+```
+
+**Compare:**
+- score: should differ between strategies
+- take_profit: should differ
+- stop_loss: should differ
+- direction: may differ
+
+#### 4.5 Dynamic TP/SL Calculation Verification
+**Test: Verify TP/SL are calculated dynamically based on strategy**
+
+**Test Steps:**
+1. Select a symbol with a known strategy
+2. Note the TP and SL values
+3. Check if strategy has dynamic TP/SL:
+   - Look at strategy config (if accessible)
+   - Or compare TP/SL ratio to ATR or other indicators
+4. **For different strategies, verify:**
+   - **Adaptive Regime:** TP = entry × (1 + ATR_factor), SL = entry × (1 - ATR_factor)
+   - **MMS Mean-Reversion:** TP/SL based on Bollinger Bands or envelope
+   - **Other strategies:** Check if TP/SL scale with volatility
+
+**Formulas to verify:**
+```bash
+# Get current price and calculate expected TP/SL
+PRICE=$(curl -s http://localhost:8001/api/quote/XAU | jq -r '.price')
+ATR=$(curl -s "http://localhost:8001/api/indicators/XAU?indicator=atr" | jq -r '.atr')
+
+# Expected TP (e.g., ATR × 3 for TP)
+EXPECTED_TP=$(echo "$PRICE + $ATR * 3" | bc)
+EXPECTED_SL=$(echo "$PRICE - $ATR * 2" | bc)
+
+echo "Price: $PRICE, ATR: $ATR"
+echo "Expected TP: ~$EXPECTED_TP"
+echo "Expected SL: ~$EXPECTED_SL"
+```
+
+**Verification:**
+- [ ] TP is above entry price (for BUY signals)
+- [ ] SL is below entry price (for BUY signals)
+- [ ] TP/SL distance scales with volatility (higher ATR = wider TP/SL)
+- [ ] TP/SL values are reasonable (not too tight, not absurdly wide)
+
+#### 4.6 Strategy-Specific Signal Differences
+**Test: Different strategies produce different signals for same market conditions**
+
+**Test Steps:**
+1. For each symbol (XAU, XAG, US100, BTC):
+2. Record signal with Strategy A
+3. Change to Strategy B
+4. Record signal with Strategy B
+5. Compare
+
+**Expected Results:**
+
+| Symbol | Strategy | Direction | Score | TP | SL |
+|--------|----------|-----------|-------|-----|-----|
+| XAU | Adaptive Regime | BUY/SELL | X.XX | XXXX | XXXX |
+| XAU | MMS Mean-Reversion | BUY/SELL | X.XX | XXXX | XXXX |
+| XAU | BTC v2 | BUY/SELL | X.XX | XXXX | XXXX |
+
+**Verification:**
+- [ ] At least 2 out of 4 strategies produce different directions for same symbol
+- [ ] Score values differ by at least 0.1 between strategies
+- [ ] TP values differ by at least 1% between strategies
+- [ ] SL values differ by at least 1% between strategies
+
 ---
 
 ### 5. TRADES TAB (History)
