@@ -72,6 +72,26 @@ curl -s "http://localhost:8001/api/chart/XAU?resolution=60&count=10"
 - [ ] **Symbol tabs** - Click to switch between XAU/XAG/US100/BTC
 - [ ] **Data loads** - Changing symbol loads new candles
 
+#### 2.4 Candle Count Verification
+**Test candle counts by timeframe:**
+
+| Timeframe | Expected Candles | API Query |
+|-----------|------------------|-----------|
+| 15m | 24 | `curl -s "http://localhost:8001/api/chart/BTC?resolution=15&count=24"` |
+| 30m | 24 | `curl -s "http://localhost:8001/api/chart/BTC?resolution=30&count=24"` |
+| 60m | 24 | `curl -s "http://localhost:8001/api/chart/BTC?resolution=60&count=24"` |
+| 1d (D1) | 14 | `curl -s "http://localhost:8001/api/chart/BTC?resolution=D1&count=14"` |
+
+**Verification Steps:**
+1. For each timeframe, fetch chart data from API
+2. Count actual candles returned
+3. Verify count matches expected value
+4. Compare with Dashboard mini-chart (should be fewer in Charts tab)
+
+**Expected Difference:**
+- **Dashboard mini-charts:** More candles (full width display)
+- **Charts tab:** Fewer candles (24 for 15m/30m/1h, 14 for 1d)
+
 ---
 
 ### 3. TRADING - OPEN POSITIONS
