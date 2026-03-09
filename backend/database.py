@@ -907,3 +907,16 @@ async def async_set_setting(key: str, value: Any, updated_by: str = "system") ->
 
 async def async_list_settings() -> dict:
     return await asyncio.to_thread(list_settings)
+
+
+def ensure_news_indexes():
+    """Create TTL index for news (60 days)"""
+    db = get_db()
+    if db is None:
+        return
+    
+    # Create TTL index - documents will be automatically deleted after 60 days
+    try:
+        db.news.create_index("fetched_at", expireAfterSeconds=60*60*24*60, background=True)
+    except Exception as e:
+        log_event(f"News index creation: {e}", "warning")

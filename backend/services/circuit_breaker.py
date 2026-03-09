@@ -16,7 +16,9 @@ MAX_DRAWDOWN_PERCENT = 10.0
 def check_circuit_breaker() -> Tuple[bool, str]:
     """
     Check if trading should be paused due to risk limits.
-    Returns (should_pause, reason).
+    Returns (can_trade, reason).
+    - can_trade=True: trading is allowed
+    - can_trade=False: trading is blocked
     """
     global _circuit_breaker_triggered, _circuit_breaker_reason, _circuit_breaker_since
     
@@ -27,8 +29,8 @@ def check_circuit_breaker() -> Tuple[bool, str]:
         # Auto-reset after 1 hour
         if _circuit_breaker_since and datetime.now() - _circuit_breaker_since > timedelta(hours=1):
             reset_circuit_breaker()
-            return False, ""
-        return True, _circuit_breaker_reason
+            return True, ""  # FIXED: was False
+        return False, _circuit_breaker_reason  # FIXED: was True
     
     # Check consecutive losses
     try:
@@ -40,7 +42,7 @@ def check_circuit_breaker() -> Tuple[bool, str]:
             losses = sum(1 for t in recent_trades[:MAX_CONSECUTIVE_LOSSES] if t.get("pnl", 0) < 0)
             if losses >= MAX_CONSECUTIVE_LOSSES:
                 trigger_circuit_breaker("Too many consecutive losses")
-                return True, _circuit_breaker_reason
+                return False, _circuit_breaker_reason  # FIXED: trading blocked
     except Exception:
         pass
     
@@ -52,11 +54,11 @@ def check_circuit_breaker() -> Tuple[bool, str]:
             drawdown = ((peak - current) / peak) * 100
             if drawdown > MAX_DRAWDOWN_PERCENT:
                 trigger_circuit_breaker(f"Max drawdown exceeded: {drawdown:.1f}%")
-                return True, _circuit_breaker_reason
+                return False, _circuit_breaker_reason  # FIXED: trading blocked
     except Exception:
         pass
     
-    return False, ""
+    return True, ""  # FIXED: was False - trading allowed!
 
 
 def trigger_circuit_breaker(reason: str) -> None:

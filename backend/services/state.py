@@ -234,9 +234,30 @@ def get_symbol_strategy(symbol: str) -> str:
 
 
 def set_symbol_strategy(symbol: str, strategy_id: str) -> None:
-    """Set strategy for symbol"""
+    """Set strategy for symbol - saves to both memory and MongoDB"""
     global _strategy_selection
     _strategy_selection[symbol] = strategy_id
+    # Persist to MongoDB
+    import database as db
+    db.set_setting(f"STRATEGY_{symbol}", strategy_id, "system")
+    
+    # Trigger immediate signal recalculation for this symbol
+    try:
+        from services.signal_cache import invalidate_signal_cache
+        invalidate_signal_cache(symbol)
+    except Exception:
+        pass
+
+
+def load_strategy_selections_from_db() -> None:
+    """Load strategy selections from MongoDB on startup"""
+    global _strategy_selection
+    import database as db
+    instruments = ["XAU", "XAG", "US100", "BTC"]
+    for sym in instruments:
+        val = db.get_setting(f"STRATEGY_{sym}")
+        if val:
+            _strategy_selection[sym] = val
 
 
 def get_all_strategy_selections() -> Dict[str, str]:

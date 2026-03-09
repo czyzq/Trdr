@@ -78,8 +78,30 @@ export const ChartsTab: React.FC = () => {
     return localStorage.getItem("cfd_chartsResolution") || "60";
   });
   const [indicatorSettingsOpen, setIndicatorSettingsOpen] = useState<string | null>(null);
-  const [indicatorSettings, setIndicatorSettings] = useState<Record<string, { indicators: string[], strategy: string, available_indicators: string[] }>>({});
+  const [indicatorSettings, setIndicatorSettings] = useState<Record<string, { indicators: string[], strategy: string, available_indicators: string[] }>>(() => {
+    const saved = localStorage.getItem("cfd_indicatorSettings");
+    return saved ? JSON.parse(saved) : {};
+  });
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
+
+  // Load indicator settings from backend on mount
+  useEffect(() => {
+    const symbols = ["XAU", "XAG", "US100", "BTC"];
+    Promise.all(symbols.map(s => 
+      fetch(`/cfd/api/settings/indicators/${s}`).then(r => r.json()).catch(() => null)
+    )).then(results => {
+      const loaded: Record<string, any> = {};
+      results.forEach((data, i) => {
+        if (data && !data.error && (data.indicators?.length > 0 || data.strategy)) {
+          loaded[symbols[i]] = data;
+        }
+      });
+      if (Object.keys(loaded).length > 0) {
+        setIndicatorSettings(prev => ({ ...prev, ...loaded }));
+        localStorage.setItem("cfd_indicatorSettings", JSON.stringify({ ...indicatorSettings, ...loaded }));
+      }
+    });
+  }, []);
 
   // Fetch indicator settings when modal opens
   useEffect(() => {
@@ -109,13 +131,18 @@ export const ChartsTab: React.FC = () => {
     localStorage.setItem("cfd_chartsResolution", selectedResolution);
   }, [selectedResolution]);
 
+  // Persist indicator settings to localStorage
+  useEffect(() => {
+    localStorage.setItem("cfd_indicatorSettings", JSON.stringify(indicatorSettings));
+  }, [indicatorSettings]);
+
   const fetchChartData = async () => {
     try {
       setLoading(true);
       const chartData: ChartResponse[] = [];
       for (const instrument of instruments) {
         const response = await fetch(
-          `${apiUrl(`chart/${instrument.symbol}`)}?resolution=${selectedResolution}&count=20`,
+          `${apiUrl(`chart/${instrument.symbol}`)}?resolution=${selectedResolution}&count=24`,
         );
         if (response.ok) {
           const data = await response.json();
@@ -215,7 +242,7 @@ export const ChartsTab: React.FC = () => {
         const params = new URLSearchParams({
           [type === 'tp' ? 'take_profit' : 'stop_loss']: value.toString()
         });
-        await fetch(apiUrl(`trade/update/${positionId}?${params.toString()}`), {
+        await fetch(apiUrl(`trades/update/${positionId}?${params.toString()}`), {
           method: "POST",
         });
         // Refresh positions after update

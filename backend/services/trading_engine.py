@@ -153,14 +153,60 @@ async def auto_trade_loop():
                     except Exception:
                         atr = entry_price * 0.01
 
-                    if direction == "buy":
-                        take_profit = entry_price + (atr * 3)
-                        stop_loss = entry_price - (atr * 2)
-                    else:
-                        take_profit = entry_price - (atr * 3)
-                        stop_loss = entry_price + (atr * 2)
+                    # Get strategy config for TP/SL
+                    strategy_id = get_symbol_strategy(sym)
+                    strategy_json_id = strategy_id.replace("JSON:", "") if strategy_id else None
+                    strategy_config_for_tp = {}
+                    if strategy_json_id:
+                        from strategy.strategy_manager import get_strategy_manager
+                        manager = get_strategy_manager()
+                        if strategy_json_id in manager.strategies:
+                            strategy_config_for_tp = manager.strategies[strategy_json_id].config
+                    
+                    take_profit, stop_loss = get_adaptive_tp_sl(
+                        strategy_config=strategy_config_for_tp,
+                        candles=fresh_candles,
+                        entry_price=entry_price,
+                        direction=direction
+                    )
 
-                    size = calculate_position_size(sym, entry_price, stop_loss) * size_multiplier
+                    # Calculate dynamic position size based on signal score, confidence, open positions, volatility
+                    open_pos_count = len(broker.get_open_positions())
+                    
+                    # Get volatility from candles
+                    volatility = 0.0
+                    if fresh_candles and len(fresh_candles) >= 20:
+                        try:
+                            from strategy.technical import TechnicalIndicators
+                            ind = TechnicalIndicators.calculate_all(fresh_candles, period=14)
+                            atr = ind.get('atr_14', 0)
+                            volatility = (atr / entry_price) * 100 if entry_price > 0 else 0
+                        except:
+                            pass
+                    
+                    # Get strategy config for position sizing
+                    strategy_id = get_symbol_strategy(sym)
+                    strategy_json_id = strategy_id.replace("JSON:", "") if strategy_id else None
+                    strategy_config = {}
+                    if strategy_json_id:
+                        from strategy.strategy_manager import get_strategy_manager
+                        manager = get_strategy_manager()
+                        if strategy_json_id in manager.strategies:
+                            strategy_config = manager.strategies[strategy_json_id].config
+                    
+                    account = broker.get_account()
+                    balance = account.get('balance_usd', 3000)
+                    
+                    size = calculate_dynamic_position_size(
+                        strategy_config=strategy_config,
+                        account_balance=balance,
+                        entry_price=entry_price,
+                        stop_loss_price=stop_loss,
+                        signal_score=signal.score,
+                        signal_confidence=signal.confidence,
+                        open_positions_count=open_pos_count,
+                        volatility=volatility
+                    ) * size_multiplier
 
                     result = await broker.open_position(
                         symbol=sym,
@@ -214,13 +260,16 @@ async def auto_trade_loop():
             await asyncio.sleep(30)
 
 
-async def execute_trade(symbol: str, direction: str, volume: float) -> Dict:
+async def execute_trade(symbol: str, direction: str, volume: float, signal_score: float = 0.0, take_profit: float = None, stop_loss: float = None) -> Dict:
     """Execute a trade - wrapper around broker.open_position"""
     from main import broker
     result = await broker.open_position(
         symbol=symbol,
         direction=direction,
         size=volume,
+        signal_score=signal_score,
+        take_profit=take_profit,
+        stop_loss=stop_loss,
     )
     return result
 
@@ -551,3 +600,170 @@ async def generate_signals() -> List[Signal]:
     await async_sync_account_from_closed_trades()
 
     return signals
+
+# === Adaptive TP/SL Helper Functions ===
+
+def calculate_adaptive_tp_sl(strategy_config: dict, candles: list, entry_price: float, direction: str) -> tuple:
+    """
+    Calculate TP/SL using adaptive algorithm combining:
+    - Base percentage from strategy
+    - ATR-based levels
+    - Support/Resistance levels
+    """
+    from strategy.support_resistance import calculate_optimal_tp_sl as sr_calc
+    
+    exits_v2 = strategy_config.get('exits_v2', {})
+    
+    if not exits_v2 or exits_v2.get('tp_method') != 'adaptive':
+        # Fallback to simple percentage
+        base_tp = exits_v2.get('base_tp_percent', 2.5) if exits_v2 else 2.5
+        base_sl = exits_v2.get('base_sl_percent', 1.5) if exits_v2 else 1.5
+        
+        if direction == 'buy':
+            return (
+                entry_price * (1 + base_tp / 100),
+                entry_price * (1 - base_sl / 100)
+            )
+        else:
+            return (
+                entry_price * (1 - base_tp / 100),
+                entry_price * (1 + base_sl / 100)
+            )
+    
+    # Use adaptive algorithm
+    result = sr_calc(
+        candles=candles,
+        entry_price=entry_price,
+        direction=direction,
+        base_tp_percent=exits_v2.get('base_tp_percent', 2.5),
+        base_sl_percent=exits_v2.get('base_sl_percent', 1.5),
+        atr_multiplier=exits_v2.get('atr_multiplier', 2.0),
+        min_rr_ratio=exits_v2.get('min_rr_ratio', 1.5)
+    )
+    
+    return result['take_profit'], result['stop_loss']
+
+
+# === Adaptive TP/SL Helper ===
+def get_adaptive_tp_sl(strategy_config: dict, candles: list, entry_price: float, direction: str) -> tuple:
+    """
+    Calculate TP/SL using adaptive algorithm combining base %, ATR, and S/R levels
+    """
+    try:
+        from strategy.support_resistance import calculate_optimal_tp_sl
+        
+        exits_v2 = strategy_config.get('exits_v2', {}) if strategy_config else {}
+        
+        if not exits_v2 or exits_v2.get('tp_method') != 'adaptive':
+            # Fallback: simple ATR
+            atr = entry_price * 0.015
+            if direction == 'buy':
+                return (entry_price + atr*2, entry_price - atr*1.5)
+            else:
+                return (entry_price - atr*2, entry_price + atr*1.5)
+        
+        result = calculate_optimal_tp_sl(
+            candles=candles,
+            entry_price=entry_price,
+            direction=direction,
+            base_tp_percent=exits_v2.get('base_tp_percent', 2.5),
+            base_sl_percent=exits_v2.get('base_sl_percent', 1.5),
+            atr_multiplier=exits_v2.get('atr_multiplier', 2.0),
+            min_rr_ratio=exits_v2.get('min_rr_ratio', 1.5)
+        )
+        return result['take_profit'], result['stop_loss']
+    except Exception as e:
+        # Fallback
+        atr = entry_price * 0.015
+        if direction == 'buy':
+            return (entry_price + atr*2, entry_price - atr*1.5)
+        else:
+            return (entry_price - atr*2, entry_price + atr*1.5)
+
+
+def calculate_dynamic_position_size(
+    strategy_config: dict,
+    account_balance: float,
+    entry_price: float,
+    stop_loss_price: float,
+    signal_score: float,
+    signal_confidence: float,
+    open_positions_count: int,
+    volatility: float = 0.0
+) -> float:
+    """
+    Calculate position size dynamically based on multiple factors:
+    - Signal score (higher score = bigger position)
+    - Signal confidence (higher confidence = bigger position)
+    - Number of open positions (more positions = smaller size)
+    - Volatility (higher volatility = smaller size)
+    """
+    from services.signal_generator import calculate_position_size
+    
+    sizing_v2 = strategy_config.get('position_sizing_v2', {})
+    
+    if not sizing_v2 or sizing_v2.get('method') != 'adaptive':
+        # Fallback to simple calculation
+        return calculate_position_size("XAU", entry_price, stop_loss_price)
+    
+    # Get base risk
+    base_risk_percent = sizing_v2.get('base_risk_percent', 1.5)
+    max_leverage = sizing_v2.get('max_leverage', 10)
+    min_leverage = sizing_v2.get('min_leverage', 5)
+    modifiers = sizing_v2.get('modifiers', {})
+    
+    # Modifier 1: Signal Score (0-1 scale)
+    # Higher score = larger position
+    score_modifier = abs(signal_score)  # Use absolute value (both buy/sell)
+    
+    # Modifier 2: Confidence (0-1 scale)
+    confidence_modifier = signal_confidence
+    
+    # Modifier 3: Open positions
+    pos_modifiers = modifiers.get('by_open_positions', {})
+    if open_positions_count == 0:
+        pos_mod = pos_modifiers.get('0', 1.0)
+    elif open_positions_count == 1:
+        pos_mod = pos_modifiers.get('1', 0.8)
+    elif open_positions_count == 2:
+        pos_mod = pos_modifiers.get('2', 0.6)
+    else:
+        pos_mod = pos_modifiers.get('3+', 0.4)
+    
+    # Modifier 4: Volatility (ATR %)
+    # Higher volatility = smaller position
+    if volatility > 2.0:
+        vol_mod = modifiers.get('by_volatility', {}).get('high', 0.5)
+    elif volatility > 1.0:
+        vol_mod = modifiers.get('by_volatility', {}).get('medium', 0.75)
+    else:
+        vol_mod = modifiers.get('by_volatility', {}).get('low', 1.0)
+    
+    # Combine all modifiers
+    combined_modifier = score_modifier * confidence_modifier * pos_mod * vol_mod
+    
+    # Apply modifier to base risk
+    adjusted_risk = base_risk_percent * combined_modifier
+    
+    # Ensure minimum risk (0.5%)
+    adjusted_risk = max(adjusted_risk, 0.5)
+    
+    # Calculate position size with adjusted risk
+    risk_amount = account_balance * (adjusted_risk / 100)
+    risk_per_lot = abs(entry_price - stop_loss_price)
+    
+    if risk_per_lot > 0:
+        size = risk_amount / risk_per_lot
+    else:
+        size = risk_amount / entry_price
+    
+    # Apply leverage
+    leverage = max_leverage * combined_modifier
+    leverage = max(min_leverage, min(max_leverage, leverage))
+    
+    size = size * leverage
+    
+    # Round to reasonable precision
+    size = round(size, 4)
+    
+    return max(0.01, size)  # Minimum 0.01 lot

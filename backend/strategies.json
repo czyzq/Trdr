@@ -14,24 +14,24 @@
             "name": "RSI",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              0,
+              100
             ]
           },
           {
             "name": "MACD",
             "weight": 0.0,
             "normalized_range": [
-              -1,
-              1
+              -50,
+              50
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              -20,
+              20
             ]
           },
           {
@@ -68,6 +68,10 @@
             "value": 50
           },
           "short_condition": null
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
         }
       },
       "risk": {
@@ -118,6 +122,51 @@
           ],
           "default_tp_percent": 5.0
         }
+      },
+      "exits_v2": {
+        "tp_method": "adaptive",
+        "sl_method": "adaptive",
+        "base_tp_percent": 5.0,
+        "base_sl_percent": 2.0,
+        "atr_multiplier": 2.0,
+        "atr_period": 14,
+        "use_support_resistance": true,
+        "sr_lookback": 50,
+        "htf_confirmation": {
+          "enabled": false,
+          "timeframe": "1H",
+          "indicator": "RSI"
+        },
+        "weights": {
+          "base_percent": 0.4,
+          "atr": 0.3,
+          "support_resistance": 0.3
+        },
+        "min_rr_ratio": 1.5
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 2.0,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 20,
+        "min_leverage": 5
       }
     },
     {
@@ -134,24 +183,24 @@
             "name": "RSI",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              0,
+              100
             ]
           },
           {
             "name": "MACD",
             "weight": 0.0,
             "normalized_range": [
-              -1,
-              1
+              -50,
+              50
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              -20,
+              20
             ]
           },
           {
@@ -188,6 +237,10 @@
             "value": 50
           },
           "short_condition": null
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
         }
       },
       "risk": {
@@ -238,6 +291,51 @@
           ],
           "default_tp_percent": 5.0
         }
+      },
+      "exits_v2": {
+        "tp_method": "adaptive",
+        "sl_method": "adaptive",
+        "base_tp_percent": 5.0,
+        "base_sl_percent": 2.0,
+        "atr_multiplier": 2.0,
+        "atr_period": 14,
+        "use_support_resistance": true,
+        "sr_lookback": 50,
+        "htf_confirmation": {
+          "enabled": false,
+          "timeframe": "1H",
+          "indicator": "RSI"
+        },
+        "weights": {
+          "base_percent": 0.4,
+          "atr": 0.3,
+          "support_resistance": 0.3
+        },
+        "min_rr_ratio": 1.5
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 2.0,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 20,
+        "min_leverage": 5
       }
     },
     {
@@ -254,24 +352,24 @@
             "name": "RSI",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              0,
+              100
             ]
           },
           {
             "name": "MACD",
             "weight": 0.0,
             "normalized_range": [
-              -1,
-              1
+              -50,
+              50
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              -20,
+              20
             ]
           },
           {
@@ -308,6 +406,10 @@
             "value": 50
           },
           "short_condition": null
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
         }
       },
       "risk": {
@@ -358,6 +460,51 @@
           ],
           "default_tp_percent": 5.0
         }
+      },
+      "exits_v2": {
+        "tp_method": "adaptive",
+        "sl_method": "adaptive",
+        "base_tp_percent": 5.0,
+        "base_sl_percent": 2.0,
+        "atr_multiplier": 2.0,
+        "atr_period": 14,
+        "use_support_resistance": true,
+        "sr_lookback": 50,
+        "htf_confirmation": {
+          "enabled": false,
+          "timeframe": "1H",
+          "indicator": "RSI"
+        },
+        "weights": {
+          "base_percent": 0.4,
+          "atr": 0.3,
+          "support_resistance": 0.3
+        },
+        "min_rr_ratio": 1.5
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 2.0,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 20,
+        "min_leverage": 5
       }
     },
     {
@@ -380,16 +527,16 @@
             "name": "RSI",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              0,
+              100
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              -20,
+              20
             ]
           }
         ]
@@ -418,6 +565,10 @@
             "value": 50
           },
           "short_condition": null
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
         }
       },
       "risk": {
@@ -468,6 +619,51 @@
           ],
           "default_tp_percent": 5.0
         }
+      },
+      "exits_v2": {
+        "tp_method": "adaptive",
+        "sl_method": "adaptive",
+        "base_tp_percent": 5.0,
+        "base_sl_percent": 2.0,
+        "atr_multiplier": 2.0,
+        "atr_period": 14,
+        "use_support_resistance": true,
+        "sr_lookback": 50,
+        "htf_confirmation": {
+          "enabled": false,
+          "timeframe": "1H",
+          "indicator": "RSI"
+        },
+        "weights": {
+          "base_percent": 0.4,
+          "atr": 0.3,
+          "support_resistance": 0.3
+        },
+        "min_rr_ratio": 1.5
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 2.0,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 20,
+        "min_leverage": 5
       }
     },
     {
@@ -490,16 +686,16 @@
             "name": "RSI",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              0,
+              100
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              -20,
+              20
             ]
           }
         ]
@@ -528,6 +724,10 @@
             "value": 50
           },
           "short_condition": null
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
         }
       },
       "risk": {
@@ -578,6 +778,51 @@
           ],
           "default_tp_percent": 5.0
         }
+      },
+      "exits_v2": {
+        "tp_method": "adaptive",
+        "sl_method": "adaptive",
+        "base_tp_percent": 5.0,
+        "base_sl_percent": 2.0,
+        "atr_multiplier": 2.0,
+        "atr_period": 14,
+        "use_support_resistance": true,
+        "sr_lookback": 50,
+        "htf_confirmation": {
+          "enabled": false,
+          "timeframe": "1H",
+          "indicator": "RSI"
+        },
+        "weights": {
+          "base_percent": 0.4,
+          "atr": 0.3,
+          "support_resistance": 0.3
+        },
+        "min_rr_ratio": 1.5
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 2.0,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 20,
+        "min_leverage": 5
       }
     },
     {
@@ -600,16 +845,16 @@
             "name": "RSI",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              0,
+              100
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 0.5,
             "normalized_range": [
-              -1,
-              1
+              -20,
+              20
             ]
           }
         ]
@@ -638,6 +883,10 @@
             "value": 50
           },
           "short_condition": null
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
         }
       },
       "risk": {
@@ -688,6 +937,51 @@
           ],
           "default_tp_percent": 5.0
         }
+      },
+      "exits_v2": {
+        "tp_method": "adaptive",
+        "sl_method": "adaptive",
+        "base_tp_percent": 5.0,
+        "base_sl_percent": 2.0,
+        "atr_multiplier": 2.0,
+        "atr_period": 14,
+        "use_support_resistance": true,
+        "sr_lookback": 50,
+        "htf_confirmation": {
+          "enabled": false,
+          "timeframe": "1H",
+          "indicator": "RSI"
+        },
+        "weights": {
+          "base_percent": 0.4,
+          "atr": 0.3,
+          "support_resistance": 0.3
+        },
+        "min_rr_ratio": 1.5
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 2.0,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 20,
+        "min_leverage": 5
       }
     },
     {
@@ -704,17 +998,26 @@
           {
             "name": "RSI",
             "weight": 0.4,
-            "normalized_range": [-1, 1]
+            "normalized_range": [
+              0,
+              100
+            ]
           },
           {
             "name": "MACD",
             "weight": 0.4,
-            "normalized_range": [-1, 1]
+            "normalized_range": [
+              -50,
+              50
+            ]
           },
           {
             "name": "MOMENTUM",
             "weight": 0.2,
-            "normalized_range": [-1, 1]
+            "normalized_range": [
+              -20,
+              20
+            ]
           }
         ]
       },
@@ -733,6 +1036,10 @@
         },
         "htf_trend": {
           "enabled": false
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
         }
       },
       "risk": {
@@ -765,6 +1072,51 @@
         "dynamic_tp": {
           "enabled": false
         }
+      },
+      "exits_v2": {
+        "tp_method": "adaptive",
+        "sl_method": "adaptive",
+        "base_tp_percent": 2.5,
+        "base_sl_percent": 1.5,
+        "atr_multiplier": 2.0,
+        "atr_period": 14,
+        "use_support_resistance": true,
+        "sr_lookback": 50,
+        "htf_confirmation": {
+          "enabled": false,
+          "timeframe": "1H",
+          "indicator": "RSI"
+        },
+        "weights": {
+          "base_percent": 0.4,
+          "atr": 0.3,
+          "support_resistance": 0.3
+        },
+        "min_rr_ratio": 1.5
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 1.5,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 10,
+        "min_leverage": 5
       }
     },
     {
@@ -781,17 +1133,26 @@
           {
             "name": "RSI",
             "weight": 0.4,
-            "normalized_range": [-1, 1]
+            "normalized_range": [
+              0,
+              100
+            ]
           },
           {
             "name": "MACD",
             "weight": 0.4,
-            "normalized_range": [-1, 1]
+            "normalized_range": [
+              -50,
+              50
+            ]
           },
           {
             "name": "MOMENTUM",
             "weight": 0.2,
-            "normalized_range": [-1, 1]
+            "normalized_range": [
+              -20,
+              20
+            ]
           }
         ]
       },
@@ -810,6 +1171,10 @@
         },
         "htf_trend": {
           "enabled": false
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
         }
       },
       "risk": {
@@ -842,6 +1207,51 @@
         "dynamic_tp": {
           "enabled": false
         }
+      },
+      "exits_v2": {
+        "tp_method": "adaptive",
+        "sl_method": "adaptive",
+        "base_tp_percent": 2.5,
+        "base_sl_percent": 1.5,
+        "atr_multiplier": 2.0,
+        "atr_period": 14,
+        "use_support_resistance": true,
+        "sr_lookback": 50,
+        "htf_confirmation": {
+          "enabled": false,
+          "timeframe": "1H",
+          "indicator": "RSI"
+        },
+        "weights": {
+          "base_percent": 0.4,
+          "atr": 0.3,
+          "support_resistance": 0.3
+        },
+        "min_rr_ratio": 1.5
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 1.5,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 10,
+        "min_leverage": 5
       }
     }
   ],

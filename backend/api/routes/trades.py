@@ -80,11 +80,17 @@ async def open_trade(
     take_profit: float = Body(0),
     stop_loss: float = Body(0),
     entry_price: float = Body(0),
+    signal_score: float = Body(0),  # Add signal_score parameter
 ):
     """Open a new trade"""
     can_trade, reason = check_circuit_breaker()
     if not can_trade:
         return {"error": f"Trading blocked: {reason}"}
+    
+    # If no signal_score provided, try to get from current signals (simplified)
+    # For now, use 0 as default - the auto-trade loop passes signal.score directly
+    if signal_score == 0:
+        signal_score = 0.0  # Will be set by auto-trade
     
     # Using imported function directly
     result = await broker.open_position(
@@ -94,6 +100,7 @@ async def open_trade(
         take_profit=take_profit if take_profit > 0 else None,
         stop_loss=stop_loss if stop_loss > 0 else None,
         entry_price=entry_price if entry_price > 0 else None,
+        signal_score=signal_score,  # Pass signal score
     )
     
     if "error" not in result:

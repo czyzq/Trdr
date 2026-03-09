@@ -1449,9 +1449,16 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 .filter((t) => t.symbol === symbol)
                 .map((trade) => {
                   try {
-                    // Simple approach: show all trades on the last candle (most recent)
-                    // This ensures markers are always visible regardless of timestamp matching issues
-                    const effectiveEntryIdx = validData.length - 1;
+                    // Find the correct candle index based on trade opened_at timestamp
+                    const entryDate = new Date(trade.opened_at.replace('Z', '+00:00'));
+                    let effectiveEntryIdx = validData.findIndex((c) => {
+                      if (!c.timestamp) return false;
+                      const candleDate = new Date(c.timestamp + "Z");
+                      // Find candle that matches or is closest to trade open time
+                      return candleDate.getTime() <= entryDate.getTime();
+                    });
+                    // If no candle found before trade time, use the FIRST candle (not last!)
+                    if (effectiveEntryIdx < 0) effectiveEntryIdx = 0;
                     if (effectiveEntryIdx < 0 || effectiveEntryIdx >= validData.length) return null;
 
                     const entryX = idxToX(effectiveEntryIdx);
@@ -1513,7 +1520,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                               return false;
                             });
                             // Use last candle as fallback
-                            const exitIdx = exitIdxRaw === -1 ? validData.length - 1 : exitIdxRaw;
+                            // Use first candle if exit not found (not last!)
+                            const exitIdx = exitIdxRaw === -1 ? 0 : exitIdxRaw;
 
                             if (exitIdx < 0 || exitIdx >= validData.length) return null;
 

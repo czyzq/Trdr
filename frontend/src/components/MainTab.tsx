@@ -6,12 +6,12 @@ import { apiUrl } from "../api";
 
 // Interval-appropriate display candle counts (visible candles, reduced for BB visibility)
 const CANDLE_COUNTS: Record<string, number> = {
-  "1": 60, // 60 min of 1m candles
-  "5": 80, // ~7 hours of 5m candles
-  "15": 80, // ~20 hours of 15m candles
-  "30": 80, // ~40 hours of 30m candles
-  "60": 100, // ~4 days of 1h candles
-  "D": 90, // ~3 months of daily candles
+  "1": 48, // 48 min of 1m candles
+  "5": 48, // ~4 hours of 5m candles
+  "15": 48, // ~12 hours of 15m candles
+  "30": 48, // ~24 hours of 30m candles
+  "60": 48, // ~2 days of 1h candles
+  "D": 48, // ~2 months of daily candles
 };
 
 interface MainTabProps {
@@ -130,7 +130,7 @@ export const MainTab: React.FC<MainTabProps> = ({
       .then((r) => (r.ok ? r.json() : { strategies: [] }))
       .then((data) => setStrategies(data.strategies || []))
       .catch(() => {});
-    fetch(apiUrl("strategy-selection"))
+    fetch(apiUrl("strategy-selections"))
       .then((r) => (r.ok ? r.json() : {}))
       .then((data: Record<string, string>) => setSymbolStrategies(data))
       .catch(() => {});
@@ -240,7 +240,29 @@ export const MainTab: React.FC<MainTabProps> = ({
   useEffect(() => {
     fetchTrades();
     const interval = setInterval(fetchTrades, 10000); // Refresh every 10 seconds
-    return () => clearInterval(interval);
+    
+    // Handle TP/SL line dragging from chart
+    const handleLineAdjust = async (e: CustomEvent) => {
+      const { positionId, type, value } = e.detail;
+      try {
+        const endpoint = type === "tp" 
+          ? `trades/update/${positionId}?take_profit=${value}`
+          : `trades/update/${positionId}?stop_loss=${value}`;
+        await fetch(apiUrl(endpoint), {
+          method: "POST",
+        });
+        fetchTrades(); // Refresh after update
+      } catch (error) {
+        console.error("Failed to update position:", error);
+      }
+    };
+    
+    window.addEventListener("adjustPositionLine", handleLineAdjust as EventListener);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("adjustPositionLine", handleLineAdjust as EventListener);
+    };
   }, []);
 
   const handleSignalClick = (signal: any) => {

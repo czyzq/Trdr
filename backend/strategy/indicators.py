@@ -35,8 +35,12 @@ class Indicator:
         
         min_val, max_val = self._get_range()
         
+        # Handle case where min == max (avoid division by zero)
+        if max_val == min_val:
+            return 0.0
+        
         # Normalize: map from [min_val, max_val] to [range_min, range_max]
-        # Use midpoint as zero point
+        # Use midpoint as zero point (so 0 = neutral)
         mid = (min_val + max_val) / 2
         half_range = (max_val - min_val) / 2
         
@@ -46,7 +50,7 @@ class Indicator:
         else:
             normalized = 0.0
         
-        # Scale to desired range
+        # Scale to desired range (e.g., [-1, 1])
         return normalized * ((range_max - range_min) / 2)
     
     def _get_range(self) -> tuple:
@@ -140,7 +144,7 @@ class MacdIndicator(Indicator):
         return None
     
     def _get_range(self) -> tuple:
-        return (-2.0, 2.0)
+        return (-10.0, 10.0)
 
 
 class MomentumIndicator(Indicator):
@@ -164,7 +168,7 @@ class MomentumIndicator(Indicator):
         return ((current - past) / past) * 100
     
     def _get_range(self) -> tuple:
-        return (-5.0, 5.0)
+        return (-15.0, 15.0)
 
 
 class AdxIndicator(Indicator):

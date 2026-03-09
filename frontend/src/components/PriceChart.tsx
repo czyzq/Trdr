@@ -57,7 +57,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     try {
       setLoading(true);
       // Fetch real chart data from backend
-      const response = await fetch(`/api/chart/${symbol}?resolution=60&count=100`);
+      const response = await fetch(`/api/chart/${symbol}?resolution=60&count=48`);
       if (response.ok) {
         const data = await response.json();
         // Extract candles array from response and transform to chart format

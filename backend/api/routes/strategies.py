@@ -1,5 +1,5 @@
 """Strategies API routes - extracted from main.py"""
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Query, Request
 from typing import Optional
 from pydantic import BaseModel
 from services.state import get_symbol_strategy, set_symbol_strategy, get_all_strategy_selections, get_instruments
@@ -83,7 +83,7 @@ async def set_strategy_for_symbol(
     return {"symbol": symbol, "strategy": strategy_id}
 
 
-@router.get("/strategy-selections")
+@router.get("/api/strategy-selections")
 async def get_all_strategy_selections():
     """Get strategy selection for all symbols."""
     instruments = get_instruments()
@@ -134,8 +134,9 @@ async def backtest_from_json(
     resolution: str = Query("5"),
     days: int = Query(30),
     initial_balance: float = Query(3000.0),
+    request: Request = None,
 ):
     """Run backtest using strategy config from JSON body."""
-    from fastapi import Request
-    # This endpoint requires JSON body - handled separately
-    return {"error": "Use /api/backtest endpoint with JSON strategy in body"}
+    # Import the actual implementation from backtest.py
+    from api.routes.backtest import backtest_from_json as _run_backtest
+    return await _run_backtest(symbol=symbol, resolution=resolution, days=days, initial_balance=initial_balance, request=request)

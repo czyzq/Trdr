@@ -128,14 +128,29 @@ async def backtest_from_json(
     risk_config = strategy_config.get('risk', {})
     leverage = risk_config.get('leverage', 20)
     
-    exits_config = strategy_config.get('exits', {})
-    tp_pct = exits_config.get('take_profit', {}).get('value', 5.0) / 100
-    sl_pct = abs(exits_config.get('stop_loss', {}).get('value', -2.0)) / 100
+    # TP/SL will be calculated per-trade using adaptive algorithm
+    # exits_v2 config is loaded above
+    
+    # Add unified trading functions
+    # Use the same logic as live trading!
+    from services.trading_engine import (
+        calculate_adaptive_tp_sl,
+        calculate_dynamic_position_size
+    )
     
     # Run backtest
     balance = initial_balance
     trades = []
     position = None
+    open_positions_count = 0
+    
+    # Get strategy's exits_v2 config for adaptive TP/SL
+    exits_v2 = strategy_config.get('exits_v2', {})
+    sizing_v2 = strategy_config.get('position_sizing_v2', {})
+    
+    # Get base TP/SL percentages for reporting
+    tp_pct = exits_v2.get('base_tp_percent', 2.5) / 100 if exits_v2 else 0.025
+    sl_pct = exits_v2.get('base_sl_percent', 1.5) / 100 if exits_v2 else 0.015
     
     # Initialize indicators with warmup data
     for i, candle in enumerate(candles[:warmup_candles]):
@@ -163,19 +178,84 @@ async def backtest_from_json(
             'timestamp': candle.get('timestamp')
         }
         
-        # Get enabled strategies from manager
+        # Get enabled strategies from manager and calculate using unified functions
         for strat in manager.get_enabled_strategies():
-            order = strat.on_bar(candle_data, balance)
+            # Get signal from strategy
+            signal = strat.on_bar(candle_data, balance)
             
-            if order and position is None:
-                # Open position
+            if signal and position is None:
+                # Use unified adaptive TP/SL calculation
+                direction = 'buy' if signal.get('direction', 0) > 0 else 'sell'
+                
+                # Get candles for TP/SL calculation (last 50 candles)
+                lookback_candles = []
+                for j in range(max(warmup_candles, i-50), i):
+                    c = candles[j]
+                    lookback_candles.append({
+                        'open': c.get('open'),
+                        'high': c.get('high'),
+                        'low': c.get('low'),
+                        'close': c.get('close'),
+                        'volume': c.get('volume', 0)
+                    })
+                
+                # Calculate adaptive TP/SL
+                try:
+                    tp_price, sl_price = calculate_adaptive_tp_sl(
+                        strategy_config=strategy_config,
+                        candles=lookback_candles,
+                        entry_price=candle.get('close'),
+                        direction=direction
+                    )
+                except:
+                    # Fallback to simple percentage
+                    tp_pct = exits_v2.get('base_tp_percent', 2.5) / 100
+                    sl_pct = exits_v2.get('base_sl_percent', 1.5) / 100
+                    if direction == 'buy':
+                        tp_price = candle.get('close') * (1 + tp_pct)
+                        sl_price = candle.get('close') * (1 - sl_pct)
+                    else:
+                        tp_price = candle.get('close') * (1 - tp_pct)
+                        sl_price = candle.get('close') * (1 + sl_pct)
+                
+                # Calculate dynamic position size
+                score = abs(signal.get('score', 0.5))
+                conf = signal.get('confidence', 0.5)
+                
+                # Get ATR for volatility
+                volatility = 0.0
+                if len(lookback_candles) >= 20:
+                    try:
+                        from strategy.technical import TechnicalIndicators
+                        ind = TechnicalIndicators.calculate_all(lookback_candles[-20:], period=14)
+                        atr = ind.get('atr_14', 0)
+                        volatility = (atr / candle.get('close')) * 100 if candle.get('close') > 0 else 0
+                    except:
+                        pass
+                
+                try:
+                    size = calculate_dynamic_position_size(
+                        strategy_config=strategy_config,
+                        account_balance=balance,
+                        entry_price=candle.get('close'),
+                        stop_loss_price=sl_price,
+                        signal_score=score,
+                        signal_confidence=conf,
+                        open_positions_count=open_positions_count,
+                        volatility=volatility
+                    )
+                except:
+                    size = (balance * 0.02 * leverage) / candle.get('close')
+                
+                # Open position with unified calculations
                 position = {
-                    'entry_price': order['entry_price'],
-                    'size': order['size'],
-                    'direction': order['direction'],
+                    'entry_price': candle.get('close'),
+                    'size': size,
+                    'direction': signal.get('direction', 1),
                     'entry_time': candle.get('timestamp'),
-                    'tp_price': order['tp_price'],
-                    'sl_price': order['sl_price']
+                    'tp_price': tp_price,
+                    'sl_price': sl_price,
+                    'original_score': score
                 }
         
         # Check if we have a position

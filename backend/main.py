@@ -80,12 +80,6 @@ from settings import (
     get_current_broker_settings,
 )
 
-# Legacy function for backward compatibility
-def get_strategy(strategy_id: str):
-    """Legacy function - use StrategyManager instead."""
-    manager = get_strategy_manager()
-    return manager.strategies.get(strategy_id)
-
 from timeframes import TimeFrame, DEFAULT_TIMEFRAME
 from strategy import load_strategies_from_file
 from strategies import list_strategies as old_list_strategies, mms_on_trade_result
@@ -118,7 +112,7 @@ async def lifespan(app: FastAPI):
         log_event(f"Restored {len(open_positions)} open positions, {len(closed_positions)} closed trades", "info")
         
         # Load settings from MongoDB on startup
-        from services.state import set_auto_trade_enabled, set_auto_trade_interval
+        from services.state import set_auto_trade_enabled, set_auto_trade_interval, load_strategy_selections_from_db
         
         db_settings = db.list_settings()
         auto_trade_val = db_settings.get("AUTO_TRADE_ENABLED", 0)
@@ -129,12 +123,18 @@ async def lifespan(app: FastAPI):
         set_auto_trade_interval(int(interval))
         log_event(f"Loaded AUTO_TRADE_INTERVAL_SEC={interval} from MongoDB", "info")
         
+        # Load strategy selections from MongoDB
+        load_strategy_selections_from_db()
+        log_event("Loaded strategy selections from MongoDB", "info")
+        
         db.ensure_candle_indexes()
         log_event("Candle history indexes ensured", "info")
         db.ensure_settings_indexes()
         log_event("Settings indexes ensured & defaults migrated", "info")
         db.ensure_trades_indexes()
         log_event("Trades indexes ensured", "info")
+        db.ensure_news_indexes()
+        log_event("News indexes ensured (TTL: 60 days)", "info")
         db.list_settings()  # triggers migration of defaults
         await async_sync_account_from_closed_trades()
     else:
@@ -145,8 +145,9 @@ async def lifespan(app: FastAPI):
         log_event("Connected to Alpha Vantage API", "success")
     await async_load_signal_cache_db()
     try:
-        get_news_client()
-        log_event("Web scraping news client initialized", "success")
+        # Don't block startup with news client - it's not critical
+        # get_news_client()  # Disabled to prevent blocking on rate limits
+        log_event("News client skipped (using mock data)", "info")
     except Exception as e:
         log_event(f"Failed to initialize news client: {e}", "error")
     # Update global account in services.state
@@ -178,12 +179,13 @@ async def lifespan(app: FastAPI):
             pass
     await async_save_account(account)
     await async_save_event_log(event_log)
-    try:
-        news_client = get_news_client()
-        if hasattr(news_client, "close"):
-            await news_client.close()
-    except Exception:
-        pass
+    # Skip news client cleanup - it's not critical
+    # try:
+    #     news_client = get_news_client()
+    #     if hasattr(news_client, "close"):
+    #         await news_client.close()
+    # except Exception:
+    #     pass
     log_event("[CFD TRADING BOT] Shutdown complete - state saved", "event")
 
 
@@ -1431,6 +1433,10 @@ if _frontend_dist.is_dir():
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         """Serve frontend SPA - all non-API routes get index.html"""
+        # Skip API routes - let them 404
+        if full_path.startswith("api/"):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": "Not found"}, status_code=404)
         file_path = _frontend_dist / full_path
         if file_path.is_file():
             return FileResponse(file_path)

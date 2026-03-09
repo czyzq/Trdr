@@ -1,5 +1,6 @@
 """Strategy management service - extracted from main.py"""
 import os
+import math
 
 # Global strategy manager - loaded once
 _strategy_manager = None
@@ -127,6 +128,7 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
     # Check if we have enough indicator data
     has_data = all(ind.value() is not None for ind in strategy.indicators.values())
     if not has_data:
+        print(f"[DEBUG] {symbol}: Not enough indicator data for {strategy.name}")
         return None
     
     # Check filters (includes volatility and VIX from strategy config)
@@ -155,14 +157,21 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
         direction=direction
     )
     
-    # Clamp score to valid range [-1, 1]
-    clamped_score = max(-1.0, min(1.0, score))
+    # Normalize score to [-1, 1] using sigmoid-like scaling
+    # This handles any range of raw scores properly
+    def normalize_score(s: float) -> float:
+        """Normalize score using tanh for smooth scaling to [-1, 1]"""
+        # Use larger scale factor to avoid saturation for scores in hundreds
+        scale = 200.0
+        return math.tanh(s / scale)
+    
+    normalized_score = normalize_score(score)
     
     return {
         'direction': 'long' if direction > 0 else 'short',
-        'score': clamped_score,  # Keep sign - positive for buy, negative for sell
-        'confidence': min(1.0, abs(clamped_score)),
-        'technical_score': clamped_score,
+        'score': normalized_score,  # Properly normalized to [-1, 1]
+        'confidence': min(1.0, abs(normalized_score)),
+        'technical_score': normalized_score,
         'components': [{
             'type': 'technical',
             'name': f'JSON Strategy ({strategy.id})',
