@@ -31,11 +31,11 @@ def set_symbol_strategy(symbol: str, strategy_id: str):
 def get_strategy_manager(force_reload: bool = False):
     """Get or create the JSON-based strategy manager."""
     global _strategy_manager
-    
+
     if _strategy_manager is None or force_reload:
         try:
             from strategy import load_strategies_from_file
-            
+
             # Load from local strategies.json in project root
             json_path = os.path.join(os.path.dirname(__file__), "..", "strategies.json")
             if os.path.exists(json_path):
@@ -47,17 +47,22 @@ def get_strategy_manager(force_reload: bool = False):
         except Exception as e:
             print(f"[STRATEGY] Failed to load JSON strategies: {e}")
             _strategy_manager = None
-    
+
     return _strategy_manager
 
 
-def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
-                            requested_strategy: str = None, atr_percent: float = None, 
-                            vix_value: float = None) -> dict:
-    """
-    Analyze using new JSON-based strategy module.
+def analyze_with_new_strategy(
+    symbol: str,
+    candles: list,
+    current_price: float,
+    requested_strategy: str = None,
+    atr_percent: float = None,
+    vix_value: float = None,
+) -> dict:
+    """Analyze using new JSON-based strategy module.
+
     Returns dict with direction, score, confidence, etc. or None if not available.
-    
+
     Args:
         symbol: Trading symbol
         candles: Price candles
@@ -69,17 +74,17 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
     manager = get_strategy_manager()
     if not manager:
         return None
-    
+
     # Find strategy - use requested one or find any for symbol
     strategy = None
-    
+
     if requested_strategy:
         # User specifically requested this JSON strategy
         json_id = requested_strategy.replace("JSON:", "")
         if json_id in manager.strategies:
             strategy = manager.strategies[json_id]
             # Only print on first call (check if already printed this session)
-            if not getattr(analyze_with_new_strategy, '_logged', False):
+            if not getattr(analyze_with_new_strategy, "_logged", False):
                 print(f"[STRATEGY] Using requested JSON strategy: {json_id}")
                 analyze_with_new_strategy._logged = True
     else:
@@ -88,115 +93,113 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
             if s.symbol.upper() == symbol.upper():
                 strategy = s
                 break
-        
+
         # If no enabled, try any for this symbol
         if not strategy:
             for s in manager.strategies.values():
                 if s.symbol.upper() == symbol.upper():
                     strategy = s
                     break
-    
+
     if not strategy:
         return None
-    
-    # Update indicators with latest candles
+
+    # Update indicators with latest candles (warmup)
     for candle in candles[-50:]:  # Last 50 candles for warmup
         candle_data = {
-            'open': candle.get('open'),
-            'high': candle.get('high'),
-            'low': candle.get('low'),
-            'close': candle.get('close'),
-            'volume': candle.get('volume', 0),
-            'timestamp': candle.get('timestamp')
+            "open": candle.get("open"),
+            "high": candle.get("high"),
+            "low": candle.get("low"),
+            "close": candle.get("close"),
+            "volume": candle.get("volume", 0),
+            "timestamp": candle.get("timestamp"),
         }
         for ind in strategy.indicators.values():
             ind.update(candle_data)
-    
+
     # Get current candle
     if not candles:
         return None
-    
+
     current_candle = candles[-1]
     candle_data = {
-        'open': current_candle.get('open'),
-        'high': current_candle.get('high'),
-        'low': current_candle.get('low'),
-        'close': current_candle.get('close'),
-        'volume': current_candle.get('volume', 0),
-        'timestamp': current_candle.get('timestamp')
+        "open": current_candle.get("open"),
+        "high": current_candle.get("high"),
+        "low": current_candle.get("low"),
+        "close": current_candle.get("close"),
+        "volume": current_candle.get("volume", 0),
+        "timestamp": current_candle.get("timestamp"),
     }
-    
+
     # Check if we have enough indicator data
     has_data = all(ind.value() is not None for ind in strategy.indicators.values())
     if not has_data:
         print(f"[DEBUG] {symbol}: Not enough indicator data for {strategy.name}")
         return None
-    
+
     # Check filters (includes volatility and VIX from strategy config)
     filters_passed, failed_filters = strategy.filters.check_all(
-        candle_data, symbol, 'long', 
-        atr_percent=atr_percent, 
-        vix_value=vix_value
+        candle_data,
+        symbol,
+        "long",
+        atr_percent=atr_percent,
+        vix_value=vix_value,
     )
     if not filters_passed:
         print(f"[FILTERS] {symbol}: Failed filters: {failed_filters}")
         return None
-    
-    # Get signal
+
+    # Get signal from score engine (applies min_score internally)
     signal = strategy.score_engine.get_signal()
-    score = strategy.score_engine.compute_score()
-    
     if not signal:
         return None
-    
-    direction = 1 if signal == 'buy' else -1
-    
+
+    # Direction: +1 for buy, -1 for sell
+    direction = 1 if signal == "buy" else -1
+
     # Calculate exits
     exits = strategy.exit_engine.initialize_position(
         position_id=f"live_{symbol}",
         entry_price=current_price,
-        direction=direction
+        direction=direction,
     )
-    
-    # FIXED: Use signal direction and compute confidence from raw score
-    # The issue was that get_signal() and compute_score() use different logic
-    # Now we use:
-    # - direction from get_signal() (RSI/Momentum based - reliable)
-    # - score is just the normalized absolute strength
-    # - confidence combines both
-    
-    # Get min_score from strategy config
-    min_score = strategy.score_engine.min_score
-    
-    # Clamp raw score to reasonable range [-2, 2] then map to [0, 1]
-    raw_clamped = max(-2.0, min(2.0, score))
-    abs_score = abs(raw_clamped) / 2.0  # Map [-2, 2] to [0, 1]
-    
-    # Confidence is the absolute score value, but must exceed min_score threshold
-    confidence = min(1.0, abs_score)
-    
-    # Score is direction * confidence
+
+    # Compute raw score for confidence/strength (range [-1, 1])
+    raw_score = strategy.score_engine.compute_score()
+
+    # Clamp raw score to [-1, 1]
+    raw_clamped = max(-1.0, min(1.0, raw_score))
+
+    # Confidence is absolute score in [0, 1]
+    confidence = min(1.0, abs(raw_clamped))
+
+    # Apply a small floor so any valid signal has a visible non-zero confidence
+    if confidence < 0.05:
+        confidence = 0.05
+
+    # Normalized technical score carries direction
     normalized_score = direction * confidence
-    
-    # Only return signal if confidence exceeds min_score threshold
-    if confidence < min_score:
-        print(f"[SIGNAL] {symbol}: confidence {confidence:.3f} below min_score {min_score}, skipping")
-        return None
-    
-    print(f"[DEBUG] {symbol}: signal={signal}, direction={direction}, raw_score={score:.3f}, abs_score={abs_score:.3f}, confidence={confidence:.3f}, min_score={min_score}, normalized={normalized_score:.3f}")
-    
+
+    print(
+        f"[DEBUG] {symbol}: signal={signal}, direction={direction}, "
+        f"raw_score={raw_score:.3f}, clamped={raw_clamped:.3f}, "
+        f"confidence={confidence:.3f}, normalized={normalized_score:.3f}"
+    )
+
     return {
-        'direction': 'long' if direction > 0 else 'short',
-        'score': normalized_score,  # Properly normalized to [-1, 1]
-        'confidence': confidence,  # Use calculated confidence with minimum
-        'technical_score': normalized_score,
-        'components': [{
-            'type': 'technical',
-            'name': f'JSON Strategy ({strategy.id})',
-            'value': normalized_score,  # Fixed: show normalized score, not raw
-            'description': f'Score: {normalized_score:.3f}, Signal: {signal}',
-            'confidence': confidence
-        }],
-        'exits': exits,
-        'strategy_id': strategy.id,
+        "direction": "long" if direction > 0 else "short",
+        "score": normalized_score,  # Normalized to [-1, 1]
+        "confidence": confidence,  # 0..1 confidence for UI/logs
+        "technical_score": normalized_score,
+        "components": [
+            {
+                "type": "technical",
+                "name": f"JSON Strategy ({strategy.id})",
+                "value": normalized_score,
+                "description": f"Score: {normalized_score:.3f}, Signal: {signal}",
+                "confidence": confidence,
+            }
+        ],
+        "exits": exits,
+        "strategy_id": strategy.id,
     }
