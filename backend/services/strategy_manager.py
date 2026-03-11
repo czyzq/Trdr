@@ -51,25 +51,21 @@ def get_strategy_manager(force_reload: bool = False):
     return _strategy_manager
 
 
-def analyze_with_new_strategy(
-    symbol: str,
-    candles: list,
-    current_price: float,
-    requested_strategy: str = None,
-    atr_percent: float = None,
-    vix_value: float = None,
-) -> dict:
-    """Analyze using new JSON-based strategy module.
-
+def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
+                              requested_strategy: str = None, atr_percent: float = None,
+                              vix_value: float = None) -> dict:
+    """
+    Analyze using new JSON-based strategy module.
     Returns dict with direction, score, confidence, etc. or None if not available.
 
-    Args:
-        symbol: Trading symbol
-        candles: Price candles
-        current_price: Current price
-        requested_strategy: Specific JSON strategy ID to use (e.g., "JSON:btc_v2_core")
-        atr_percent: ATR percent for volatility filter
-        vix_value: Current VIX value for VIX filter
+    Score semantics (FIXED):
+    - raw_score  = compute_score() result, already in [-1, 1] by weight normalization
+    - direction  = from get_signal() which already applies min_score threshold ONCE
+    - confidence = how far above min_score the signal is, mapped to [0, 1]
+                   formula: (|raw_score| - min_score) / (1 - min_score)
+                   A signal that just barely passes -> confidence ~0
+                   A max-strength signal (|score|=1) -> confidence ~1
+    - score (returned) = direction_sign * |raw_score|  (keeps [-1,1] range, no squashing)
     """
     manager = get_strategy_manager()
     if not manager:
@@ -77,7 +73,6 @@ def analyze_with_new_strategy(
 
     # Find strategy - use requested one or find any for symbol
     strategy = None
-
     if requested_strategy:
         # User specifically requested this JSON strategy
         json_id = requested_strategy.replace("JSON:", "")
@@ -104,7 +99,7 @@ def analyze_with_new_strategy(
     if not strategy:
         return None
 
-    # Update indicators with latest candles (warmup)
+    # Update indicators with latest candles
     for candle in candles[-50:]:  # Last 50 candles for warmup
         candle_data = {
             "open": candle.get("open"),
@@ -120,7 +115,6 @@ def analyze_with_new_strategy(
     # Get current candle
     if not candles:
         return None
-
     current_candle = candles[-1]
     candle_data = {
         "open": current_candle.get("open"),
@@ -139,23 +133,47 @@ def analyze_with_new_strategy(
 
     # Check filters (includes volatility and VIX from strategy config)
     filters_passed, failed_filters = strategy.filters.check_all(
-        candle_data,
-        symbol,
-        "long",
+        candle_data, symbol, 'long',
         atr_percent=atr_percent,
-        vix_value=vix_value,
+        vix_value=vix_value
     )
     if not filters_passed:
         print(f"[FILTERS] {symbol}: Failed filters: {failed_filters}")
         return None
 
-    # Get signal from score engine (applies min_score internally)
+    # Get signal - get_signal() already applies min_score threshold internally (ONCE)
     signal = strategy.score_engine.get_signal()
     if not signal:
+        # Signal did not pass min_score - no trade
         return None
 
-    # Direction: +1 for buy, -1 for sell
-    direction = 1 if signal == "buy" else -1
+    # Get raw score - already in [-1, 1] after weight normalization in compute_score()
+    raw_score = strategy.score_engine.compute_score()
+
+    # Clamp to [-1, 1] as a safety guard (should already be in range)
+    raw_score = max(-1.0, min(1.0, raw_score))
+    abs_score = abs(raw_score)
+
+    # Direction from signal (reliable - uses RSI/Momentum logic or score sign)
+    direction = 1 if signal == 'buy' else -1
+
+    # Confidence = how strongly the score exceeds the min_score threshold
+    # Maps [min_score, 1.0] -> [0.0, 1.0] so:
+    #   - score just at threshold -> confidence ~ 0 (weak signal)
+    #   - score at max (1.0)      -> confidence = 1.0 (strong signal)
+    min_score = strategy.score_engine.min_score
+    score_range = max(1.0 - min_score, 1e-6)  # avoid division by zero
+    confidence = max(0.0, min(1.0, (abs_score - min_score) / score_range))
+
+    # Returned score keeps full [-1, 1] range - direction_sign * abs_score
+    # This gives meaningful spread in the UI (not squashed to +-1)
+    returned_score = direction * abs_score
+
+    print(
+        f"[DEBUG] {symbol}: signal={signal}, raw_score={raw_score:.3f}, "
+        f"abs_score={abs_score:.3f}, min_score={min_score}, "
+        f"confidence={confidence:.3f}, returned_score={returned_score:.3f}"
+    )
 
     # Calculate exits
     exits = strategy.exit_engine.initialize_position(
@@ -164,47 +182,18 @@ def analyze_with_new_strategy(
         direction=direction,
     )
 
-    # Compute raw score for strength (range [-1, 1])
-    raw_score = strategy.score_engine.compute_score()
-
-    # Map raw score and min_score to confidence in [0, 1]
-    #  - abs(raw) == min_score  → confidence ~ 0
-    #  - abs(raw) == 1.0        → confidence ~ 1
-    min_score = strategy.score_engine.min_score
-    abs_score = abs(raw_score)
-    if abs_score <= min_score:
-        confidence = 0.0
-    else:
-        confidence = (abs_score - min_score) / max(1.0 - min_score, 1e-6)
-    confidence = max(0.0, min(1.0, confidence))
-
-    # Apply a small visual floor so valid signals do not show as exactly 0% confidence
-    if confidence > 0.0 and confidence < 0.05:
-        confidence = 0.05
-
-    # Normalized technical score is just the raw score (already in [-1, 1])
-    normalized_score = max(-1.0, min(1.0, raw_score))
-
-    print(
-        f"[DEBUG] {symbol}: signal={signal}, direction={direction}, "
-        f"raw_score={raw_score:.3f}, min_score={min_score:.3f}, "
-        f"abs_score={abs_score:.3f}, confidence={confidence:.3f}, normalized={normalized_score:.3f}"
-    )
-
     return {
-        "direction": "long" if direction > 0 else "short",
-        "score": normalized_score,  # Signed score in [-1, 1]
-        "confidence": confidence,  # 0..1 confidence for UI/logs
-        "technical_score": normalized_score,
-        "components": [
-            {
-                "type": "technical",
-                "name": f"JSON Strategy ({strategy.id})",
-                "value": normalized_score,
-                "description": f"Score: {normalized_score:.3f}, Signal: {signal}",
-                "confidence": confidence,
-            }
-        ],
-        "exits": exits,
-        "strategy_id": strategy.id,
+        'direction': 'long' if direction > 0 else 'short',
+        'score': returned_score,          # [-1, 1] with full spread
+        'confidence': confidence,          # [0, 1] relative to min_score threshold
+        'technical_score': returned_score,
+        'components': [{
+            'type': 'technical',
+            'name': f'JSON Strategy ({strategy.id})',
+            'value': returned_score,
+            'description': f'Score: {returned_score:.3f}, Signal: {signal}, Conf: {confidence:.2f}',
+            'confidence': confidence
+        }],
+        'exits': exits,
+        'strategy_id': strategy.id,
     }
