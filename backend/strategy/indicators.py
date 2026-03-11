@@ -10,6 +10,38 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from indicators import TechnicalIndicators
 
+# FIXED RANGES - for stable normalization (per specialist recommendation)
+INDICATOR_RANGES = {
+    # Bounded oscillators (naturalnie stałe)
+    'RSI': (0, 100),
+    'STOCH': (0, 100),
+    'STOCH_RSI': (0, 100),
+    'WILLIAMS_R': (-100, 0),
+    'CCI': (-200, 200),
+    'ADX': (0, 100),
+    'MFI': (0, 100),
+    
+    # Unbounded - praktyczne limity
+    'MACD': (-20, 20),
+    'MACD_LINE': (-15, 15),
+    'MACD_SIGNAL': (-15, 15),
+    'MOMENTUM': (-10, 10),
+    'ROC': (-20, 20),
+    
+    # Volatility
+    'ATR': (0, 100),
+    'BOLLINGER_WIDTH': (0, 50),
+    'CHOP': (0, 100),
+    
+    # Trend
+    'EMA_DIFF': (-10, 10),
+    'RSI': (0, 100),           # Standard RSI 0-100
+    'MACD': (-20, 20),          # MACD histogram -20 to +20
+    'MOMENTUM': (-10, 10),     # Momentum -10% to +10%
+    'ADX': (0, 100),            # Standard ADX 0-100
+    'STOCH': (0, 100),         # Stochastic 0-100
+}
+
 
 class Indicator:
     """Base class for all indicators"""
@@ -28,27 +60,36 @@ class Indicator:
         raise NotImplementedError
     
     def normalized_value(self, range_min: float = -1.0, range_max: float = 1.0) -> float:
-        """Normalize indicator value to specified range"""
+        """Normalize indicator value to specified range using FIXED RANGES"""
         val = self.value()
         if val is None:
             return 0.0
         
-        min_val, max_val = self._get_range()
+        # Use FIXED RANGES from INDICATOR_RANGES (per specialist recommendation)
+        # Fall back to dynamic range only if not in fixed ranges
+        indicator_name = self.__class__.__name__.replace('Indicator', '').upper()
+        if indicator_name in INDICATOR_RANGES:
+            min_val, max_val = INDICATOR_RANGES[indicator_name]
+        else:
+            min_val, max_val = self._get_range()
         
         # Handle case where min == max (avoid division by zero)
         if max_val == min_val:
             return 0.0
         
-        # Normalize: map from [min_val, max_val] to [range_min, range_max]
+        # Normalize: map from [min_val, max_val] to [-1, 1] 
         # Use midpoint as zero point (so 0 = neutral)
         mid = (min_val + max_val) / 2
         half_range = (max_val - min_val) / 2
         
-        # Normalize to -1 to 1 first
+        # Normalize to -1 to 1
         if half_range > 0:
             normalized = (val - mid) / half_range
         else:
             normalized = 0.0
+        
+        # Clamp to [-1, 1] to avoid extreme values
+        normalized = max(-1.0, min(1.0, normalized))
         
         # Scale to desired range (e.g., [-1, 1])
         return normalized * ((range_max - range_min) / 2)

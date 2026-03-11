@@ -3,6 +3,7 @@ CFD Trading Bot - FastAPI Backend
 Real-time signal generation using Finnhub data and technical indicators
 Simulated trading engine with USD currency
 """
+print("[MAIN.PY] Loaded successfully")
 
 import asyncio
 import json
@@ -16,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from services.trading_engine import auto_trade_loop
 from services.market_data import price_cache_loop
-from services.state import broker, account, open_positions, closed_positions, INSTRUMENTS, INITIAL_BALANCE_USD
+from services.state import broker, account, open_positions, closed_positions, INSTRUMENTS, INITIAL_BALANCE_USD, get_symbol_strategy
 import uvicorn
 
 # =============================================================================
@@ -275,46 +276,94 @@ if "peak_equity_usd" not in account:
 # run_backtest imported from backtester
 from backtester import run_backtest as _run_backtest
 
-async def run_backtest(
+# API endpoint for backtest
+print("[TEST] backtest endpoint called")
+@app.get("/api/backtest")
+async def backtest(
     symbol: str = Query(..., description="Symbol to backtest"),
     resolution: str = Query("5", description="Resolution: 1, 5, 15, 30, 60, D"),
     days: int = Query(14, description="Number of days to backtest"),
-    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD), defaults to days ago"),
-    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
-    min_score: float = Query(0.15, description="Minimum score threshold"),
+    date_from: Optional[str] = Query(None, description="Start date"),
+    date_to: Optional[str] = Query(None, description="End date"),
+    min_score: float = Query(0.3, description="Minimum score threshold"),
     initial_balance: float = Query(3000.0, description="Initial balance"),
-    strategy: Optional[str] = Query(None, description="Strategy ID (adaptive_regime, mms)"),
-    indicators: Optional[str] = Query(
-        None, description="Comma-separated indicators (RSI,MACD,BB,SMA,ADX,STOCH,MOMENTUM)"
-    ),
-    settings: Optional[str] = Query(
-        None, description="Settings (e.g., rsi_period=14,macd_fast=12)"
-    ),
-    leverage: int = Query(10, description="Leverage (e.g., 10 = 10x)"),
-    tp_pct: float = Query(0.02, description="Take profit % (e.g., 0.02 = 2%)"),
-    sl_pct: float = Query(0.01, description="Stop loss % (e.g., 0.01 = 1%)"),
-    risk_pct: float = Query(0.01, description="Risk per trade % (e.g., 0.01 = 1%)"),
-    trailing_sl_pct: float = Query(0.0, description="Trailing SL % (0 = disabled, e.g., 0.5 = move SL to breakeven at 0.5% profit)"),
-    volume_filter: float = Query(0.0, description="Min volume as % of avg (0 = disabled, e.g., 0.5 = only trade if volume > 50% of avg)"),
-    multi_tf: Optional[str] = Query(None, description="Multi-timeframe alignment (e.g., '15,30' - trade only if all timeframes agree)"),
-    htf_rsi_filter: Optional[str] = Query(None, description="HTF RSI filter (e.g., '30' - check RSI on higher TF and skip if extreme)"),
-    htf_adx_filter: Optional[str] = Query(None, description="HTF ADX filter (e.g., '30' - skip if ADX < 20 on higher TF)"),
-    htf_resistance_filter: Optional[str] = Query(None, description="HTF resistance filter (e.g., '30' - reduce TP if price near HTF high/low)"),
-    htf_vwap_filter: Optional[str] = Query(None, description="HTF VWAP filter (e.g., '60' - only trade when price moving toward VWAP)"),
-    htf_trend_filter: Optional[str] = Query(None, description="HTF trend filter (e.g., '30' - only trade with HTF trend: RSI>50 long, RSI<50 short)"),
-    adx_filter_mode: Optional[str] = Query(None, description="ADX filter: 'trend' (ADX>25 uses TP=5%) or 'chop' (ADX<20 uses TP=3%, SL=1.5%)"),
-    divergence_filter: Optional[str] = Query(None, description="Divergence filter (e.g., 'RSI' or 'MACD' - check for bullish/bearish divergence)"),
-    
-    # Strategy weights (v3 defaults: MACD=0.35, RSI=0.35, Momentum=0.2)
-    order_block_filter: Optional[str] = Query(None, description="Order Block filter (e.g., '1' - enable, check for order blocks)"),
-    
-    # Strategy weights
-    rsi_weight: float = Query(None, description="RSI weight override (e.g., 0.2)"),
-    macd_weight: float = Query(None, description="MACD weight override (e.g., 0.3)"),
-    stoch_weight: float = Query(None, description="Stoch weight override (e.g., 0.1)"),
-    momentum_weight: float = Query(None, description="Momentum weight override (e.g., 0.2)"),
-    adx_weight: float = Query(None, description="ADX weight override (e.g., 0.15)"),
-    bb_weight: float = Query(None, description="Bollinger Bands weight override (e.g., 0.15)"),
+    strategy: Optional[str] = Query(None, description="Strategy ID"),
+    indicators: Optional[str] = Query(None, description="Indicators"),
+    settings: Optional[str] = Query(None, description="Settings"),
+    leverage: int = Query(20, description="Leverage"),
+    tp_pct: float = Query(0.02, description="Take profit %"),
+    sl_pct: float = Query(0.01, description="Stop loss %"),
+    risk_pct: float = Query(0.02, description="Risk per trade %"),
+    trailing_sl_pct: float = Query(0.0, description="Trailing SL"),
+    volume_filter: float = Query(0.0, description="Volume filter"),
+    multi_tf: Optional[str] = Query(None, description="Multi-timeframe"),
+    htf_rsi_filter: Optional[str] = Query(None, description="HTF RSI"),
+    htf_adx_filter: Optional[str] = Query(None, description="HTF ADX"),
+    htf_resistance_filter: Optional[str] = Query(None, description="HTF resistance"),
+    htf_vwap_filter: Optional[str] = Query(None, description="HTF VWAP"),
+    htf_trend_filter: Optional[str] = Query(None, description="HTF trend"),
+    adx_filter_mode: Optional[str] = Query(None, description="ADX mode"),
+    divergence_filter: Optional[str] = Query(None, description="Divergence"),
+    order_block_filter: Optional[str] = Query(None, description="Order block"),
+    rsi_weight: Optional[float] = Query(None, description="RSI weight"),
+    macd_weight: Optional[float] = Query(None, description="MACD weight"),
+    stoch_weight: Optional[float] = Query(None, description="Stoch weight"),
+    momentum_weight: Optional[float] = Query(None, description="Momentum weight"),
+    adx_weight: Optional[float] = Query(None, description="ADX weight"),
+    bb_weight: Optional[float] = Query(None, description="BB weight"),
+):
+    """Run backtest on historical data"""
+    # Call the main run_backtest function (defined later in this file)
+    return await run_backtest(
+        symbol=symbol, resolution=resolution, days=days,
+        date_from=date_from, date_to=date_to,
+        min_score=min_score, initial_balance=initial_balance,
+        strategy=strategy, indicators=indicators, settings=settings,
+        leverage=leverage, tp_pct=tp_pct, sl_pct=sl_pct,
+        risk_pct=risk_pct, trailing_sl_pct=trailing_sl_pct,
+        volume_filter=volume_filter, multi_tf=multi_tf,
+        htf_rsi_filter=htf_rsi_filter, htf_adx_filter=htf_adx_filter,
+        htf_resistance_filter=htf_resistance_filter,
+        htf_vwap_filter=htf_vwap_filter, htf_trend_filter=htf_trend_filter,
+        adx_filter_mode=adx_filter_mode, divergence_filter=divergence_filter,
+        order_block_filter=order_block_filter,
+        rsi_weight=rsi_weight, macd_weight=macd_weight,
+        stoch_weight=stoch_weight, momentum_weight=momentum_weight,
+        adx_weight=adx_weight, bb_weight=bb_weight,
+    )
+
+async def run_backtest(
+    symbol: str,
+    resolution: str = "5",
+    days: int = 14,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    min_score: float = 0.15,
+    initial_balance: float = 3000.0,
+    strategy: Optional[str] = None,
+    indicators: Optional[str] = None,
+    settings: Optional[str] = None,
+    leverage: int = 10,
+    tp_pct: float = 0.05,
+    sl_pct: float = 0.02,
+    risk_pct: float = 0.02,
+    trailing_sl_pct: float = 0.0,
+    volume_filter: float = 0.0,
+    multi_tf: Optional[str] = None,
+    htf_rsi_filter: Optional[str] = None,
+    htf_adx_filter: Optional[str] = None,
+    htf_resistance_filter: Optional[str] = None,
+    htf_vwap_filter: Optional[str] = None,
+    htf_trend_filter: Optional[str] = None,
+    adx_filter_mode: Optional[str] = None,
+    divergence_filter: Optional[str] = None,
+    order_block_filter: Optional[str] = None,
+    rsi_weight: Optional[float] = None,
+    macd_weight: Optional[float] = None,
+    stoch_weight: Optional[float] = None,
+    momentum_weight: Optional[float] = None,
+    adx_weight: Optional[float] = None,
+    bb_weight: Optional[float] = None,
 ):
     """
     Run backtest on historical data.
@@ -360,6 +409,41 @@ async def run_backtest(
     from strategies import get_strategy
     strategy = get_strategy(strategy_id)
     instrument_info = INSTRUMENTS.get(symbol_key, {})
+
+    # Override TP/SL, leverage, risk from JSON strategy config
+    print(f"[DEBUG] strategy_id={strategy_id}, checking if not in ['adaptive_regime', 'mms']: {strategy_id and strategy_id not in ['adaptive_regime', 'mms']}")
+    if strategy_id and strategy_id not in ['adaptive_regime', 'mms']:
+        try:
+            print(f"[DEBUG] Has strategy.config: {hasattr(strategy, 'config')}")
+            if hasattr(strategy, 'config') and strategy.config:
+                print(f"[DEBUG] Config keys: {list(strategy.config.keys())}")
+                # Get exits config
+                exits = strategy.config.get('exits', {})
+                if exits:
+                    tp_val = exits.get('take_profit', {}).get('value', 0)
+                    sl_val = exits.get('stop_loss', {}).get('value', 0)
+                    if tp_val:
+                        tp_pct = abs(tp_val) / 100
+                    if sl_val:
+                        sl_pct = abs(sl_val) / 100
+                
+                # Get risk config (leverage, risk_per_trade)
+                risk = strategy.config.get('risk', {})
+                if risk:
+                    if 'leverage' in risk:
+                        leverage = risk.get('leverage', 20)
+                    if 'risk_per_trade_pct' in risk:
+                        risk_pct = risk.get('risk_per_trade_pct', 2.0) / 100  # Convert % to decimal
+                
+                # Get min_score from strategy score config
+                score_cfg = strategy.config.get('score', {})
+                if score_cfg and 'min_score' in score_cfg:
+                    min_score = score_cfg.get('min_score', 0.3)
+                    
+                print(f"[BACKTEST] Using strategy config: leverage={leverage}, risk_pct={risk_pct}, min_score={min_score}, tp_pct={tp_pct}, sl_pct={sl_pct}")
+        except Exception as e:
+            print(f"[BACKTEST] Error loading strategy config: {e}")
+            pass  # Use defaults if anything fails
 
     # Parse custom settings if provided (e.g., "rsi_period=14,macd_fast=12")
     custom_settings = {}

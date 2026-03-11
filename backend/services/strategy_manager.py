@@ -1,6 +1,7 @@
 """Strategy management service - extracted from main.py"""
 import os
 import math
+import database as db
 
 # Global strategy manager - loaded once
 _strategy_manager = None
@@ -157,27 +158,44 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
         direction=direction
     )
     
-    # Normalize score to [-1, 1] using sigmoid-like scaling
-    # This handles any range of raw scores properly
-    def normalize_score(s: float) -> float:
-        """Normalize score using tanh for smooth scaling to [-1, 1]"""
-        # Use larger scale factor to avoid saturation for scores in hundreds
-        scale = 200.0
-        return math.tanh(s / scale)
+    # FIXED: Use signal direction and compute confidence from raw score
+    # The issue was that get_signal() and compute_score() use different logic
+    # Now we use:
+    # - direction from get_signal() (RSI/Momentum based - reliable)
+    # - score is just the normalized absolute strength
+    # - confidence combines both
     
-    normalized_score = normalize_score(score)
+    # Get min_score from strategy config
+    min_score = strategy.score_engine.min_score
+    
+    # Clamp raw score to reasonable range [-2, 2] then map to [0, 1]
+    raw_clamped = max(-2.0, min(2.0, score))
+    abs_score = abs(raw_clamped) / 2.0  # Map [-2, 2] to [0, 1]
+    
+    # Confidence is the absolute score value, but must exceed min_score threshold
+    confidence = min(1.0, abs_score)
+    
+    # Score is direction * confidence
+    normalized_score = direction * confidence
+    
+    # Only return signal if confidence exceeds min_score threshold
+    if confidence < min_score:
+        print(f"[SIGNAL] {symbol}: confidence {confidence:.3f} below min_score {min_score}, skipping")
+        return None
+    
+    print(f"[DEBUG] {symbol}: signal={signal}, direction={direction}, raw_score={score:.3f}, abs_score={abs_score:.3f}, confidence={confidence:.3f}, min_score={min_score}, normalized={normalized_score:.3f}")
     
     return {
         'direction': 'long' if direction > 0 else 'short',
         'score': normalized_score,  # Properly normalized to [-1, 1]
-        'confidence': min(1.0, abs(normalized_score)),
+        'confidence': confidence,  # Use calculated confidence with minimum
         'technical_score': normalized_score,
         'components': [{
             'type': 'technical',
             'name': f'JSON Strategy ({strategy.id})',
-            'value': score,
-            'description': f'Score: {score:.3f}, Signal: {signal}',
-            'confidence': 0.5
+            'value': normalized_score,  # Fixed: show normalized score, not raw
+            'description': f'Score: {normalized_score:.3f}, Signal: {signal}',
+            'confidence': confidence
         }],
         'exits': exits,
         'strategy_id': strategy.id,

@@ -127,6 +127,7 @@ async def backtest_from_json(
     
     risk_config = strategy_config.get('risk', {})
     leverage = risk_config.get('leverage', 20)
+    print(f"[BACKTEST DEBUG] strategy={strategy_config.get('id')}, risk_config={risk_config}, leverage={leverage}")
     
     # TP/SL will be calculated per-trade using adaptive algorithm
     # exits_v2 config is loaded above

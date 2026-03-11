@@ -24,6 +24,7 @@ class ScoreEngine:
         
         Returns:
             Score value (positive = buy, negative = sell)
+            Range: [-1, 1] after normalization
         """
         total_score = 0.0
         total_weight = 0.0
@@ -40,10 +41,11 @@ class ScoreEngine:
             range_min, range_max = normalized_range[0], normalized_range[1]
             
             normalized = indicator.normalized_value(range_min, range_max)
+            # Add weighted score directly
             total_score += normalized * weight
             total_weight += weight
         
-        # Normalize by actual weight used
+        # Normalize by total weight to get score in [-1, 1] range
         if total_weight > 0:
             total_score = total_score / total_weight
         

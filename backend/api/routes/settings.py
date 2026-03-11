@@ -61,15 +61,30 @@ async def set_trading_mode(broker: str = "simulation", autoTrade: bool = False):
 @router.get("/api/settings/indicators/{symbol}")
 async def get_indicators_for_symbol(symbol: str):
     """Get indicator settings for a symbol."""
+    from services.state import get_symbol_strategy
+    
     indicators = db.get_setting(f"INDICATORS_{symbol}", {})
-    return {"symbol": symbol, "indicators": indicators}
+    strategy = get_symbol_strategy(symbol)  # Get active strategy for symbol
+    
+    return {
+        "symbol": symbol, 
+        "indicators": indicators,
+        "strategy": strategy
+    }
 
 
 @router.post("/api/settings/indicators/{symbol}")
-async def set_indicators_for_symbol(symbol: str, indicators: dict):
+async def set_indicators_for_symbol(symbol: str, data: dict):
     """Save indicator settings for a symbol."""
+    indicators = data.get("indicators", [])
+    strategy = data.get("strategy", "")
+    
     db.set_setting(f"INDICATORS_{symbol}", indicators, "user")
-    return {"symbol": symbol, "indicators": indicators}
+    if strategy:
+        from services.state import set_symbol_strategy
+        set_symbol_strategy(symbol, strategy)
+    
+    return {"symbol": symbol, "indicators": indicators, "strategy": strategy}
 
 
 @router.post("/api/settings/dynamic-positions")

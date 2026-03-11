@@ -8,11 +8,11 @@
       "enabled": true,
       "trade_direction": "long_only",
       "score": {
-        "min_score": 0.01,
+        "min_score": 0.5,
         "indicators": [
           {
             "name": "RSI",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -28,7 +28,7 @@
           },
           {
             "name": "MOMENTUM",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -137,11 +137,11 @@
       "enabled": false,
       "trade_direction": "long_only",
       "score": {
-        "min_score": 0.01,
+        "min_score": 0.5,
         "indicators": [
           {
             "name": "RSI",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -157,7 +157,7 @@
           },
           {
             "name": "MOMENTUM",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -266,11 +266,11 @@
       "enabled": false,
       "trade_direction": "long_only",
       "score": {
-        "min_score": 0.01,
+        "min_score": 0.5,
         "indicators": [
           {
             "name": "RSI",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -286,7 +286,7 @@
           },
           {
             "name": "MOMENTUM",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -401,11 +401,11 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.05,
+        "min_score": 0.5,
         "indicators": [
           {
             "name": "RSI",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -413,7 +413,7 @@
           },
           {
             "name": "MOMENTUM",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -520,11 +520,11 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.05,
+        "min_score": 0.5,
         "indicators": [
           {
             "name": "RSI",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -532,7 +532,7 @@
           },
           {
             "name": "MOMENTUM",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -639,11 +639,11 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.05,
+        "min_score": 0.5,
         "indicators": [
           {
             "name": "RSI",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1
@@ -651,7 +651,7 @@
           },
           {
             "name": "MOMENTUM",
-            "weight": 0.5,
+            "weight": 2.0,
             "normalized_range": [
               -1,
               1

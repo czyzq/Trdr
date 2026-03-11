@@ -783,16 +783,16 @@ export const Dashboard: React.FC = () => {
                         <div className="flex flex-wrap gap-4 text-sm">
                           <div>
                             <span style={{ color: "var(--text-muted)" }}>Strategy:</span>{" "}
-                            <span style={{ color: "var(--text-primary)" }}>{backtestResults.config?.strategy}</span>
+                            <span style={{ color: "var(--text-primary)" }}>{backtestResults.config?.display_name || backtestResults.config?.id}</span>
                           </div>
                           <div>
                             <span style={{ color: "var(--text-muted)" }}>Used:</span>{" "}
                             <span style={{ color: "var(--accent)" }}>{(backtestResults.config?.used_indicators || []).join(", ")}</span>
                           </div>
-                          {backtestResults.config?.default_indicators && backtestResults.config?.used_indicators?.join(",") !== backtestResults.config?.default_indicators?.join(",") && (
+                          {backtestResults.config?.default_indicators && backtestResults.config?.used_indicators?.join(",") !== backtestResults.config?.default_indicators?.map((ind: any) => ind.id).join(",") && (
                             <div>
                               <span style={{ color: "var(--text-muted)" }}>Default:</span>{" "}
-                              <span style={{ color: "var(--text-muted)" }}>{backtestResults.config?.default_indicators?.join(", ")}</span>
+                              <span style={{ color: "var(--text-muted)" }}>{backtestResults.config?.default_indicators?.map((ind: any) => ind.id).join(", ")}</span>
                             </div>
                           )}
                         </div>

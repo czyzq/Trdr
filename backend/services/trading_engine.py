@@ -489,6 +489,28 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             # Clamp scores to valid range [-1, 1]
             json_score = max(-1.0, min(1.0, new_result["score"]))
             json_technical = max(-1.0, min(1.0, new_result["technical_score"]))
+            
+            # Filter out weak signals - require minimum score threshold from strategy config
+            min_signal_score = new_result.get("confidence", 0.5)  # Use confidence as min threshold
+            if abs(json_score) < min_signal_score:
+                print(f"[SIGNAL] {symbol}: Score {json_score:.3f} below threshold {min_signal_score}, skipping")
+                return Signal(
+                    symbol=symbol,
+                    direction=SignalDirection.NEUTRAL,
+                    score=0.0,
+                    confidence=0.0,
+                    technical_score=0.0,
+                    price_action_score=0.0,
+                    news_score=0.0,
+                    components=[],
+                    current_price=current_price,
+                    time_horizon=timeframe,
+                    entry_point=current_price,
+                    take_profit=0.0,
+                    stop_loss=0.0,
+                    risk_reward_ratio=0.0,
+                )
+            
             return Signal(
                 symbol=symbol,
                 direction=SignalDirection.BUY if new_result["direction"] == "long" else SignalDirection.SELL,
