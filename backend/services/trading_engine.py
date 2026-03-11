@@ -282,7 +282,7 @@ def check_circuit_breaker() -> bool:
     return allowed
 
 
-async def 350
+async def _analyze_single_symbol
 (symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
     # Lazy imports to avoid circular dependency
