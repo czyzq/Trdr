@@ -282,8 +282,7 @@ def check_circuit_breaker() -> bool:
     return allowed
 
 
-async def _analyze_single_symbol
-(symbol: str, info: dict, news_client_instance) -> Signal:
+async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
     # Lazy imports to avoid circular dependency
     from services.state import get_live_price_cache as _price_cache, get_symbol_strategy, broker
