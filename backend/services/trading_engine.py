@@ -15,6 +15,7 @@ from alpha_vantage_news import get_client as get_news_client
 # Import async_timed decorator
 from utils.decorators import async_timed
 from strategies import get_strategy
+from services.strategy_manager import get_symbol_strategy, get_strategy_manager, analyze_with_new_strategy
 # Lazy imports used inside functions to avoid circular dependency
 # (imported from main.py at function call time)
 from services.market_data import get_cached_candles
@@ -281,7 +282,8 @@ def check_circuit_breaker() -> bool:
     return allowed
 
 
-async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
+async def 350
+(symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
     # Lazy imports to avoid circular dependency
     from services.state import get_live_price_cache as _price_cache, get_symbol_strategy, broker
