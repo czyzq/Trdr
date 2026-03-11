@@ -920,3 +920,154 @@ def ensure_news_indexes():
         db.news.create_index("fetched_at", expireAfterSeconds=60*60*24*60, background=True)
     except Exception as e:
         log_event(f"News index creation: {e}", "warning")
+
+
+# ============================================================
+# STRATEGY COLLECTION - Store strategies in MongoDB
+# ============================================================
+
+def save_strategy(config: dict, updated_by: str = "system") -> bool:
+    """
+    Save strategy config to database.
+    Creates or updates a strategy document.
+    """
+    db = get_db()
+    if db is None:
+        return False
+    
+    strategy_id = config.get("id")
+    if not strategy_id:
+        return False
+    
+    doc = {
+        "_id": strategy_id,
+        **config,
+        "updated_at": datetime.utcnow(),
+        "updated_by": updated_by
+    }
+    
+    # Don't overwrite created_at on update
+    existing = db.strategies.find_one({"_id": strategy_id})
+    if existing and "created_at" in existing:
+        doc["created_at"] = existing["created_at"]
+    else:
+        doc["created_at"] = datetime.utcnow()
+    
+    db.strategies.replace_one({"_id": strategy_id}, doc, upsert=True)
+    return True
+
+
+def get_strategy_from_db(strategy_id: str) -> Optional[dict]:
+    """Get a strategy config from database by ID."""
+    db = get_db()
+    if db is None:
+        return None
+    
+    doc = db.strategies.find_one({"_id": strategy_id})
+    if doc:
+        doc.pop("_id", None)  # Remove MongoDB _id, use id field
+    return doc
+
+
+def list_strategies_db() -> List[dict]:
+    """List all strategies from database."""
+    db = get_db()
+    if db is None:
+        return []
+    
+    docs = list(db.strategies.find({}))
+    for doc in docs:
+        doc.pop("_id", None)
+    return docs
+
+
+def delete_strategy_from_db(strategy_id: str) -> bool:
+    """Delete a strategy from database."""
+    db = get_db()
+    if db is None:
+        return False
+    
+    result = db.strategies.delete_one({"_id": strategy_id})
+    return result.deleted_count > 0
+
+
+def get_strategy_count_db() -> int:
+    """Get count of strategies in database."""
+    db = get_db()
+    if db is None:
+        return 0
+    return db.strategies.count_documents({})
+
+
+def ensure_strategy_indexes():
+    """Create indexes for strategies collection."""
+    db = get_db()
+    if db is None:
+        return
+    
+    # Index on id (unique)
+    try:
+        db.strategies.create_index("_id", unique=True)
+    except Exception:
+        pass
+    
+    # Index on symbol for quick lookups
+    try:
+        db.strategies.create_index("symbol")
+    except Exception:
+        pass
+    
+    # Index on enabled flag
+    try:
+        db.strategies.create_index("enabled")
+    except Exception:
+        pass
+
+
+def sync_strategies_from_json(json_path: str = "strategy/strategies.json") -> dict:
+    """
+    Sync strategies from JSON file to database.
+    Returns dict with counts: {added, updated, unchanged, errors}
+    """
+    from pathlib import Path
+    from strategy.config_loader import load_strategies_from_file
+    
+    result = {"added": 0, "updated": 0, "unchanged": 0, "errors": 0}
+    
+    # Find JSON file
+    json_file = Path(json_path)
+    if not json_file.exists():
+        json_file = Path(__file__).parent / json_path
+    
+    if not json_file.exists():
+        print(f"[STRATEGY SYNC] File not found: {json_path}")
+        return result
+    
+    try:
+        manager = load_strategies_from_file(str(json_file))
+        
+        for strat_id, strat in manager.strategies.items():
+            config = strat.config
+            config["id"] = strat_id
+            
+            # Check if exists in DB
+            existing = get_strategy_from_db(strat_id)
+            
+            if existing:
+                # Compare to see if changed
+                if existing != config:
+                    save_strategy(config, updated_by="sync")
+                    result["updated"] += 1
+                else:
+                    result["unchanged"] += 1
+            else:
+                save_strategy(config, updated_by="sync")
+                result["added"] += 1
+        
+        print(f"[STRATEGY SYNC] Added: {result['added']}, Updated: {result['updated']}, Unchanged: {result['unchanged']}")
+        
+    except Exception as e:
+        print(f"[STRATEGY SYNC] Error: {e}")
+        result["errors"] += 1
+    
+    return result

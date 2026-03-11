@@ -136,6 +136,13 @@ async def lifespan(app: FastAPI):
         log_event("Trades indexes ensured", "info")
         db.ensure_news_indexes()
         log_event("News indexes ensured (TTL: 60 days)", "info")
+        db.ensure_strategy_indexes()
+        log_event("Strategy indexes ensured", "info")
+        
+        # Sync strategies from JSON to DB on startup
+        db.sync_strategies_from_json()
+        log_event("Strategies synced from JSON to DB", "info")
+        
         db.list_settings()  # triggers migration of defaults
         await async_sync_account_from_closed_trades()
     else:
@@ -162,6 +169,23 @@ async def lifespan(app: FastAPI):
     _price_cache_task = asyncio.create_task(price_cache_loop())
     log_event("[AUTO-TRADE] Background task launched (5 min interval)", "success")
     log_event("[PRICE-CACHE] Live price cache started (3 sec refresh)", "success")
+
+    # Start strategy sync background task (every 5 minutes)
+    async def strategy_sync_loop():
+        """Periodically sync strategies from JSON to DB."""
+        while True:
+            await asyncio.sleep(300)  # 5 minutes
+            try:
+                db.sync_strategies_from_json()
+                # Reload strategies in memory
+                from strategies import reload_strategies
+                reload_strategies()
+                log_event("[STRATEGY-SYNC] Synced from JSON to DB", "info")
+            except Exception as e:
+                log_event(f"[STRATEGY-SYNC] Error: {e}", "error")
+    
+    _strategy_sync_task = asyncio.create_task(strategy_sync_loop())
+    log_event("[STRATEGY-SYNC] Background sync started (5 min interval)", "success")
 
     yield  # App runs here
 
@@ -275,6 +299,70 @@ if "peak_equity_usd" not in account:
 
 # run_backtest imported from backtester
 from backtester import run_backtest as _run_backtest
+
+# ============================================================
+# Strategy Management Endpoints
+# ============================================================
+
+@app.get("/api/strategies/list")
+async def list_strategies_api():
+    """List all strategies from database."""
+    from database import list_strategies_db
+    strategies = list_strategies_db()
+    return {"strategies": strategies, "count": len(strategies)}
+
+
+@app.get("/api/strategies/{strategy_id}")
+async def get_strategy_api(strategy_id: str):
+    """Get a specific strategy from database."""
+    from database import get_strategy_from_db
+    strategy = get_strategy_from_db(strategy_id)
+    if strategy:
+        return strategy
+    return {"error": f"Strategy {strategy_id} not found"}, 404
+
+
+@app.post("/api/strategies/sync")
+async def sync_strategies_api():
+    """Sync strategies from JSON file to database."""
+    from database import sync_strategies_from_json
+    result = sync_strategies_from_json()
+    # Reload strategies in memory
+    from strategies import reload_strategies
+    reload_strategies()
+    return result
+
+
+@app.post("/api/strategies/reload")
+async def reload_strategies_api():
+    """Reload strategies into memory from database."""
+    from strategies import reload_strategies
+    reload_strategies()
+    return {"status": "success", "count": len(STRATEGIES)}
+
+
+@app.put("/api/strategies/{strategy_id}")
+async def update_strategy_api(strategy_id: str, config: dict):
+    """Update a strategy in database."""
+    from database import save_strategy
+    config["id"] = strategy_id
+    save_strategy(config, updated_by="api")
+    # Reload strategies in memory
+    from strategies import reload_strategies
+    reload_strategies()
+    return {"status": "success"}
+
+
+@app.delete("/api/strategies/{strategy_id}")
+async def delete_strategy_api(strategy_id: str):
+    """Delete a strategy from database."""
+    from database import delete_strategy_from_db
+    result = delete_strategy_from_db(strategy_id)
+    # Reload strategies in memory
+    from strategies import reload_strategies
+    reload_strategies()
+    return {"status": "success" if result else "not_found"}
+
 
 # API endpoint for backtest
 print("[TEST] backtest endpoint called")

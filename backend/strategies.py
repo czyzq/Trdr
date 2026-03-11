@@ -1319,24 +1319,63 @@ class JSONStrategyWrapper:
         }
 
 
-# Load JSON strategies
-try:
-    from strategy.config_loader import load_strategies_from_file
-    from pathlib import Path
+# Load strategies: try DB first, then fall back to JSON
+def load_strategies_from_db_or_json():
+    """Load strategies from database first, then fall back to JSON file."""
+    loaded_count = 0
     
-    # Try to load from multiple possible locations
-    json_path = Path("strategy/strategies.json")
-    if not json_path.exists():
-        json_path = Path("../strategy/strategies.json")
-    if not json_path.exists():
-        json_path = Path(__file__).parent / "strategy" / "strategies.json"
+    # Try to load from database first
+    try:
+        from database import list_strategies_db, get_strategy_from_db
+        
+        db_strategies = list_strategies_db()
+        if db_strategies:
+            for config in db_strategies:
+                strat_id = config.get("id")
+                if strat_id:
+                    wrapper = JSONStrategyWrapper(config, strat_id)
+                    STRATEGIES[strat_id] = wrapper
+                    loaded_count += 1
+            print(f"Loaded {loaded_count} strategies from database")
+            return loaded_count
+    except Exception as e:
+        print(f"Could not load strategies from DB: {e}")
     
-    if json_path.exists():
-        manager = load_strategies_from_file(str(json_path))
-        for strat_id, strat in manager.strategies.items():
-            # Create wrapper for backtest compatibility
-            wrapper = JSONStrategyWrapper(strat.config, strat_id)
-            STRATEGIES[strat_id] = wrapper
-        print(f"Loaded {len(manager.strategies)} JSON strategies")
-except Exception as e:
-    print(f"Warning: Could not load JSON strategies: {e}")
+    # Fall back to JSON file
+    try:
+        from strategy.config_loader import load_strategies_from_file
+        from pathlib import Path
+        
+        # Try to load from multiple possible locations
+        json_path = Path("strategy/strategies.json")
+        if not json_path.exists():
+            json_path = Path("../strategy/strategies.json")
+        if not json_path.exists():
+            json_path = Path(__file__).parent / "strategy" / "strategies.json"
+        
+        if json_path.exists():
+            manager = load_strategies_from_file(str(json_path))
+            for strat_id, strat in manager.strategies.items():
+                # Create wrapper for backtest compatibility
+                wrapper = JSONStrategyWrapper(strat.config, strat_id)
+                STRATEGIES[strat_id] = wrapper
+                loaded_count += 1
+            print(f"Loaded {loaded_count} strategies from JSON file")
+    except Exception as e:
+        print(f"Warning: Could not load JSON strategies: {e}")
+    
+    return loaded_count
+
+
+# Initial load
+load_strategies_from_db_or_json()
+
+
+def reload_strategies():
+    """Reload strategies from DB (for cron job or manual refresh)."""
+    global STRATEGIES
+    STRATEGIES = {}  # Clear existing
+    STRATEGIES["adaptive_regime"] = AdaptiveRegimeStrategy()
+    STRATEGIES["mms"] = MMSStrategy()
+    load_strategies_from_db_or_json()
+    print(f"Reloaded strategies. Total: {len(STRATEGIES)}")
