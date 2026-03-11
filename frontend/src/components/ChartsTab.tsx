@@ -142,7 +142,7 @@ export const ChartsTab: React.FC = () => {
       const chartData: ChartResponse[] = [];
       for (const instrument of instruments) {
         const response = await fetch(
-          `${apiUrl(`chart/${instrument.symbol}`)}?resolution=${selectedResolution}&count=24`,
+          `${apiUrl(`chart/${instrument.symbol}`)}?resolution=${selectedResolution}&count=50`,
         );
         if (response.ok) {
           const data = await response.json();
