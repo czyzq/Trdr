@@ -492,7 +492,8 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             json_technical = max(-1.0, min(1.0, new_result["technical_score"]))
             
             # Filter out weak signals - require minimum score threshold from strategy config
-                min_signal_score = new_result.get("strategy_config", {}).get("score", {}).get("min_score", 0.01)  # Use strategy min_score            if abs(json_score) < min_signal_score:
+            min_signal_score = new_result.get("strategy_config", {}).get("score", {}).get("min_score", 0.01)
+            if abs(json_score) < min_signal_score:
                 print(f"[SIGNAL] {symbol}: Score {json_score:.3f} below threshold {min_signal_score}, skipping")
                 return Signal(
                     symbol=symbol,
