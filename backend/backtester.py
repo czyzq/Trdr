@@ -205,6 +205,11 @@ class BacktestTrade:
     exit_time: Optional[str] = None
     exit_reason: Optional[str] = None  # "TP", "SL", "TRAIL", "TIMEOUT", "END"
     pnl_pct: float = 0.0
+    # Risk/position sizing fields
+    size: float = 0.0  # position size in units
+    leverage: float = 1.0  # leverage applied to this trade
+    risk_amount: float = 0.0  # risk amount in account currency for this trade
+    use_risk_manager: bool = False  # whether this trade was sized via JSON RiskManager
 
 
 @dataclass
@@ -379,29 +384,40 @@ def run_backtest(
             trade.exit_time = current.get("timestamp", current.get("time", ""))
 
             # P&L % includes leverage effect
-            leverage = INSTRUMENT_CONFIG.get(symbol, {}).get("leverage", 1)
+            leverage = trade.leverage or INSTRUMENT_CONFIG.get(symbol, {}).get("leverage", 1)
             if trade.direction == "BUY":
                 raw_pct = ((trade.exit_price - trade.entry_price) / trade.entry_price) * 100
             else:
                 raw_pct = ((trade.entry_price - trade.exit_price) / trade.entry_price) * 100
             trade.pnl_pct = raw_pct * leverage
 
-            # Update balance using initial SL for position sizing
-            risk_amount = balance * (risk_per_trade_pct / 100)
-            initial_sl = trade.initial_sl if trade.initial_sl else trade.stop_loss
-            risk_per_unit = abs(trade.entry_price - initial_sl)
-            if risk_per_unit > 0:
-                position_value = risk_amount / (risk_per_unit * leverage) * trade.entry_price
-                dollar_pnl = position_value * (raw_pct / 100) * leverage
+            if trade.use_risk_manager and trade.size > 0:
+                # RiskManager path: PnL = price * size * pct * leverage
+                dollar_pnl = trade.entry_price * trade.size * (raw_pct / 100.0) * leverage
             else:
-                dollar_pnl = 0
-            balance += dollar_pnl
+                # Legacy sizing: use risk_per_trade_pct and initial SL distance
+                risk_amount = balance * (risk_per_trade_pct / 100)
+                initial_sl = trade.initial_sl if trade.initial_sl else trade.stop_loss
+                risk_per_unit = abs(trade.entry_price - initial_sl)
+                if risk_per_unit > 0:
+                    position_value = risk_amount / (risk_per_unit * leverage) * trade.entry_price
+                    dollar_pnl = position_value * (raw_pct / 100) * leverage
+                else:
+                    dollar_pnl = 0
 
+            balance += dollar_pnl
             closed_this_bar.append(trade)
 
         for t in closed_this_bar:
             open_trades.remove(t)
             trades.append(t)
+
+        # Track current exposure and open risk for RiskManager sizing
+        current_exposure_notional = sum(
+            abs(t.size) * t.entry_price * (t.leverage or INSTRUMENT_CONFIG.get(symbol, {}).get("leverage", 1))
+            for t in open_trades
+        )
+        open_risk_amount = sum(t.risk_amount for t in open_trades)
 
         equity_curve.append(balance)
         peak_balance = max(peak_balance, balance)
@@ -543,7 +559,7 @@ def run_backtest(
 
         # Per-instrument threshold - use from unified result or config
         if using_unified and using_unified_result:
-            # Unified strategy already applied its own thresholds
+            # Unified strategy already applies its own thresholds
             min_score = 0.0
         else:
             # Fell back to traditional scoring - use config thresholds
@@ -623,6 +639,41 @@ def run_backtest(
             take_profit = current_price - (atr * tp_mult)
             trade_dir = "SELL"
 
+        # Determine leverage and position size
+        leverage = inst_config.get("leverage", 1)
+        size = 0.0
+        risk_amount_for_trade = 0.0
+        use_risk_manager_flag = False
+
+        if using_unified and using_unified_result and last_unified_result is not None and get_strategy_manager:
+            try:
+                mgr = get_strategy_manager()
+                strat_id = last_unified_result.get("strategy_id") or strategy_id
+                if mgr and strat_id and strat_id in mgr.strategies:
+                    strat = mgr.strategies[strat_id]
+                    rm = getattr(strat, "risk_manager", None)
+                    if rm is not None:
+                        # Use RiskManager config for leverage and sizing
+                        leverage = getattr(rm, "leverage", leverage)
+                        size = rm.calculate_position_size(
+                            balance=balance,
+                            price=current_price,
+                            current_exposure=current_exposure_notional,
+                            open_risk_amount=open_risk_amount,
+                        )
+                        risk_amount_for_trade = rm.calculate_risk_amount(balance)
+                        if size <= 0 or risk_amount_for_trade <= 0:
+                            if verbose:
+                                print(
+                                    f"[BACKTEST] RiskManager blocked trade for {symbol} (size={size}, risk={risk_amount_for_trade}), skipping"
+                                )
+                            neutral_skipped += 1
+                            continue
+                        use_risk_manager_flag = True
+            except Exception as e:
+                if verbose:
+                    print(f"[BACKTEST] RiskManager error for {symbol}: {e}, falling back to legacy sizing")
+
         trade = BacktestTrade(
             entry_idx=i,
             entry_price=current_price,
@@ -634,19 +685,23 @@ def run_backtest(
             initial_sl=round(stop_loss, 2),
             atr_at_entry=atr if use_trailing else 0.0,
             best_price=current_price,
+            size=size,
+            leverage=leverage,
+            risk_amount=risk_amount_for_trade,
+            use_risk_manager=use_risk_manager_flag,
         )
         open_trades.append(trade)
 
         if verbose:
             print(
                 f"  [{current.get('time', i)}] {trade_dir} @ {current_price:.2f} "
-                f"(score={score:.3f}, SL={stop_loss:.2f}, TP={take_profit:.2f})"
+                f"(score={score:.3f}, SL={stop_loss:.2f}, TP={take_profit:.2f}, size={size:.4f}, lev={leverage})"
             )
 
     # Force-close any remaining open trades at last candle price
     last_price = candles[-1]["close"]
-    leverage = INSTRUMENT_CONFIG.get(symbol, {}).get("leverage", 1)
     for trade in open_trades:
+        leverage = trade.leverage or INSTRUMENT_CONFIG.get(symbol, {}).get("leverage", 1)
         trade.exit_idx = len(candles) - 1
         trade.exit_price = last_price
         trade.exit_time = candles[-1].get("timestamp", "")
@@ -774,6 +829,10 @@ def results_to_dict(result: BacktestResult) -> dict:
                 "entry_time": t.entry_time,
                 "exit_time": t.exit_time,
                 "score": t.score,
+                "size": t.size,
+                "leverage": t.leverage,
+                "risk_amount": t.risk_amount,
+                "use_risk_manager": t.use_risk_manager,
             }
             for t in result.trades
         ],
@@ -875,7 +934,7 @@ def main():
 
         # Priority: CSV > Yahoo > Alpha Vantage (real data only)
         if args.csv:
-            from historical_data import PRICE_MULTIPLIERS
+            from historical_data import PRICE_MULTUPLIERS as PRICE_MULTIPLIERS  # type: ignore
 
             mult = PRICE_MULTIPLIERS.get(symbol, 1.0)
             candles = load_csv_candles(args.csv, multiplier=mult)
