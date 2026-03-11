@@ -164,31 +164,36 @@ def analyze_with_new_strategy(
         direction=direction,
     )
 
-    # Compute raw score for confidence/strength (range [-1, 1])
+    # Compute raw score for strength (range [-1, 1])
     raw_score = strategy.score_engine.compute_score()
 
-    # Clamp raw score to [-1, 1]
-    raw_clamped = max(-1.0, min(1.0, raw_score))
+    # Map raw score and min_score to confidence in [0, 1]
+    #  - abs(raw) == min_score  → confidence ~ 0
+    #  - abs(raw) == 1.0        → confidence ~ 1
+    min_score = strategy.score_engine.min_score
+    abs_score = abs(raw_score)
+    if abs_score <= min_score:
+        confidence = 0.0
+    else:
+        confidence = (abs_score - min_score) / max(1.0 - min_score, 1e-6)
+    confidence = max(0.0, min(1.0, confidence))
 
-    # Confidence is absolute score in [0, 1]
-    confidence = min(1.0, abs(raw_clamped))
-
-    # Apply a small floor so any valid signal has a visible non-zero confidence
-    if confidence < 0.05:
+    # Apply a small visual floor so valid signals do not show as exactly 0% confidence
+    if confidence > 0.0 and confidence < 0.05:
         confidence = 0.05
 
-    # Normalized technical score carries direction
-    normalized_score = direction * confidence
+    # Normalized technical score is just the raw score (already in [-1, 1])
+    normalized_score = max(-1.0, min(1.0, raw_score))
 
     print(
         f"[DEBUG] {symbol}: signal={signal}, direction={direction}, "
-        f"raw_score={raw_score:.3f}, clamped={raw_clamped:.3f}, "
-        f"confidence={confidence:.3f}, normalized={normalized_score:.3f}"
+        f"raw_score={raw_score:.3f}, min_score={min_score:.3f}, "
+        f"abs_score={abs_score:.3f}, confidence={confidence:.3f}, normalized={normalized_score:.3f}"
     )
 
     return {
         "direction": "long" if direction > 0 else "short",
-        "score": normalized_score,  # Normalized to [-1, 1]
+        "score": normalized_score,  # Signed score in [-1, 1]
         "confidence": confidence,  # 0..1 confidence for UI/logs
         "technical_score": normalized_score,
         "components": [
