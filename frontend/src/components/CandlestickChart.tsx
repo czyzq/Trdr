@@ -227,7 +227,7 @@ function parseTimestamp(
 export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   symbol,
   data,
-  height = 220,
+  height = 320,
   showVolume = true,
   showRSI = true,
   resolution = "60",
