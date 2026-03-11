@@ -8,7 +8,7 @@
       "enabled": true,
       "trade_direction": "long_only",
       "score": {
-        "min_score": 0.15,
+        "min_score": 0.1,
         "indicators": [
           {
             "name": "RSI",
@@ -177,7 +177,7 @@
       "enabled": false,
       "trade_direction": "long_only",
       "score": {
-        "min_score": 0.15,
+        "min_score": 0.1,
         "indicators": [
           {
             "name": "RSI",
@@ -346,37 +346,37 @@
       "enabled": false,
       "trade_direction": "long_only",
       "score": {
-        "min_score": 0.15,
+        "min_score": 0.02,
         "indicators": [
           {
             "name": "RSI",
             "weight": 2.0,
             "normalized_range": [
               0,
-              100
+              1
             ]
           },
           {
             "name": "MACD",
             "weight": 0.0,
             "normalized_range": [
-              -50,
-              50
+              -1,
+              1
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 2.0,
             "normalized_range": [
-              -20,
-              20
+              -1,
+              1
             ]
           },
           {
             "name": "ADX",
             "weight": 0.0,
             "normalized_range": [
-              -1,
+              0,
               1
             ]
           }
@@ -507,22 +507,22 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.15,
+        "min_score": 0.02,
         "indicators": [
           {
             "name": "RSI",
             "weight": 2.0,
             "normalized_range": [
               0,
-              100
+              1
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 2.0,
             "normalized_range": [
-              -20,
-              20
+              -1,
+              1
             ]
           }
         ]
@@ -666,22 +666,22 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.15,
+        "min_score": 0.02,
         "indicators": [
           {
             "name": "RSI",
             "weight": 2.0,
             "normalized_range": [
               0,
-              100
+              1
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 2.0,
             "normalized_range": [
-              -20,
-              20
+              -1,
+              1
             ]
           }
         ]
@@ -825,22 +825,22 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.15,
+        "min_score": 0.02,
         "indicators": [
           {
             "name": "RSI",
             "weight": 2.0,
             "normalized_range": [
               0,
-              100
+              1
             ]
           },
           {
             "name": "MOMENTUM",
             "weight": 2.0,
             "normalized_range": [
-              -20,
-              20
+              -1,
+              1
             ]
           }
         ]
@@ -1114,7 +1114,7 @@
       "trade_direction": "both",
       "description": "Scalping strategy with tight TP and trailing stop for quick trades on trend changes",
       "score": {
-        "min_score": 0.15,
+        "min_score": 0.1,
         "indicators": [
           {
             "name": "RSI",

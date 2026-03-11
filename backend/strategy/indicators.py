@@ -91,10 +91,10 @@ class Indicator:
         # Clamp to [-1, 1] to avoid extreme values
         normalized = max(-1.0, min(1.0, normalized))
         
-        # Scale to desired range (e.g., [-1, 1])    
-    def _get_range(self) -> tuple:
-        """Get min/max range for normalization"""
+        # Scale to desired range (e.g., [-1, 1])
         return range_min + (normalized + 1) / 2 * (range_max - range_min)
+    
+
 
 class RsiIndicator(Indicator):
     """Relative Strength Index"""

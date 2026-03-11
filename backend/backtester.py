@@ -64,7 +64,8 @@ def calculate_signal_score(indicators: dict) -> Tuple[float, str]:
         elif rsi > 55:
             rsi_score = -(rsi - 55) / 45 * 0.3
         else:
-            rsi_score = 0
+            # Neutral zone 45-55: weak signal based on position
+            rsi_score = (50 - rsi) / 50 * 0.2  # 50 = center, gives small directional bias
         scores.append(max(-1, min(1, rsi_score)))
         weights.append(0.15 if is_trending else 0.25)
 
@@ -77,7 +78,8 @@ def calculate_signal_score(indicators: dict) -> Tuple[float, str]:
         elif k > 80:
             stoch_score = -(0.6 + (k - 80) / 50)
         else:
-            stoch_score = 0
+            # Neutral zone 20-80: weak signal based on position
+            stoch_score = (50 - k) / 50 * 0.2  # weak directional bias
         if k > d and k < 30:
             stoch_score = max(stoch_score, 0.5)
         elif k < d and k > 70:
@@ -169,9 +171,9 @@ def calculate_signal_score(indicators: dict) -> Tuple[float, str]:
     return score, scores
 
 
-def get_direction(score: float, min_score: float = 0.15) -> str:
+def get_direction(score: float, min_score: float = 0.05) -> str:
     """Convert score to direction string using per-instrument threshold."""
-    strong_threshold = max(0.45, min_score + 0.20)
+    strong_threshold = max(0.25, min_score + 0.15)
     if score > strong_threshold:
         return "STRONG_BUY"
     elif score > min_score:
@@ -242,10 +244,10 @@ MAX_HOLD_CANDLES = 20
 # min_agreement: how many indicators must agree to enter
 # asset_class: "commodity" gets trend-alignment filter
 INSTRUMENT_CONFIG = {
-    "XAU": {"min_score": 0.30, "min_agreement": 3, "asset_class": "commodity", "leverage": 20, "trailing_stop": True},
-    "XAG": {"min_score": 0.28, "min_agreement": 3, "asset_class": "commodity", "leverage": 20, "trailing_stop": True},
-    "US100": {"min_score": 0.20, "min_agreement": 2, "asset_class": "equity", "leverage": 20, "trailing_stop": True},
-    "BTC": {"min_score": 0.20, "min_agreement": 2, "asset_class": "crypto", "leverage": 5, "trailing_stop": True},
+    "XAU": {"min_score": 0.05, "min_agreement": 2, "asset_class": "commodity", "leverage": 20, "trailing_stop": True},
+    "XAG": {"min_score": 0.05, "min_agreement": 2, "asset_class": "commodity", "leverage": 20, "trailing_stop": True},
+    "US100": {"min_score": 0.05, "min_agreement": 2, "asset_class": "equity", "leverage": 20, "trailing_stop": True},
+    "BTC": {"min_score": 0.05, "min_agreement": 2, "asset_class": "crypto", "leverage": 5, "trailing_stop": True},
 }
 
 
