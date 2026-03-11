@@ -60,7 +60,7 @@
         "htf_trend": {
           "enabled": true,
           "indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "source": "close",
           "use_closed_candles_only": true,
           "long_condition": {
@@ -102,7 +102,7 @@
         "dynamic_tp": {
           "enabled": true,
           "htf_indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "use_closed_candles_only": true,
           "rules": [
             {
@@ -229,7 +229,7 @@
         "htf_trend": {
           "enabled": true,
           "indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "source": "close",
           "use_closed_candles_only": true,
           "long_condition": {
@@ -271,7 +271,7 @@
         "dynamic_tp": {
           "enabled": true,
           "htf_indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "use_closed_candles_only": true,
           "rules": [
             {
@@ -398,7 +398,7 @@
         "htf_trend": {
           "enabled": true,
           "indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "source": "close",
           "use_closed_candles_only": true,
           "long_condition": {
@@ -440,7 +440,7 @@
         "dynamic_tp": {
           "enabled": true,
           "htf_indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "use_closed_candles_only": true,
           "rules": [
             {
@@ -543,7 +543,7 @@
         "htf_trend": {
           "enabled": false,
           "indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "source": "close",
           "use_closed_candles_only": true,
           "long_condition": {
@@ -585,7 +585,7 @@
         "dynamic_tp": {
           "enabled": true,
           "htf_indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "use_closed_candles_only": true,
           "rules": [
             {
@@ -702,7 +702,7 @@
         "htf_trend": {
           "enabled": false,
           "indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "source": "close",
           "use_closed_candles_only": true,
           "long_condition": {
@@ -744,7 +744,7 @@
         "dynamic_tp": {
           "enabled": true,
           "htf_indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "use_closed_candles_only": true,
           "rules": [
             {
@@ -861,7 +861,7 @@
         "htf_trend": {
           "enabled": false,
           "indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "source": "close",
           "use_closed_candles_only": true,
           "long_condition": {
@@ -903,7 +903,7 @@
         "dynamic_tp": {
           "enabled": true,
           "htf_indicator": "RSI",
-          "htf_timeframe": "30m",
+          "htf_timeframe": "1H",
           "use_closed_candles_only": true,
           "rules": [
             {
