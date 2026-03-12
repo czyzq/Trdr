@@ -159,7 +159,7 @@ async def auto_trade_loop():
                     strategy_json_id = strategy_id.replace("JSON:", "") if strategy_id else None
                     strategy_config_for_tp = {}
                     if strategy_json_id:
-                        from strategy.strategy_manager import get_strategy_manager
+                        from services.strategy_manager import get_strategy_manager
                         manager = get_strategy_manager()
                         if strategy_json_id in manager.strategies:
                             strategy_config_for_tp = manager.strategies[strategy_json_id].config
@@ -178,7 +178,7 @@ async def auto_trade_loop():
                     volatility = 0.0
                     if fresh_candles and len(fresh_candles) >= 20:
                         try:
-                            from strategy.technical import TechnicalIndicators
+                            
                             ind = TechnicalIndicators.calculate_all(fresh_candles, period=14)
                             atr = ind.get('atr_14', 0)
                             volatility = (atr / entry_price) * 100 if entry_price > 0 else 0
@@ -190,7 +190,7 @@ async def auto_trade_loop():
                     strategy_json_id = strategy_id.replace("JSON:", "") if strategy_id else None
                     strategy_config = {}
                     if strategy_json_id:
-                        from strategy.strategy_manager import get_strategy_manager
+                        from services.strategy_manager import get_strategy_manager
                         manager = get_strategy_manager()
                         if strategy_json_id in manager.strategies:
                             strategy_config = manager.strategies[strategy_json_id].config
