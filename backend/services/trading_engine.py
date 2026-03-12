@@ -328,12 +328,29 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         
         # Use StrategyManager from JSON (supports timeframe)
         manager = get_strategy_manager()
+        if not manager or len(manager.strategies) == 0:
+            print("[STRATEGY] No strategies available in manager")
+            return Signal(
+                symbol=symbol,
+                direction=SignalDirection.NEUTRAL,
+                score=0.0,
+                confidence=0.0,
+                technical_score=0.0,
+                price_action_score=0.0,
+                news_score=0.0,
+                components=[],
+                current_price=current_price,
+                time_horizon=timeframe,
+                entry_point=current_price,
+                take_profit=0.0,
+                stop_loss=0.0,
+                risk_reward_ratio=0.0,
+            )
         strategy_obj = manager.strategies.get(selected_strategy)
-        if not strategy_obj:
-            strategy_obj = manager.strategies.get('xau_v3_exp')
         
         # Handle both string and TimeFrame enum
         tf_value = strategy_obj.timeframe if strategy_obj and hasattr(strategy_obj, 'timeframe') else "5m"
+        print(f"[STRATEGY] {symbol}: Using strategy '{selected_strategy}' with timeframe '{tf_value}'")
         if hasattr(tf_value, 'value'):
             tf_value = tf_value.value
         

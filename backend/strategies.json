@@ -346,7 +346,7 @@
       "enabled": false,
       "trade_direction": "long_only",
       "score": {
-        "min_score": 0.25,0.2,
+        "min_score": 0.25,
         "indicators": [
           {
             "name": "RSI",
@@ -507,7 +507,7 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.25,0.2,
+        "min_score": 0.25,
         "indicators": [
           {
             "name": "RSI",
@@ -666,7 +666,7 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.25,0.2,
+        "min_score": 0.25,
         "indicators": [
           {
             "name": "RSI",
@@ -825,7 +825,7 @@
         "momentum_threshold": 0
       },
       "score": {
-        "min_score": 0.25,0.2,
+        "min_score": 0.25,
         "indicators": [
           {
             "name": "RSI",
