@@ -1,4 +1,32 @@
-# Backtest Results - 2026-03-11 (Po naprawach)
+# Backtest Results - 2026-03-13 (Strategy Optimizer Run)
+
+## This Run's Results (14 dni, 60m TF, scalp strategies)
+
+| Symbol | Trades | Win Rate | PnL | Change vs Previous |
+|--------|--------|----------|-----|-------------------|
+| **BTC** | 56 | 42.9% | **+7.2%** | ✅ Improved from 39 trades |
+| **XAU** | 49 | 40.8% | **+4.5%** | ✅ Improved from -1% (19 trades) |
+
+---
+
+## Previous Results (2026-03-11)
+
+### Naprawy wprowadzone tego dnia
+
+1. **min_score** w backtester.py: XAU 0.30→0.05, XAG 0.28→0.05, BTC 0.20→0.05
+2. **strong_threshold** w get_direction(): 0.45→0.25
+3. **RSI neutral zone (45-55)**: zwracało 0 → teraz daje słaby kierunek
+4. **StochRSI neutral zone (20-80)**: zwracało 0 → teraz daje słaby kierunek
+
+---
+
+## WYNIKI (14 dni, 5m TF) - from 2026-03-11
+
+| Symbol | Trades | Win Rate | PnL | Zmiana vs przed |
+|--------|--------|----------|-----|-----------------|
+| **BTC** | 39 | 43.6% | **+$104.11** | ✅ +$105 |
+| **XAU** | 19 | 42.1% | -$30.28 | ⚠️ -$35 |
+| **XAG** | 63 | 42.9% | **+$182.58** | ✅ +$160 |
 
 ## Naprawy wprowadzone tego dnia
 

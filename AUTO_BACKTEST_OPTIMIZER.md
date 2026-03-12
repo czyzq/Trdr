@@ -2,24 +2,24 @@
 
 ## Overview
 A background service (cronjob) that continuously evaluates strategy performance, runs backtests for unexplored parameter combinations, and identifies optimal settings based on historical data.
-docs: add Auto Backtest Optimizer specification (AUTO_BACKTEST_OPTIMIZER.md)
+
 ## Execution Schedule
 
 ### 1. Optimization Cycle (Every 10 Minutes)
 - **Target:** Process 5 strategy/parameter combinations per run.
 - **Action:** 
-  - Pick 5 least recently tested or unexplored combinations.
-  - Run backtests using dynamic lookback windows.
-  - Record results and insights.
+ - Pick 5 least recently tested or unexplored combinations.
+ - Run backtests using dynamic lookback windows.
+ - Record results and insights.
 
 ### 2. Summary & Comparison Cycle (Every 1 Hour)
 - **Action:**
-  - Aggregate results from the last hour.
-  - Compare against the daily "Best Strategy" baseline.
-  - If a new winner is found, promote it to the daily baseline.
-  - Generate a summary report with insights and observations.
-  - Update decision logic for the next optimization cycle.
-  - Persist the best strategy configuration for future comparison.
+ - Aggregate results from the last hour.
+ - Compare against the daily "Best Strategy" baseline.
+ - If a new winner is found, promote it to the daily baseline.
+ - Generate a summary report with insights and observations.
+ - Update decision logic for the next optimization cycle.
+ - Persist the best strategy configuration for future comparison.
 
 ## Dynamic Lookback Windows
 Lookback is scaled to ensure roughly the same candle count (~1,000 - 2,000 candles) for statistical relevance:
@@ -40,15 +40,15 @@ Each result entry must include:
 - `candle_count`: Total candles processed
 - `parameters`: JSON object of settings tested (min_score, weights, etc.)
 - `metrics`:
-    - `trade_count`: Total trades executed
-    - `pnl_pct`: Total profit/loss percentage
-    - `win_rate`: Percentage of winning trades
-    - `loss_rate`: Percentage of losing trades
-    - `max_drawdown`: Peak-to-trough decline
-    - `profit_factor`: Gross profit / gross loss
-    - `avg_trade_pct`: Average profit per trade
+ - `trade_count`: Total trades executed
+ - `pnl_pct`: Total profit/loss percentage
+ - `win_rate`: Percentage of winning trades
+ - `loss_rate`: Percentage of losing trades
+ - `max_drawdown`: Peak-to-trough decline
+ - `profit_factor`: Gross profit / gross loss
+ - `avg_trade_pct`: Average profit per trade
 - `insights`:
-    - `parameter_impact`: How specific changes affected results (e.g., "Increasing MACD weight improved win rate by 5% but reduced trade count by 10%")
+ - `parameter_impact`: How specific changes affected results (e.g., "Increasing MACD weight improved win rate by 5% but reduced trade count by 10%")
 
 ## Logic & Analysis Requirements
 
@@ -81,9 +81,26 @@ The cronjob must analyze how individual parameters affect performance:
 - **Tested:** 30 combinations across 5 symbols.
 - **New Winner:** BTC_v2_aggressive (PnL +5.2%, WR 68%) - Beat baseline by 1.2%.
 - **Observations:** 
-  - min_score > 0.3 on US100 significantly reduces drawdown.
-  - 1H HTF filter is 20% more effective than 30m for Gold.
+ - min_score > 0.3 on US100 significantly reduces drawdown.
+ - 1H HTF filter is 20% more effective than 30m for Gold.
 - **Actionable Insight:** Increasing MOMENTUM weight on XAU 5m shows positive correlation with Profit Factor.
+```
+
+## Cronjob Setup
+
+```bash
+# Run as daemon (continuous 10min + 1hr cycles)
+cd /Users/pinchr/dev/cfd-trading-bot/backend
+python3 -m cron.optimizer_cron
+
+# Or run once (quick test)
+python3 -m cron.optimizer_cron --quick
+
+# Add to crontab for auto-start on boot:
+@reboot cd /Users/pinchr/dev/cfd-trading-bot/backend && python3 -m cron.optimizer_cron >> /Users/pinchr/logs/optimizer.log 2>&1
+
+# Logs location
+/Users/pinchr/logs/optimizer.log
 ```
 
 ## Commit Message Suggestion

@@ -519,7 +519,8 @@ export const MainTab: React.FC<MainTabProps> = ({
         {/* Collapsible Content */}
         {expandedSection === "signals" && (
           <SignalsGrid 
-            onSignalClick={handleSignalClick} 
+            onSignalClick={handleSignalClick}
+            selectedSymbol={selectedSymbol}
             onRefresh={() => {
               setLastRefresh(r => ({ ...r, signals: Date.now() }));
               // Fetch signals to update state

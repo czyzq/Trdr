@@ -146,8 +146,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData, broker = "simulat
   const balance = account?.balance_usd ?? accountData?.balance_usd ?? 0;
   const equity = account?.equity_usd ?? accountData?.equity_usd ?? 0;
   const openTrades = account?.open_trades ?? accountData?.open_trades ?? 0;
-  const closedTrades = account?.closed_trades ?? 0;
-  const winRate = account?.win_rate ?? 0;
+  const closedTrades = account?.closed_trades ?? accountData?.closed_trades ?? 0;
+  const winRate = account?.win_rate ?? accountData?.win_rate ?? 0;
+  const winCount = account?.win_count ?? accountData?.win_count ?? 0;
+  const lossCount = account?.loss_count ?? accountData?.loss_count ?? 0;
   const totalPnl = account?.total_pnl_usd ?? 0;
   const accountMode = account?.mode ?? accountData?.mode ?? "simulate";
 
@@ -245,6 +247,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData, broker = "simulat
           label="Closed"
           value={closedTrades.toString()}
           color="var(--text-muted)"
+        />
+        <StatBox
+          label="Wins"
+          value={winCount.toString()}
+          color="var(--success)"
+        />
+        <StatBox
+          label="Losses"
+          value={lossCount.toString()}
+          color="var(--danger)"
         />
         <StatBox
           label="Win Rate"

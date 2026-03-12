@@ -164,8 +164,28 @@ async def lifespan(app: FastAPI):
     account["last_scan"] = datetime.utcnow().isoformat()
     log_event(f"Account loaded: ${account['balance_usd']:.2f} USD", "success")
 
-    # Start autonomous trading loop
-    _trading_task = asyncio.create_task(auto_trade_loop())
+    # Start autonomous trading loop with watchdog
+    _trading_task = None
+    
+    async def start_auto_trade_with_watchdog():
+        """Start auto-trade loop with automatic restart if it crashes or exits."""
+        from services.trading_engine import auto_trade_loop
+        while True:
+            try:
+                log_event("[AUTO-TRADE-WATCHDOG] Starting auto-trade loop...", "info")
+                await auto_trade_loop()
+                # If we get here, loop exited unexpectedly - log it!
+                log_event("[AUTO-TRADE-WATCHDOG] Loop exited unexpectedly! Restarting...", "error")
+            except Exception as e:
+                import traceback
+                log_event(f"[AUTO-TRADE-WATCHDOG] Loop crashed: {e}", "error")
+                log_event(f"[AUTO-TRADE-WATCHDOG] Traceback: {traceback.format_exc()}", "error")
+            finally:
+                # Always wait before restart
+                log_event("[AUTO-TRADE-WATCHDOG] Waiting 5s before restart...", "info")
+                await asyncio.sleep(5)
+    
+    _trading_task = asyncio.create_task(start_auto_trade_with_watchdog())
     _price_cache_task = asyncio.create_task(price_cache_loop())
     log_event("[AUTO-TRADE] Background task launched (5 min interval)", "success")
     log_event("[PRICE-CACHE] Live price cache started (3 sec refresh)", "success")

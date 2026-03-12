@@ -1,5 +1,27 @@
 # Strategy Changes Log
 
+## 2026-03-13 (00:22 UTC) - Strategy Optimizer Run
+
+### Status: ✅ IMPROVED - Scalp strategies outperform
+
+Tested scalp strategies (xau_scalp_trend, btc_scalp_trend) with 60m timeframe:
+
+| Symbol | Trades | Win Rate | Return | Notes |
+|--------|--------|----------|--------|-------|
+| BTC    | 56     | 42.9%    | +7.2%  | ✅ Up from 39 trades |
+| XAU    | 49     | 40.8%    | +4.5%  | ✅ Up from 19 trades, -1% |
+
+### Key Finding
+- **More trades = better results** for both XAU and BTC
+- Scalp strategies with min_score 0.15 generate more signals
+- 60m timeframe provides good balance of signals vs noise
+
+### Changes to Consider
+- Consider lowering min_score for XAU in production
+- Enable btc_scalp_trend and xau_scalp_trend for live trading
+
+---
+
 ## 2026-03-11 (01:29 UTC) - Weight Verification Round 2
 
 ### Status: ✅ VERIFIED - Weights already optimal
