@@ -1606,7 +1606,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               style={{ cursor: "ns-resize" }}
               onMouseDown={(e) => handleLineDragStart("tp", e)}
             />
-            <text x="5" y={priceToY(selectedPosition.take_profit) - 8} fill="#22c55e" fontSize="11" fontWeight="bold">TP: {selectedPosition.take_profit.toFixed(2)}</text>
+            <text x="5" y={priceToY(selectedPosition.take_profit) - 8} fill="#22c55e" fontSize="11" fontWeight="bold">{(() => { const e = selectedPosition.entry_price; const tp = selectedPosition.take_profit; const size = selectedPosition.size || 0; const lev = selectedPosition.leverage || 1; const isBuy = selectedPosition.direction === 'buy'; const pnl = isBuy ? ((tp - e) / e) * lev * size * e : ((e - tp) / e) * lev * size * e; const sign = pnl >= 0 ? '+' : ''; return `TP: ${tp.toFixed(2)} ${sign}$${Math.abs(pnl).toFixed(2)}`; })()}</text>
             <text x={usableWidth - 5} y={priceToY(selectedPosition.take_profit) + 3} fill="#22c55e" fontSize="9" textAnchor="end" opacity="0.7">↕ drag</text>
             
             {/* SL Line - draggable */}
@@ -1630,7 +1630,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
               style={{ cursor: "ns-resize" }}
               onMouseDown={(e) => handleLineDragStart("sl", e)}
             />
-            <text x="5" y={priceToY(selectedPosition.stop_loss) - 8} fill="#ef4444" fontSize="11" fontWeight="bold">SL: {selectedPosition.stop_loss.toFixed(2)}</text>
+            <text x="5" y={priceToY(selectedPosition.stop_loss) - 8} fill="#ef4444" fontSize="11" fontWeight="bold">{(() => { const e = selectedPosition.entry_price; const sl = selectedPosition.stop_loss; const size = selectedPosition.size || 0; const lev = selectedPosition.leverage || 1; const isBuy = selectedPosition.direction === 'buy'; const pnl = isBuy ? ((sl - e) / e) * lev * size * e : ((e - sl) / e) * lev * size * e; const sign = pnl >= 0 ? '+' : ''; return `SL: ${sl.toFixed(2)} ${sign}$${Math.abs(pnl).toFixed(2)}`; })()}</text>
             <text x={usableWidth - 5} y={priceToY(selectedPosition.stop_loss) + 3} fill="#ef4444" fontSize="9" textAnchor="end" opacity="0.7">↕ drag</text>
             
             {/* Entry Line */}
