@@ -524,14 +524,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   };
 
   // TP/SL line dragging
-  const [draggingLine, setDraggingLine] = useState<"tp" | "sl" | null>(null);
+  const [draggingLine, setDraggingLine] = useState<"tp" | "sl" | null>(null);   const draggingLineRef = useRef<"tp" | "sl" | null>(null);
   const [dragLineStartY, setDragLineStartY] = useState(0);
   const [dragLineStartValue, setDragLineStartValue] = useState(0);
 
   const handleLineDragStart = (line: "tp" | "sl", e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDraggingLine(line);
+    setDraggingLine(line); draggingLineRef.current = line;
     setDragLineStartY(e.clientY);
     const currentValue = line === "tp" 
       ? selectedPosition?.take_profit 
@@ -540,7 +540,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   };
 
   const handleLineDragMove = useCallback((e: MouseEvent) => {
-    if (!draggingLine || !selectedPosition) return;
+    if (!draggingLineRef.current || !selectedPosition) return;
     
     const deltaY = dragLineStartY - e.clientY; // Invert: drag up = increase
     // Scale pixels to SVG user units using the actual rendered SVG height     const svgEl = (e.target as SVGElement)?.closest?.('svg') ||       document.querySelector(`svg[data-chart-svg]`) as SVGSVGElement | null;     const svgRenderedH = svgEl ? svgEl.getBoundingClientRect().height : priceChartH;     const svgScale = svgRenderedH > 0 ? totalH / svgRenderedH : 1;     const sensitivity = (priceRange / priceChartH) * svgScale; // screen pixels → price
@@ -554,14 +554,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     window.dispatchEvent(new CustomEvent("adjustPositionLine", {
       detail: {
         positionId: selectedPosition.id,
-        type: draggingLine,
+        type: draggingLineRef.current,
         value: roundedValue
       }
     }));
-  }, [draggingLine, selectedPosition, dragLineStartY, dragLineStartValue, priceRange, priceChartH, totalH, containerRef);
+  }, [selectedPosition, dragLineStartY, dragLineStartValue, priceRange, priceChartH, totalH]);
 
   const handleLineDragEnd = useCallback(() => {
-    setDraggingLine(null);
+    setDraggingLine(null); draggingLineRef.current = null;
   }, []);
 
   // Add/remove global event listeners for line dragging
