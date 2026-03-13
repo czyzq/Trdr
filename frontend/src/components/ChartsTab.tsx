@@ -252,11 +252,11 @@ export const ChartsTab: React.FC = () => {
       }
     };
 
-    window.addEventListener("adjustPositionLine", handleLineAdjust as EventListener);
+    window.addEventListener("adjustPositionLine", handleLineAdjust as unknown as EventListener);
     
     return () => {
       clearInterval(interval);
-      window.removeEventListener("adjustPositionLine", handleLineAdjust as EventListener);
+      window.removeEventListener("adjustPositionLine", handleLineAdjust as unknown as EventListener);
     };
   }, [selectedResolution]);
 

@@ -861,14 +861,20 @@ def calculate_dynamic_position_size(
     risk_amount = account_balance * (adjusted_risk / 100)
     risk_per_lot = abs(entry_price - stop_loss_price)
     
-    if risk_per_lot > 0:
-        size = risk_amount / risk_per_lot
-    else:
-        size = risk_amount / entry_price
+    # Commodity multiplier: XAU=$100/lot/$1, XAG=$5/lot/$1
+    # For XAG we need to divide by 5 instead of 100 to get larger lot size
+    commodity_multiplier = 5 if symbol == "XAG" else 100
     
-    # Apply leverage
+    if risk_per_lot > 0:
+        size = risk_amount / (risk_per_lot * commodity_multiplier)
+    else:
+        size = risk_amount / (entry_price * commodity_multiplier)
+    
+    # Apply leverage (capped by instrument max)
+    instrument_leverage = {"XAU": 20, "XAG": 10, "US100": 20, "BTC": 2}.get(symbol, 10)
+    max_allowed_leverage = min(max_leverage, instrument_leverage)
     leverage = max_leverage * combined_modifier
-    leverage = max(min_leverage, min(max_leverage, leverage))
+    leverage = max(min_leverage, min(max_allowed_leverage, leverage))
     
     size = size * leverage
     

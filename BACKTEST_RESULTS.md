@@ -1,11 +1,40 @@
 # Backtest Results - 2026-03-13 (Strategy Optimizer Run)
 
-## This Run's Results (14 dni, 60m TF, scalp strategies)
+## This Run's Results (2026-03-13 00:53 UTC)
+
+| Symbol | Period | TF | Trades | Win Rate | Return | Notes |
+|--------|--------|-----|--------|----------|--------|-------|
+| **BTC** | 45d | 60m | 216 | 40.7% | **+14.4%** | Same as 30d |
+| **BTC** | 60d | 60m | 216 | 40.7% | **+14.4%** | Same as 30d - capped |
+| **XAU** | 14d | 60m | 49 | 40.8% | **+4.5%** | ✅ Previous best |
+| XAU | 30d | 60m | 278 | 35.6% | -17.1% | ❌ Too many bad trades |
+| XAU | 14d | 5m | 0 | - | 0% | ❌ No data |
+| XAU | 14d | 15m | 0 | - | 0% | ❌ No data |
+| XAG | 14d | 5m | 0 | - | 0% | ❌ No data |
+
+### Key Finding
+- **BTC capped at 216 trades** - longer period (45d, 60d) doesn't increase trades
+- **XAU 5m/15m data unavailable** in MongoDB
+- **XAG 5m data unavailable** in MongoDB
 
 | Symbol | Trades | Win Rate | PnL | Change vs Previous |
 |--------|--------|----------|-----|-------------------|
 | **BTC** | 56 | 42.9% | **+7.2%** | ✅ Improved from 39 trades |
 | **XAU** | 49 | 40.8% | **+4.5%** | ✅ Improved from -1% (19 trades) |
+
+---
+
+## Extended Testing Results (2026-03-13)
+
+| Symbol | Period | TF | Trades | Win Rate | Return | Notes |
+|--------|--------|-----|--------|----------|--------|-------|
+| **BTC** | 30d | 60m | 216 | 40.7% | **+14.4%** | ✅ BEST - More trades = better |
+| XAU | 30d | 60m | 278 | 35.6% | -17.1% | ❌ Too many bad trades |
+| XAG | 14d | 60m | 15 | 33.3% | -7.3% | ❌ Too few trades |
+
+### Key Finding
+- **BTC benefits from longer period (30d)** - 216 trades, +14.4%
+- **XAU/XAG don't benefit from 60m** - too few or losing trades
 
 ---
 

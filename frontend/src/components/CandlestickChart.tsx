@@ -543,7 +543,11 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     if (!draggingLineRef.current || !selectedPosition) return;
     
     const deltaY = dragLineStartY - e.clientY; // Invert: drag up = increase
-    // Scale pixels to SVG user units using the actual rendered SVG height     const svgEl = (e.target as SVGElement)?.closest?.('svg') ||       document.querySelector(`svg[data-chart-svg]`) as SVGSVGElement | null;     const svgRenderedH = svgEl ? svgEl.getBoundingClientRect().height : priceChartH;     const svgScale = svgRenderedH > 0 ? totalH / svgRenderedH : 1;     const sensitivity = (priceRange / priceChartH) * svgScale; // screen pixels → price
+    // Scale pixels to SVG user units using the actual rendered SVG height
+    const svgEl = (e.target as SVGElement)?.closest?.('svg') || document.querySelector(`svg[data-chart-svg]`) as SVGSVGElement | null;     
+    const svgRenderedH = svgEl ? svgEl.getBoundingClientRect().height : priceChartH;     
+    const svgScale = svgRenderedH > 0 ? totalH / svgRenderedH : 1;     
+    const sensitivity = (priceRange / priceChartH) * svgScale; // screen pixels → price
     const deltaPrice = deltaY * sensitivity;
     
     const newValue = dragLineStartValue + deltaPrice;
@@ -558,7 +562,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         value: roundedValue
       }
     }));
-  }, [selectedPosition, dragLineStartY, dragLineStartValue, priceRange, priceChartH, totalH]);
+  }, [draggingLine, selectedPosition, dragLineStartY, dragLineStartValue, priceRange, priceChartH, totalH, containerRef]);
 
   const handleLineDragEnd = useCallback(() => {
     setDraggingLine(null); draggingLineRef.current = null;

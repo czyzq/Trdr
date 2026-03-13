@@ -245,9 +245,9 @@ MAX_HOLD_CANDLES = 20
 # asset_class: "commodity" gets trend-alignment filter
 INSTRUMENT_CONFIG = {
     "XAU": {"min_score": 0.05, "min_agreement": 2, "asset_class": "commodity", "leverage": 20, "trailing_stop": True},
-    "XAG": {"min_score": 0.05, "min_agreement": 2, "asset_class": "commodity", "leverage": 20, "trailing_stop": True},
+    "XAG": {"min_score": 0.05, "min_agreement": 2, "asset_class": "commodity", "leverage": 10, "trailing_stop": True},
     "US100": {"min_score": 0.05, "min_agreement": 2, "asset_class": "equity", "leverage": 20, "trailing_stop": True},
-    "BTC": {"min_score": 0.05, "min_agreement": 2, "asset_class": "crypto", "leverage": 5, "trailing_stop": True},
+    "BTC": {"min_score": 0.05, "min_agreement": 2, "asset_class": "crypto", "leverage": 2, "trailing_stop": True},
 }
 
 

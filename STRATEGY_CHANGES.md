@@ -1,6 +1,29 @@
 # Strategy Changes Log
 
-## 2026-03-13 (00:22 UTC) - Strategy Optimizer Run
+## 2026-03-13 (00:53 UTC) - Extended Period Testing
+
+### Status: ⚠️ BTC CAPPED - XAU needs different approach
+
+Tested longer periods for BTC and different TF for XAU:
+
+| Symbol | Period | TF | Trades | Win Rate | Return | Notes |
+|--------|--------|-----|--------|----------|--------|-------|
+| BTC | 45d | 60m | 216 | 40.7% | +14.4% | Same as 30d |
+| BTC | 60d | 60m | 216 | 40.7% | +14.4% | Same as 30d - capped |
+| XAU | 14d | 5m | 0 | - | 0% | No data |
+| XAU | 14d | 15m | 0 | - | 0% | No data |
+| XAU | 30d | 60m | 278 | 35.6% | -17.1% | Too many bad trades |
+| XAG | 14d | 5m | 0 | - | 0% | No data |
+
+### Key Findings
+- **BTC is capped at ~216 trades** regardless of period (14-60d)
+- **5m/15m data unavailable** for XAU/XAG in MongoDB
+- XAU works best with 14d/60m (+4.5%), not 30d
+
+### Recommendations
+1. Use BTC 30d/60m or 14d/60m for live (both give ~14%/7%)
+2. Keep XAU at 14d/60m (+4.5%)
+3. Need to fetch more 5m data for XAG/XAU to improve
 
 ### Status: ✅ IMPROVED - Scalp strategies outperform
 
@@ -11,14 +34,32 @@ Tested scalp strategies (xau_scalp_trend, btc_scalp_trend) with 60m timeframe:
 | BTC    | 56     | 42.9%    | +7.2%  | ✅ Up from 39 trades |
 | XAU    | 49     | 40.8%    | +4.5%  | ✅ Up from 19 trades, -1% |
 
-### Key Finding
-- **More trades = better results** for both XAU and BTC
-- Scalp strategies with min_score 0.15 generate more signals
-- 60m timeframe provides good balance of signals vs noise
+---
 
-### Changes to Consider
-- Consider lowering min_score for XAU in production
-- Enable btc_scalp_trend and xau_scalp_trend for live trading
+## 2026-03-13 (00:36 UTC) - Extended Period Testing
+
+### Status: ⚠️ MIXED RESULTS
+
+Tested longer periods (30d) and XAG:
+
+| Symbol | Period | TF | Trades | Win Rate | Return | Notes |
+|--------|--------|-----|--------|----------|--------|-------|
+| **BTC** | 30d | 60m | 216 | 40.7% | **+14.4%** | ✅ BEST - More time = more good trades |
+| XAU | 30d | 60m | 278 | 35.6% | -17.1% | ❌ Too many trades, lower quality |
+| XAG | 14d | 60m | 15 | 33.3% | -7.3% | ❌ Not enough trades |
+
+### Fixed Bug
+- broker_sim.py: Fixed syntax error (extra `}` in INSTRUMENTS dict)
+
+### Key Findings
+- **BTC 30d/60m is best config** - 216 trades, +14.4%
+- **XAU doesn't work well with 60m** - try different TF or indicators
+- **XAG needs different approach** - 60m gives too few signals
+
+### Recommendations
+1. Use BTC with 30d period, 60m TF for live trading
+2. XAU needs lower timeframe or different strategy
+3. XAG - try 5m TF instead of 60m
 
 ---
 

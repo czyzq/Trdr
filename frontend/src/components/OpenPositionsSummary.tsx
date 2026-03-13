@@ -155,7 +155,7 @@ export const OpenPositionsSummary: React.FC<OpenPositionsSummaryProps> = ({
                 const oldPos = prev.find(op => op.id === p.id);
                 return oldPos || p;
               }
-              const newPos = newPositions.find(np => np.id === p.id);
+              const newPos = newPositions.find((np: Position) => np.id === p.id);
               return newPos || p;
             });
           });
