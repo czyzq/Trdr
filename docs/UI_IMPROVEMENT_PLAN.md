@@ -2,113 +2,73 @@
 
 **Data utworzenia:** 2026-03-13  
 **Branch:** `feature/unified-backtest-fixes-2026-03-11`  
-**Status:** Wstępny plan zmian
+**Status:** Audyt UX (02:30 CET) — Wdrażanie zmian czytelności
 
 ---
 
 ## 🎯 Cel
 
-Poprawa UX dashboardu głównego, szczególnie w zakresie edycji pozycji (TP/SL drag), markerów transakcji oraz czytelności wskaźników technicznych.
+Poprawa UX dashboardu głównego, ze szczególnym uwzględnieniem czytelności danych transakcyjnych, stabilności edycji (TP/SL) oraz hierarchii wizualnej informacji.
 
 ---
 
-## 🐛 Krytyczne Fixy TP/SL Drag
+## 🔍 Audit UI & Czytelność (Stan na 02:30)
 
-### Dlaczego TP/SL drag nadal nie działa
+Widzę, że dashboard przeszedł pewne zmiany [screenshot:2]. Oto analiza aktualnego stanu:
 
-Po analizie kodu `CandlestickChart.tsx` zidentyfikowano **3 pozostałe błędy**:
-
-#### Bug #1: `useCallback` deps zawiera `draggingLine` → stale closure
-```ts
-// ❌ BŁĄD (linia ~561)
-}, [draggingLine, selectedPosition, dragLineStartY, dragLineStartValue, priceRange, priceChartH, totalH, containerRef]);
-```
-**Fix:** Usuń `draggingLine` i `containerRef` z deps. Ref jest mutable, nie ma wartości reaktywnej.
-
-#### Bug #2: `useEffect` usuwa/dodaje listenery przy każdym renderze
-**Problem:** `handleLineDragMove` zmienia referencję (re-render), co powoduje unmount/remount listenera `mousemove`.
-**Fix:** Użyj `useRef` dla handlera i rejestruj listener tylko raz w `useEffect(() => ..., [draggingLine])`.
-
-#### Bug #3: SVG `onMouseDown` vs TP/SL Line
-**Problem:** `e.stopPropagation()` w `handleLineDragStart` może nie blokować globalnego `handleMouseDown` na poziomie SVG, jeśli zdarzenia nie są poprawnie obsłużone.
-**Fix:** Upewnij się, że `pointer-events: all` jest na liniach TP/SL, a `handleMouseDown` ignoruje kliknięcia w te elementy.
+### 1. **Główne Problemy Czytelności (Dashboard)**
+- **Wykres (Chart Area):** Candlesticki są bardzo małe i zbite (zbyt dużo świec na ekranie naraz). Wskaźniki techniczne (RSI, MACD) zajmują relatywnie dużo miejsca względem głównej akcji cenowej.
+- **Hierarchia Ceny:** Aktualna cena instrumentu na wykresie (`85.39`) jest widoczna, ale dashed line przechodzi przez świece, co wprowadza szum wizualny.
+- **Karty Pozycji:** Pasek postępu (Progress Bar) pojawił się pod pozycjami, co jest dobre, ale napisy `SL: 5069.63` i `TP: 5260.60` są ciemnoszare na czarnym tle — **praktycznie nieczytelne** bez przybliżenia.
+- **Sidebar:** P&L dzienny i Equity są w tej samej sekcji, ale brakuje separacji wizualnej. "Opened/Closed" trades to tylko liczby bez ikon.
 
 ---
 
-## 📉 Fix Markerów Pozycji (Trade Markers)
+## 🛠️ Plan Poprawy Czytelności (Action Items)
 
-**Problem:** Strzałki wejścia/wyjścia pojawiają się na lewym brzegu wykresu (X=0 lub bliskie 0).
+### 📈 Wykres i Analiza Techniczna
+- [ ] **Density Control:** Zmniejsz liczbę domyślnie wyświetlanych świec o 30% (większe, wyraźniejsze body świec).
+- [ ] **Indicator Layout:** Zmień tło paneli RSI/MACD na lekko jaśniejszy szary (`#1a1a1a`), aby oddzielić je od czarnego tła wykresu głównego.
+- [ ] **Price Pill:** Dodaj prostokątne tło (pill) pod ceną na osi Y, aby była zawsze czytelna niezależnie od świec w tle.
 
-**Przyczyna:** Błąd w mapowaniu `idxToX` przy dynamicznej liczbie świec.
-- `validData` to wycinek `allValidData` po okresie warmup (np. pierwsze 20 świec).
-- `effectiveEntryIdx` może odnosić się do indeksu w `allValidData`, podczas gdy `idxToX` oczekuje indeksu relatywnego do `validData`.
-- Jeśli `idx < 0`, funkcja `idxToX` zwraca wartości na lewym marginesie.
+### 💳 Karty Pozycji (Open Positions)
+- [ ] **Contrast Fix:** Zmień kolor czcionki dla SL/TP na biały lub jasnoszary (`#d1d5db`). Aktualny ciemnoszary jest niewidoczny.
+- [ ] **Status Badges:** Dodaj małe tagi `PROFIT` (zielony) lub `LOSS` (czerwony) obok numeru ID transakcji.
+- [ ] **Progress Bar Polish:** Zmień kolor paska postępu na gradient (Czerwony -> Szary -> Zielony), aby wizualnie pokazać "bezpieczeństwo" pozycji względem SL/TP.
 
-**Fix:**
-```ts
-// W trades.map upewnij się, że index jest poprawnie obliczony względem validData:
-const effectiveEntryIdx = validData.findIndex(c => ...); 
-if (effectiveEntryIdx === -1) return null; // Nie rysuj, jeśli świecy nie ma w widocznym zakresie
-```
-
----
-
-## 📈 Fix Wskaźników (SMA, RSI, MACD)
-
-**Problem:** Wskaźniki nie pokrywają całego wykresu, kończą się wcześniej lub są przesunięte.
-
-**Przyczyna:** Niezgodność indeksowania polylinii.
-- Wskaźniki (RSI, SMA) są liczone na pełnej tablicy `allValidData`.
-- Rendering (`idxToX`) operuje na długości `n = validData.length`.
-- Jeśli pętla rysująca (np. `rsiPolyline`) leci po całej długości `indicators.rsi.length`, a `idxToX` używa `n` z wycinka, to punkty są mapowane błędnie (wszystkie "stare" dane z warmupu lądują na lewym brzegu).
-
-**Fix:** Wszystkie funkcje pomocnicze (`toPolyline`, `rsiPolyline`) muszą używać wycinków wskaźników, które odpowiadają `validData`.
-```ts
-// Przykład:
-const displayRsi = indicators.rsi.slice(bbWarmup);
-// Potem w rsiPolyline:
-for (let i = 0; i < displayRsi.length; i++) {
-  const x = idxToX(i); // i od 0 do n-1
-  // ...
-}
-```
+### 🗄️ Sidebar (Kluczowe metryki)
+- [ ] **Icons:** Dodaj ikony obok metryk (np. 💰 dla Balance, 📈 dla Win Rate, ⏱️ dla Sessions).
+- [ ] **Visual Grouping:** Rozdziel sekcję Balance od sekcji Stats poziomą linią (separator).
 
 ---
 
-## 📊 Zmiany UI/UX Dashboardu
-docs: add UI improvement plan with technical fixes for drag, markers and indicators
-### 1. **Chart Area**
-- [ ] Zwiększ `height` do **420px**.
-- [ ] Zwiększ panele wskaźników: RSI (**70px**), MACD (**60px**), Volume (**50px**).
-- [ ] Dodaj **Live Price Tick** na prawej osi Y (zielony/czerwony badge).
+## 🐛 Krytyczne Fixy Techniczne (Reminder)
 
-### 2. **Open Positions**
-- [ ] Karty pozycji z kolorowym lewym borderem (BUY/SELL).
-- [ ] **Progress Bar** wizualizujący odległość ceny od SL i TP.
-- [ ] P&L z informacją o czasie trwania pozycji (np. `1h 24m`).
-- [ ] Przycisk **"📈 Chart"** centrujący widok na danej pozycji.
+### Bug #1: Markery transakcji na lewej krawędzi
+**Problem:** Widoczny na [screenshot:2] — strzałki są stłoczone po lewej stronie.
+**Fix:** Mapowanie indeksu transakcji musi uwzględniać przesunięcie `bbWarmup`.
 
-### 3. **Sidebar & Alerts**
-- [ ] **Drawdown Alert Box** (widoczny jeśli DD > 5%).
-- [ ] Mini wykres kołowy (Donut) dla **Win Rate**.
+### Bug #2: Wskaźniki ucięte/przesunięte
+**Problem:** Linie MACD/RSI kończą się przed ostatnią świecą.
+**Fix:** Synchronizacja długości tablic wskaźników z `validData.length`.
 
 ---
 
-## 🚀 Plan Implementacji
+## 🚀 Harmonogram Implementacji
 
-### Faza 1: Fixy techniczne (Piority 🔴)
-- [ ] Naprawa `idxToX` i synchronizacja indeksów wskaźników/markerów.
-- [ ] Stabilizacja TP/SL drag (useRef, listener fix).
-- [ ] Usunięcie "skakania" linii przy kliknięciu.
+### Faza 1: Quick Wins (Czytelność)
+- [ ] Zmiana kontrastu tekstów SL/TP na kartach.
+- [ ] Dodanie Price Pill na osi Y.
+- [ ] Separatory w sidebarze.
 
-### Faza 2: Poprawa Czytelności (Piority 🟡)
-- [ ] Layout wykresu (wysokość, proporcje paneli).
-- [ ] Live price label na osi Y.
+### Faza 2: Techniczne Fixy
+- [ ] Naprawa trade markers (pozycja na świecach).
+- [ ] Pełna synchronizacja wskaźników na całej szerokości wykresu.
 
-### Faza 3: Nowy Dashboard UI (Piority 🟢)
-- [ ] Nowe karty pozycji.
-- [ ] Progress bary SL/TP.
+### Faza 3: Nowe Funkcje
+- [ ] Margin Level Indicator.
+- [ ] Equity Curve (Sparkline).
 
 ---
 
-**Ostatnia aktualizacja:** 2026-03-13 01:15 CET
+**Ostatnia aktualizacja:** 2026-03-13 02:35 CET
