@@ -152,6 +152,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData, broker = "simulat
   const lossCount = account?.loss_count ?? accountData?.loss_count ?? 0;
   const totalPnl = account?.total_pnl_usd ?? 0;
   const accountMode = account?.mode ?? accountData?.mode ?? "simulate";
+  
+  // Calculate drawdown
+  const peakEquity = account?.peak_equity_usd ?? accountData?.peak_equity_usd ?? equity;
+  const drawdown = peakEquity > 0 ? ((peakEquity - equity) / peakEquity) * 100 : 0;
+  const showDrawdownAlert = drawdown > 5;
 
   useEffect(() => {
     const updateScan = () => {
