@@ -1,5 +1,30 @@
 # Strategy Changes Log
 
+## 2026-03-13 (02:38 UTC) - min_score Scan Confirmation
+
+### Status: ✅ CONFIRMED - Base config already optimal
+
+Tested min_score variations for XAU (14d, 60m):
+
+| Config | Trades | Win Rate | Return | Notes |
+|--------|--------|----------|--------|-------|
+| **base** | 41 | 43.9% | **+5.9%** | ✅ BEST |
+| min_score_0.75x | 126 | 38.1% | -17.9% | ❌ More trades = losses |
+| min_score_1.25x | 3 | 100% | +1.2% | ⚠️ Too selective |
+| min_score_1.5x | 0 | 0% | 0% | ❌ Too strict |
+
+### Key Findings
+1. **XAU base config confirmed optimal** - lowering min_score gives more trades but worse returns
+2. **Less is more**: 41 trades at +5.9% beats 126 trades at -17.9%
+3. **No further min_score tuning needed** for XAU
+
+### Recommendations
+- Keep XAU at base config (min_score=0.15)
+- Keep BTC at btc_scalp_trend (+14.4%)
+- Focus on other improvements
+
+---
+
 ## 2026-03-13 (02:23 UTC) - XAU min_score Scan Complete
 
 ### Status: ✅ CONFIRMED - XAU base is optimal
