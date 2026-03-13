@@ -860,7 +860,8 @@ def calculate_dynamic_position_size(
     # Calculate position size with adjusted risk
     risk_amount = account_balance * (adjusted_risk / 100)
     risk_per_lot = abs(entry_price - stop_loss_price)
-    
+    symbol = strategy_config.get('symbol', 'XAU')  # Default to XAU if not specified
+    print(f"[POSITION SIZE] {symbol}: Base Risk: {base_risk_percent}% | Adjusted Risk: {adjusted_risk:.2f}% | Score Mod: {score_modifier:.2f} | Conf Mod: {confidence_modifier:.2f} | Pos Mod: {pos_mod:.2f} | Vol Mod: {vol_mod:.2f}")
     # Commodity multiplier: XAU=$100/lot/$1, XAG=$5/lot/$1
     # For XAG we need to divide by 5 instead of 100 to get larger lot size
     commodity_multiplier = 5 if symbol == "XAG" else 100

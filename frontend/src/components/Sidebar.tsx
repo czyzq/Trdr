@@ -209,6 +209,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData, broker = "simulat
         </div>
       </div>
 
+      {/* Drawdown Alert */}
+      {showDrawdownAlert && (
+        <div 
+          className="p-3 mx-2 mt-2 rounded-md"
+          style={{ 
+            backgroundColor: "rgba(239, 68, 68, 0.15)", 
+            border: "1px solid rgba(239, 68, 68, 0.4)"
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚠️</span>
+            <div>
+              <div className="text-xs font-bold" style={{ color: "#ef4444" }}>
+                DRAWDOWN ALERT
+              </div>
+              <div className="text-[10px]" style={{ color: "#ef4444" }}>
+                {drawdown.toFixed(1)}% below peak (${peakEquity.toFixed(0)})
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Equity Section */}
       <div className="p-4" style={{ borderBottom: "1px solid var(--bg-tertiary)" }}>
         <div
@@ -258,13 +281,39 @@ export const Sidebar: React.FC<SidebarProps> = ({ accountData, broker = "simulat
           value={lossCount.toString()}
           color="var(--danger)"
         />
-        <StatBox
-          label="Win Rate"
-          value={`${winRate}%`}
-          color={
-            winRate >= 50 ? "var(--success)" : winRate > 0 ? "var(--danger)" : "var(--text-muted)"
-          }
-        />
+        {/* Win Rate Donut */}
+        <div className="flex flex-col items-center justify-center p-2">
+          <div className="relative" style={{ width: 48, height: 48 }}>
+            <svg viewBox="0 0 36 36" className="w-12 h-12">
+              {/* Background circle */}
+              <circle
+                cx="18" cy="18" r="15.9"
+                fill="none"
+                stroke="var(--bg-tertiary)"
+                strokeWidth="3"
+              />
+              {/* Win arc */}
+              <circle
+                cx="18" cy="18" r="15.9"
+                fill="none"
+                stroke={winRate >= 50 ? "var(--success)" : "var(--danger)"}
+                strokeWidth="3"
+                strokeDasharray={`${winRate} ${100 - winRate}`}
+                strokeDashoffset="25"
+                transform="rotate(-90 18 18)"
+              />
+            </svg>
+            <div 
+              className="absolute inset-0 flex items-center justify-center text-[10px] font-bold"
+              style={{ color: winRate >= 50 ? "var(--success)" : "var(--danger)" }}
+            >
+              {winRate}%
+            </div>
+          </div>
+          <div className="text-[9px] mt-1" style={{ color: "var(--text-muted)" }}>
+            Win Rate
+          </div>
+        </div>
         <StatBox
           label="Total P&L"
           value={`${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(0)}`}

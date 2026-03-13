@@ -426,7 +426,7 @@ async def backtest(
         symbol=symbol, resolution=resolution, days=days,
         date_from=date_from, date_to=date_to,
         min_score=min_score, initial_balance=initial_balance,
-        strategy=strategy, indicators=indicators, settings=settings,
+        strategy_name=strategy, indicators=indicators, settings=settings,
         leverage=leverage, tp_pct=tp_pct, sl_pct=sl_pct,
         risk_pct=risk_pct, trailing_sl_pct=trailing_sl_pct,
         volume_filter=volume_filter, multi_tf=multi_tf,
@@ -448,7 +448,7 @@ async def run_backtest(
     date_to: Optional[str] = None,
     min_score: float = 0.15,
     initial_balance: float = 3000.0,
-    strategy: Optional[str] = None,
+    strategy_name: Optional[str] = None,
     indicators: Optional[str] = None,
     settings: Optional[str] = None,
     leverage: int = 10,
@@ -505,12 +505,12 @@ async def run_backtest(
         return {"error": f"Unknown symbol: {symbol}"}
 
     # Validate strategy if provided
-    if strategy:
+    if strategy_name:
         from strategies import STRATEGIES
 
-        if strategy not in STRATEGIES:
-            return {"error": f"Unknown strategy: {strategy}. Available: {list(STRATEGIES.keys())}"}
-        strategy_id = strategy
+        if strategy_name not in STRATEGIES:
+            return {"error": f"Unknown strategy: {strategy_name}. Available: {list(STRATEGIES.keys())}"}
+        strategy_id = strategy_name
     else:
         strategy_id = get_symbol_strategy(symbol_key)
 
