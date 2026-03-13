@@ -227,7 +227,7 @@ function parseTimestamp(
 export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   symbol,
   data,
-  height = 320,
+  height = 420,
   showVolume = true,
   showRSI = true,
   resolution = "60",
@@ -330,6 +330,33 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       upper: indicators.bb.upper.slice(bbWarmup),
       middle: indicators.bb.middle.slice(bbWarmup),
       lower: indicators.bb.lower.slice(bbWarmup),
+    };
+  }, [indicators, bbWarmup]);
+
+  // Get RSI values aligned with displayed candles (slice to match validData)
+  const displayRSI = useMemo(() => {
+    if (!indicators?.rsi || bbWarmup <= 0) return indicators?.rsi;
+    return indicators.rsi.slice(bbWarmup);
+  }, [indicators, bbWarmup]);
+
+  // Get SMA values aligned with displayed candles (slice to match validData)
+  const displaySMA20 = useMemo(() => {
+    if (!indicators?.sma20 || bbWarmup <= 0) return indicators?.sma20;
+    return indicators.sma20.slice(bbWarmup);
+  }, [indicators, bbWarmup]);
+
+  const displaySMA50 = useMemo(() => {
+    if (!indicators?.sma50 || bbWarmup <= 0) return indicators?.sma50;
+    return indicators.sma50.slice(bbWarmup);
+  }, [indicators, bbWarmup]);
+
+  // Get MACD values aligned with displayed candles (slice to match validData)
+  const displayMACD = useMemo(() => {
+    if (!indicators?.macd || bbWarmup <= 0) return indicators?.macd;
+    return {
+      macdLine: indicators.macd.macdLine.slice(bbWarmup),
+      signalLine: indicators.macd.signalLine.slice(bbWarmup),
+      histogram: indicators.macd.histogram.slice(bbWarmup),
     };
   }, [indicators, bbWarmup]);
 
@@ -442,9 +469,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const isMobile = containerWidth > 0 && containerWidth < 600;
   const showMACD = overlays.macd;
   const chartWidth = containerWidth > 0 ? Math.max(800, containerWidth) : 1100;
-  const macdH = showMACD ? 50 : 0;
-  const volumeH = showVolume ? 45 : 0;
-  const rsiH = showRSI ? 50 : 0;
+  const macdH = showMACD ? 60 : 0;
+  const volumeH = showVolume ? 50 : 0;
+  const rsiH = showRSI ? 70 : 0;
   const gapH = 8;
   const xAxisH = 25; // Height reserved for X-axis labels
   const priceChartH = Math.max(
@@ -524,45 +551,22 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   };
 
   // TP/SL line dragging
-  const [draggingLine, setDraggingLine] = useState<"tp" | "sl" | null>(null);   const draggingLineRef = useRef<"tp" | "sl" | null>(null);
-  const [dragLineStartY, setDragLineStartY] = useState(0);
-  const [dragLineStartValue, setDragLineStartValue] = useState(0);
+  const [draggingLine, setDraggingLine] = useState<"tp" | "sl" | null>(null);
+  const draggingLineRef = useRef<"tp" | "sl" | null>(null);
+  const dragLineStartYRef = useRef(0);
+  const dragLineStartValueRef = useRef(0);
 
   const handleLineDragStart = (line: "tp" | "sl", e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDraggingLine(line); draggingLineRef.current = line;
-    setDragLineStartY(e.clientY);
+    setDraggingLine(line);
+    draggingLineRef.current = line;
+    dragLineStartYRef.current = e.clientY;
     const currentValue = line === "tp" 
       ? selectedPosition?.take_profit 
       : selectedPosition?.stop_loss;
-    setDragLineStartValue(currentValue || 0);
+    dragLineStartValueRef.current = currentValue || 0;
   };
-
-  const handleLineDragMove = useCallback((e: MouseEvent) => {
-    if (!draggingLineRef.current || !selectedPosition) return;
-    
-    const deltaY = dragLineStartY - e.clientY; // Invert: drag up = increase
-    // Scale pixels to SVG user units using the actual rendered SVG height
-    const svgEl = (e.target as SVGElement)?.closest?.('svg') || document.querySelector(`svg[data-chart-svg]`) as SVGSVGElement | null;     
-    const svgRenderedH = svgEl ? svgEl.getBoundingClientRect().height : priceChartH;     
-    const svgScale = svgRenderedH > 0 ? totalH / svgRenderedH : 1;     
-    const sensitivity = (priceRange / priceChartH) * svgScale; // screen pixels → price
-    const deltaPrice = deltaY * sensitivity;
-    
-    const newValue = dragLineStartValue + deltaPrice;
-    // Round to reasonable precision
-    const roundedValue = Math.round(newValue * 100) / 100;
-    
-    // Dispatch event for parent to handle
-    window.dispatchEvent(new CustomEvent("adjustPositionLine", {
-      detail: {
-        positionId: selectedPosition.id,
-        type: draggingLineRef.current,
-        value: roundedValue
-      }
-    }));
-  }, [draggingLine, selectedPosition, dragLineStartY, dragLineStartValue, priceRange, priceChartH, totalH, containerRef]);
 
   const handleLineDragEnd = useCallback(() => {
     setDraggingLine(null); draggingLineRef.current = null;
@@ -571,14 +575,41 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // Add/remove global event listeners for line dragging
   useEffect(() => {
     if (draggingLine) {
-      window.addEventListener("mousemove", handleLineDragMove);
-      window.addEventListener("mouseup", handleLineDragEnd);
+      // Use refs to avoid stale closures
+      const moveHandler = (e: MouseEvent) => {
+        if (!draggingLineRef.current || !selectedPosition) return;
+        
+        const deltaY = dragLineStartYRef.current - e.clientY;
+        const svgEl = (e.target as SVGElement)?.closest?.('svg') || document.querySelector(`svg[data-chart-svg]`) as SVGSVGElement | null;     
+        const svgRenderedH = svgEl ? svgEl.getBoundingClientRect().height : priceChartH;     
+        const svgScale = svgRenderedH > 0 ? totalH / svgRenderedH : 1;     
+        const sensitivity = (priceRange / priceChartH) * svgScale;
+        const deltaPrice = deltaY * sensitivity;
+        const newValue = dragLineStartValueRef.current + deltaPrice;
+        const roundedValue = Math.round(newValue * 100) / 100;
+        
+        window.dispatchEvent(new CustomEvent("adjustPositionLine", {
+          detail: {
+            positionId: selectedPosition.id,
+            type: draggingLineRef.current,
+            value: roundedValue
+          }
+        }));
+      };
+      
+      const upHandler = () => {
+        setDraggingLine(null);
+        draggingLineRef.current = null;
+      };
+      
+      window.addEventListener("mousemove", moveHandler);
+      window.addEventListener("mouseup", upHandler);
       return () => {
-        window.removeEventListener("mousemove", handleLineDragMove);
-        window.removeEventListener("mouseup", handleLineDragEnd);
+        window.removeEventListener("mousemove", moveHandler);
+        window.removeEventListener("mouseup", upHandler);
       };
     }
-  }, [draggingLine, handleLineDragMove, handleLineDragEnd]);
+  }, [draggingLine, selectedPosition, priceRange, priceChartH, totalH]);
 
   // Price grid levels
   const priceLevels = [];
@@ -741,15 +772,16 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // RSI polyline aligned to candle x-axis
   const rsiPolyline = useMemo(() => {
     const pts: string[] = [];
-    for (let i = 0; i < indicators.rsi.length; i++) {
-      const v = indicators.rsi[i];
-      if (v === null) continue;
+    const rsiData = displayRSI || [];
+    for (let i = 0; i < rsiData.length; i++) {
+      const v = rsiData[i];
+      if (v === null || v === undefined) continue;
       const x = idxToX(i);
       const y = rsiTop + rsiH - (v / 100) * rsiH;
       pts.push(`${x},${y}`);
     }
     return pts.join(" ");
-  }, [indicators.rsi, rsiTop, rsiH, usableWidth, n]);
+  }, [displayRSI, rsiTop, rsiH, usableWidth, n]);
 
   return (
     <div className="h-full relative" ref={containerRef}>
@@ -1034,6 +1066,29 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             ))}
           </g>
 
+          {/* Live Price Badge */}
+          <g>
+            <rect
+              x={usableWidth - 60}
+              y={priceToY(currentPrice) - 10}
+              width={55}
+              height={20}
+              rx={4}
+              fill={priceChange >= 0 ? "#166534" : "#991b1b"}
+              opacity={0.9}
+            />
+            <text
+              x={usableWidth - 33}
+              y={priceToY(currentPrice) + 4}
+              textAnchor="middle"
+              fill="white"
+              fontSize="11"
+              fontWeight="bold"
+            >
+              {currentPrice.toFixed(0)}
+            </text>
+          </g>
+
           {/* ── Bollinger Bands ── */}
           {overlays.bb && (
             <g>
@@ -1085,14 +1140,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           {overlays.sma && (
             <g>
               <polyline
-                points={toPolyline(indicators.sma20, priceToY)}
+                points={toPolyline(displaySMA20 || [], priceToY)}
                 fill="none"
                 stroke="#38bdf8"
                 strokeWidth="1"
                 opacity="0.7"
               />
               <polyline
-                points={toPolyline(indicators.sma50, priceToY)}
+                points={toPolyline(displaySMA50 || [], priceToY)}
                 fill="none"
                 stroke="#f472b6"
                 strokeWidth="1"
@@ -1259,13 +1314,13 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 );
               })}
               <polyline
-                points={toPolyline(indicators.macd.macdLine, macdToY)}
+                points={toPolyline(displayMACD?.macdLine || [], macdToY)}
                 fill="none"
                 stroke="#38bdf8"
                 strokeWidth="1"
               />
               <polyline
-                points={toPolyline(indicators.macd.signalLine, macdToY)}
+                points={toPolyline(displayMACD?.signalLine || [], macdToY)}
                 fill="none"
                 stroke="#fb923c"
                 strokeWidth="1"

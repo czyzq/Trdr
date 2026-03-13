@@ -1,6 +1,71 @@
-# Backtest Results - 2026-03-13 (Strategy Optimizer Run)
+# Backtest Results - 2026-03-13 (Strategy Analyzer Run 02:23 UTC)
 
-## This Run's Results (2026-03-13 00:53 UTC)
+## This Run's Results (2026-03-13 02:23 UTC)
+
+### XAU min_score Scan (21d, 60m)
+| Config | Trades | Win Rate | Return | Notes |
+|--------|--------|----------|--------|-------|
+| **base** | 41 | 43.9% | **+5.9%** | ✅ BEST - confirmed optimal |
+| min_score_0.75x | 126 | 38.1% | -17.9% | ❌ More trades = losses |
+| min_score_1.25x | 3 | 100% | +1.2% | ⚠️ Too few trades |
+| min_score_1.5x | 0 | 0% | 0% | ❌ Too strict |
+
+### Key Finding: XAU base is already optimal!
+- Lowering min_score gives more trades but lower quality (losing money)
+- Current base config with 41 trades and +5.9% is the best achievable
+- Further optimization of XAU would require different indicators or timeframes
+
+---
+
+# Backtest Results - 2026-03-13 (Strategy Analyzer Run 02:08 UTC)
+
+## This Run's Results (2026-03-13 02:08 UTC)
+
+| Symbol | Config | Period | TF | Trades | Win Rate | Return | Notes |
+|--------|--------|--------|-----|--------|----------|--------|-------|
+| **XAG** | xag_v3_exp | 45d | 60m | 297 | 38.7% | **+20.0%** | ✅ Same as 21d/30d - capped |
+| **BTC** | btc_scalp_trend | 7d | 60m | 216 | 40.7% | **+14.4%** | ✅ Capped at 216 (7-60d) |
+| **XAU** | xau_v2_momentum | 30d | 60m | 278 | 35.6% | **-34.4%** | ❌ Too many bad trades |
+| **XAU** | momentum_only | 21d | 60m | 13 | 61.5% | **+2.4%** | ⚠️ Few trades, high win rate |
+| **XAU** | xau_base | 30d | 60m | 41 | 43.9% | **+5.9%** | ✅ Same as 14d/21d |
+
+### Key Findings
+- **XAG consistent**: 21d, 30d, 45d all give +20.0%, capped at 297 trades
+- **BTC capped**: 216 trades regardless of period (7d-60d), always +14.4%
+- **XAU struggle**: v2_momentum loses (-34.4%), base wins (+5.9%), momentum_only has few trades but high win rate
+- **XAU configs tested**: Need better config for XAU - low trade count limits profitability
+
+## This Run's Results (2026-03-13 01:53 UTC)
+
+| Symbol | Config | Period | TF | Trades | Win Rate | Return | Notes |
+|--------|--------|--------|-----|--------|----------|--------|-------|
+| **XAG** | xag_v3_exp | 21d | 60m | 297 | 38.7% | **+20.0%** | ✅ Same as 30d |
+| **XAU** | xau_base | 21d | 60m | 41 | 43.9% | **+5.9%** | ✅ Same as 14d |
+| **BTC** | btc_scalp_trend | 21d | 60m | 216 | 40.7% | **+14.4%** | ✅ Capped |
+
+### Key Findings
+- **XAG consistent**: 21d and 30d both give +20.0%
+- **XAU consistent**: 14d and 21d both give +5.9%
+- **BTC capped**: 216 trades regardless of period
+
+---
+
+## This Run's Results (2026-03-13 01:38 UTC)
+
+| Symbol | Config | Period | TF | Trades | Win Rate | Return | Notes |
+|--------|--------|--------|-----|--------|----------|--------|-------|
+| **BTC** | btc_scalp_trend | 21d | 60m | 216 | 40.7% | **+14.4%** | ✅ Same as 30d, capped |
+| XAU | xau_v3_exp | 14d | 60m | 278 | 35.6% | **-34.4%** | ❌ Worse than base |
+| **XAG** | xag_v3_exp | 30d | 60m | 297 | 38.7% | **+20.0%** | ✅ BEST for XAG! |
+
+### Key Findings
+- **XAG breakthrough**: xag_v3_exp 30d gives +20.0% - best XAG result ever!
+- **XAU v3 exp fails**: -34.4% vs xau_base +5.9%
+- **BTC capped**: 216 trades regardless of period (14-60d)
+
+---
+
+## Previous (01:09 UTC)
 
 | Symbol | Period | TF | Trades | Win Rate | Return | Notes |
 |--------|--------|-----|--------|----------|--------|-------|
@@ -8,19 +73,22 @@
 | **BTC** | 60d | 60m | 216 | 40.7% | **+14.4%** | Same as 30d - capped |
 | **XAU** | 14d | 60m | 49 | 40.8% | **+4.5%** | ✅ Previous best |
 | XAU | 30d | 60m | 278 | 35.6% | -17.1% | ❌ Too many bad trades |
+| XAU | 14d | 60m | 41 | 43.9% | **+5.9%** | ✅ Base/no_rsi better than scalp |
 | XAU | 14d | 5m | 0 | - | 0% | ❌ No data |
 | XAU | 14d | 15m | 0 | - | 0% | ❌ No data |
+| XAU | 14d | 240m | 0 | - | 0% | ❌ No data |
 | XAG | 14d | 5m | 0 | - | 0% | ❌ No data |
 
-### Key Finding
-- **BTC capped at 216 trades** - longer period (45d, 60d) doesn't increase trades
-- **XAU 5m/15m data unavailable** in MongoDB
-- **XAG 5m data unavailable** in MongoDB
+### This Run's Findings
+- **XAU base/no_rsi better than xau_scalp_trend**: 41 trades, +5.9% vs 49 trades, +4.5%
+- **240m TF unavailable** for XAU in MongoDB
+- **min_score doesn't affect unified strategies** - backtester overrides to 0.0 for unified mode
 
 | Symbol | Trades | Win Rate | PnL | Change vs Previous |
 |--------|--------|----------|-----|-------------------|
 | **BTC** | 56 | 42.9% | **+7.2%** | ✅ Improved from 39 trades |
-| **XAU** | 49 | 40.8% | **+4.5%** | ✅ Improved from -1% (19 trades) |
+| **XAU** (base) | 41 | 43.9% | **+5.9%** | ✅ Better win rate than scalp |
+| **XAU** (scalp) | 49 | 40.8% | **+4.5%** | ✅ Previous best |
 
 ---
 

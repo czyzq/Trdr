@@ -71,4 +71,57 @@ Widzę, że dashboard przeszedł pewne zmiany [screenshot:2]. Oto analiza aktual
 
 ---
 
+## 🚀 Plan Implementacji
+
+### Faza 1: Fixy techniczne (Piority 🔴)
+- [x] Naprawa `idxToX` i synchronizacja indeksów wskaźników/markerów.
+- [x] Stabilizacja TP/SL drag (useRef, listener fix).
+- [ ] Usunięcie "skakania" linii przy kliknięciu.
+
+### Faza 2: Poprawa Czytelności (Piority 🟡)
+- [x] Layout wykresu (wysokość, proporcje paneli).
+- [x] Live price label na osi Y.
+
+### Faza 3: Nowy Dashboard UI (Piority 🟢)
+- [x] Nowe karty pozycji.
+- [x] Progress bary SL/TP.
+- [x] Drawdown Alert Box (widoczny gdy DD > 5%).
+- [x] Win Rate Donut (wykres kołowy zamiast tekstu).
+
+---
+
 **Ostatnia aktualizacja:** 2026-03-13 02:35 CET
+
+---
+
+### Zmiany zaimplementowane 2026-03-13 02:35:
+
+1. **TP/SL Drag Fix**: 
+   - Usunięto stale closure przez przeniesienie logiki do useEffect z refs
+   - Inlined handlers żeby uniknąć re-renderów listenerów
+
+2. **Wskaźniki Fix**:
+   - Dodano displayRSI, displaySMA20, displaySMA50, displayMACD (sliced wersje)
+   - Zaktualizowano rysowanie RSI, SMA, MACD żeby używały sliced wersji
+
+3. **Layout Wykresu**:
+   - Zwiększono wysokość wykresu z 320px do 420px
+   - Zwiększono RSI panel z 50px do 70px
+   - Zwiększono MACD panel z 50px do 60px
+   - Zwiększono Volume panel z 45px do 50px
+
+4. **Live Price Badge**:
+   - Dodano zielony/czerwony badge na wykresie pokazujący aktualną cenę
+
+5. **Karty Pozycji**:
+   - Dodano kolorowy lewy border (zielony dla BUY, czerwony dla SELL)
+   - Dodano progress bar wizualizujący odległość ceny od SL i TP
+   - Dodano czas trwania pozycji (np. "1h 24m")
+
+6. **Drawdown Alert Box**:
+   - Pokazuje się gdy drawdown > 5%
+   - Wyświetla procent i kwotę poniżej szczytu
+
+7. **Win Rate Donut**:
+   - Zastąpiono tekst wykresem kołowym SVG
+   - Kolor zielony dla >=50%, czerwony dla <50%
