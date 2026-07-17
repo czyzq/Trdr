@@ -9,7 +9,8 @@ import copy
 
 # indicators the optimizer may weight per timeframe
 CATALOG = ["RSI", "RSI_REVERSION", "MACD", "MOMENTUM", "ADX", "STOCH", "SMA_CROSS", "BB_POSITION", "DIVERGENCE"]
-MAX_ACTIVE_INDICATORS = 6  # across all timeframes
+CATALOG_WITH_NONE = CATALOG + ["NONE"]
+MAX_SLOTS_PER_TF = 3   # complexity cap per timeframe (overfit guard)
 
 
 def suggest_config(trial, base_config: dict) -> dict:
@@ -24,27 +25,31 @@ def suggest_config(trial, base_config: dict) -> dict:
         cfg = normalize_strategy_config(cfg)
         tfs = cfg["timeframes"]
 
-    active = 0
+    # Per-TF indicator SLOTS: each scoring timeframe independently picks up to
+    # MAX_SLOTS_PER_TF indicators (or NONE) with a weight. This gives the sampler
+    # a clean, honest parameterization - the old global greedy cap silently
+    # starved every TF after the first, degenerating all trials to single-TF.
     for tf_name, block in tfs.items():
         if block.get("role") == "veto":
             continue
-        new_indicators = []
-        for ind in CATALOG:
-            w = trial.suggest_float(f"w_{tf_name}_{ind}", 0.0, 3.0, step=0.25)
-            if w > 0 and active < MAX_ACTIVE_INDICATORS:
-                new_indicators.append({"name": ind, "weight": w})
-                active += 1
-        if new_indicators:
-            block["indicators"] = new_indicators
+        chosen = {}
+        for slot in range(MAX_SLOTS_PER_TF):
+            ind = trial.suggest_categorical(f"{tf_name}_ind{slot}", CATALOG_WITH_NONE)
+            if ind == "NONE":
+                continue
+            w = trial.suggest_float(f"w_{tf_name}_{slot}", 0.25, 3.0, step=0.25)
+            # duplicate picks merge to the strongest weight
+            if ind not in chosen or w > chosen[ind]:
+                chosen[ind] = w
+        if chosen:
+            block["indicators"] = [{"name": n, "weight": w} for n, w in chosen.items()]
         else:
-            # all weights suggested 0: turn the TF off EXPLICITLY - silently
-            # keeping the base indicators would teach the sampler a corrupted
-            # mapping around the w=0 region
+            # TF explicitly off - never silently keep stale base indicators
             block["weight"] = 0.0
             block["indicators"] = []
 
     combine = cfg.setdefault("combine", {})
-    combine["min_score"] = trial.suggest_float("min_score", 0.05, 0.5, step=0.05)
+    combine["min_score"] = trial.suggest_float("min_score", 0.02, 0.4, step=0.02)
     if len([b for b in tfs.values() if b.get("role") != "veto"]) > 1:
         combine["min_agreement"] = trial.suggest_float("min_agreement", 0.4, 1.0, step=0.1)
         combine["conflict_policy"] = trial.suggest_categorical("conflict_policy", ["dampen", "veto"])

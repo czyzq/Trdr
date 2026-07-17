@@ -89,7 +89,8 @@ def test_space_cardinality_cap():
         SignalEngine(cfg)  # must stay valid
         return 0.0
     study.optimize(obj, n_trials=20)
-    assert max(counts) <= space.MAX_ACTIVE_INDICATORS + 2  # base fallback blocks allowed
+    # per-TF slot cap: 2 scoring TFs x MAX_SLOTS_PER_TF is the ceiling
+    assert max(counts) <= 2 * space.MAX_SLOTS_PER_TF
 
 
 def test_promote_blocked_when_disabled():
