@@ -1239,6 +1239,111 @@
         "max_leverage": 10,
         "min_leverage": 5
       }
+    },
+    {
+      "id": "htf_divergence_test",
+      "name": "HTF Divergence Test Strategy",
+      "symbol": "XAUUSD",
+      "timeframe": "5m",
+      "enabled": true,
+      "trade_direction": "both",
+      "description": "Test strategy using HTF candle patterns and RSI divergence for signal confirmation",
+      "score": {
+        "min_score": 0.05,
+        "indicators": [
+          {
+            "name": "RSI",
+            "weight": 0.2,
+            "normalized_range": [
+              -1,
+              1
+            ]
+          },
+          {
+            "name": "MACD",
+            "weight": 0.2,
+            "normalized_range": [
+              -1,
+              1
+            ]
+          },
+          {
+            "name": "MOMENTUM",
+            "weight": 0.2,
+            "normalized_range": [
+              -1,
+              1
+            ]
+          },
+          {
+            "name": "DIVERGENCE",
+            "weight": 0.3,
+            "normalized_range": [
+              -1,
+              1
+            ]
+          },
+          {
+            "name": "HTF_CANDLE",
+            "weight": 0.1,
+            "normalized_range": [
+              -1,
+              1
+            ]
+          }
+        ]
+      },
+      "filters": {
+        "volume": {
+          "enabled": true,
+          "lookback_bars": 20,
+          "min_ratio_to_average": 0.75
+        },
+        "position_already_open": {
+          "enabled": true
+        },
+        "symbol_enabled_flag": {
+          "enabled": true,
+          "key_pattern": "TRADE_ENABLED_{SYMBOL}"
+        }
+      },
+      "risk": {
+        "risk_per_trade_pct": 2.0,
+        "max_total_risk_pct": 4.0,
+        "leverage": 20,
+        "max_notional_exposure_multiple": 1.0
+      },
+      "position_sizing": {
+        "formula": "size = (balance * (risk_per_trade_pct/100) * leverage) / price",
+        "max_size_pct_of_balance": 50,
+        "min_size": 0.01
+      },
+      "entries": {
+        "signal_threshold": {
+          "long": 0.1,
+          "short": -0.1
+        },
+        "wait_for_confirmation": {
+          "enabled": true,
+          "confirmation_candles": 1
+        }
+      },
+      "exits": {
+        "stop_loss": {
+          "type": "percent_from_entry",
+          "value": -1.0
+        },
+        "take_profit": {
+          "type": "percent_from_entry",
+          "value": 2.0
+        },
+        "trailing_stop": {
+          "enabled": false
+        },
+        "dynamic_tp": {
+          "enabled": false
+        }
+      }
     }
   ],
   "metadata": {

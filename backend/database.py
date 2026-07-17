@@ -46,7 +46,6 @@ def get_db():
         client = MongoClient(
             mongo_uri,
             serverSelectionTimeoutMS=10000,
-            tlsAllowInvalidCertificates=True,
         )
         client.admin.command("ping")
         print(f"[DB] ✅ MongoDB connected successfully")

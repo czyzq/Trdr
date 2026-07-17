@@ -37,11 +37,10 @@ BINANCE_COLLECTION = "binance_candles"
 
 def get_mongo_client():
     """Get MongoDB client"""
-    mongo_uri = os.getenv("MONGO_URI", "mongodb+srv://aibypiotreo:u0BC9klgc0C494fA@cluster0.wnlt6se.mongodb.net/?maxPoolSize=1&retryWrites=false&w=majority&tls=true&tlsAllowInvalidCertificates=true")
+    mongo_uri = os.environ["MONGO_URI"]
     return MongoClient(
         mongo_uri,
         serverSelectionTimeoutMS=10000,
-        tlsAllowInvalidCertificates=True,
     )
 
 

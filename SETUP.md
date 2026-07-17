@@ -1,95 +1,55 @@
-# Setup Instructions
+# Setup
+
+Local development setup for the Trdr CFD trading bot. See `README.md` for the full feature overview and architecture.
 
 ## Prerequisites
 
-- Node.js 18+ (`node -v`)
-- Python 3.10+ (`python3 --version`)
-- MongoDB running locally or Atlas connection string
-- GitHub CLI (`gh auth status`)
+- Python 3.10+
+- Node 18+
+- A free [Alpha Vantage API key](https://alphavantage.co/support/#api-key)
+- Optional: a MongoDB Atlas connection string (without it, data lives in memory and is lost on restart)
 
-## Initial Setup
+## Backend
 
-### 1. Clone & Navigate
 ```bash
-cd ~/Documents/projects/polymarket-bot
+cd backend
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+cp .env.example .env
+# edit .env: set ALPHA_VANTAGE_API_KEY, and MONGO_URI if you have one
+
+python main.py --port 8001
 ```
 
-### 2. Frontend Setup
+The backend always runs on port **8001**. Health check: `curl http://localhost:8001/api/health`.
+
+## Frontend
+
 ```bash
 cd frontend
 npm install
 npm run dev
-# Starts on http://localhost:5176
 ```
 
-### 3. Backend Setup
-```bash
-cd ../backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python main.py
-# Starts on http://localhost:8001
-```
+Open http://localhost:5173 — the Vite dev server proxies `/api` and `/cfd/api` to the backend on port 8001.
 
-### 4. Environment Variables
+## Environment variables
 
-**Backend `.env`:**
-```
-MONGODB_URI=mongodb://localhost:27017/polymarket-bot
-POLYMARKET_API_KEY=your_api_key
-POLYMARKET_PRIVATE_KEY=your_private_key
-PERPLEXITY_API_KEY=your_perplexity_key
-LOG_LEVEL=INFO
-```
+All configuration is env-driven; nothing is hardcoded. See `backend/.env.example` for the full list:
 
-**Frontend `.env`:**
-```
-VITE_API_URL=http://localhost:8001/api
-```
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `ALPHA_VANTAGE_API_KEY` | yes | Quotes, candles |
+| `MONGO_URI` | recommended | Persistence (Atlas free M0 works) |
+| `MONGO_DB` | no | DB name, default `cfd_trading_bot` |
+| `BROKER_TYPE` | no | `sim` (default) or `ibkr` |
+| `IMESSAGE_ALERT_RECIPIENT` | no | Phone number for iMessage alerts (Mac only) |
 
-### 5. Database
+## Monitoring (optional)
 
-**Local MongoDB (Docker):**
-```bash
-docker-compose up -d mongodb
-```
+`./monitor.sh` health-checks the backend/frontend every 5 minutes and restarts them if dead. It performs no git operations. Override the port with `BACKEND_PORT=8001 ./monitor.sh`.
 
-**Or Atlas (Cloud):**
-- Create cluster at mongodb.com/cloud
-- Get connection string
-- Add to `.env` as `MONGODB_URI`
+## Deployment
 
-## Verification
-
-- [ ] Frontend loads: http://localhost:5176
-- [ ] Backend ready: http://localhost:8001/docs
-- [ ] MongoDB connected: Check backend logs
-- [ ] MCP configured: Test Perplexity integration
-
-## Troubleshooting
-
-**Port already in use:**
-```bash
-# Find & kill process on port 5176/8001
-lsof -i :5176
-kill -9 <PID>
-```
-
-**Python venv issues:**
-```bash
-rm -rf venv
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-**MongoDB connection:**
-```bash
-mongosh  # Check if running locally
-# Or test Atlas connection string in backend logs
-```
-
----
-
-*For detailed architecture, see PROJECT.md*
+Render deployment via `render.yaml` — see the "Deploy to Render" section in `README.md`.

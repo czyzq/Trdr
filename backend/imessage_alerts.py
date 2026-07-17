@@ -4,6 +4,7 @@ Sends trading signal alerts via iMessage through OpenClaw
 """
 
 import logging
+import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -17,7 +18,7 @@ class AlertConfig(BaseModel):
     """Alert configuration for CFD trading bot"""
 
     enabled: bool = False
-    recipient_phone: str = "+48793203605"  # Default recipient
+    recipient_phone: str = os.getenv("IMESSAGE_ALERT_RECIPIENT", "")  # set via env
     min_score_threshold: float = 0.3  # Only alert on significant buy signals
     max_score_threshold: float = -0.3  # Only alert on significant sell signals
     notify_on_reversal: bool = True

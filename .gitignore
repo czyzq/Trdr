@@ -33,8 +33,17 @@ backend/venv1
 # Logs
 *.log
 logs/
+*.out
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
+
+# Editor/backup artifacts
+*.backup
+
+# Backtest/runtime artifacts
+backtest_results*/
+backend/signal_cache.json
+backend/data/*.json
