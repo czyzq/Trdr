@@ -12,7 +12,8 @@ from indicators import TechnicalIndicators
 
 # Fixed normalization ranges (midpoint maps to 0). Values outside clamp to +-1.
 INDICATOR_RANGES: Dict[str, tuple] = {
-    "RSI": (0, 100),
+    "RSI": (0, 100),            # linear: RSI>50 votes long (trend-following semantics)
+    "RSI_REVERSION": (-50, 50),  # 50-RSI: overbought votes SHORT (mean reversion)
     "STOCH": (0, 100),
     "STOCH_RSI": (0, 100),
     "ADX": (-100, 100),  # signed by DI dominance
@@ -46,6 +47,9 @@ def _raw_value(name: str, ind: dict, candles: List[dict]) -> Optional[float]:
     """Extract one indicator's raw value from the calculate_all dict."""
     if name == "RSI":
         return ind.get("rsi_14")
+    if name == "RSI_REVERSION":
+        rsi = ind.get("rsi_14")
+        return (50.0 - rsi) if rsi is not None else None
     if name == "MACD":
         # histogram as % of price - scale-invariant across BTC (~60k) and XAG (~30)
         macd = ind.get("macd") or {}

@@ -99,6 +99,8 @@ def run_backtest(
     symbol = strategy_config.get("symbol", "?")
     base_tf = engine.base_timeframe()
     cost_model = cost_model or CostModel(symbol)
+    # strategy config wins over the caller default - exits belong to the strategy
+    max_hold_bars = strategy_config.get("exits", {}).get("max_hold_bars", max_hold_bars)
 
     # normalize keys to TimeFrame
     by_tf: Dict[TimeFrame, List[dict]] = {}

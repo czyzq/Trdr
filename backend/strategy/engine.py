@@ -271,11 +271,11 @@ class SignalEngine:
             if not _check_veto(block, direction, tf_data.indicators):
                 return neutral(f"vetoed by {tf_name}", vetoed_by=tf_name, agreement=agreement)
 
-        # confidence: agreement-weighted distance above the threshold
+        # confidence: distance above the threshold of the EFFECTIVE score, which
+        # under the dampen policy already carries the agreement penalty - do not
+        # multiply agreement in twice
         score_range = max(1.0 - self.min_score, 1e-6)
         confidence = max(0.0, min(1.0, (abs(effective) - self.min_score) / score_range))
-        if self.min_agreement > 0 or len([t for t in tf_scores.values() if t.weight > 0]) > 1:
-            confidence *= agreement
 
         # exits from the strategy's own ExitEngine config (percent-based prices)
         exit_engine = ExitEngine(self.config.get("exits", {}), htf_indicator=None)

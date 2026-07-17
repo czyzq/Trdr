@@ -8,7 +8,7 @@ once (overfit guard)."""
 import copy
 
 # indicators the optimizer may weight per timeframe
-CATALOG = ["RSI", "MACD", "MOMENTUM", "ADX", "STOCH", "SMA_CROSS", "BB_POSITION", "DIVERGENCE"]
+CATALOG = ["RSI", "RSI_REVERSION", "MACD", "MOMENTUM", "ADX", "STOCH", "SMA_CROSS", "BB_POSITION", "DIVERGENCE"]
 MAX_ACTIVE_INDICATORS = 6  # across all timeframes
 
 
@@ -63,6 +63,8 @@ def suggest_config(trial, base_config: dict) -> dict:
     # parameter - the optimizer explores static TP only
     exits["dynamic_tp"] = {"enabled": False}
     exits.setdefault("take_profit", {})["value"] = tp
+    # hold time is part of exit design - 2h..24h in 5m bars, scaled by base TF
+    exits["max_hold_bars"] = trial.suggest_int("max_hold_bars", 24, 288, step=24)
 
     risk = cfg.setdefault("risk", {})
     risk["leverage"] = min(trial.suggest_float("leverage", 1.0, 10.0, step=1.0),

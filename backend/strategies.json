@@ -122,38 +122,19 @@
       "exits": {
         "stop_loss": {
           "type": "percent_from_entry",
-          "value": -2.0
+          "value": -0.8
         },
         "take_profit": {
           "type": "percent_from_entry",
-          "value": 5.0
+          "value": 1.6
         },
         "trailing_stop": {
           "enabled": false
         },
         "dynamic_tp": {
-          "enabled": true,
-          "htf_indicator": "RSI",
-          "htf_timeframe": "1H",
-          "use_closed_candles_only": true,
-          "rules": [
-            {
-              "condition": {
-                "operator": ">",
-                "value": 65
-              },
-              "tp_percent": 3.0
-            },
-            {
-              "condition": {
-                "operator": "<",
-                "value": 40
-              },
-              "tp_percent": 7.0
-            }
-          ],
-          "default_tp_percent": 5.0
-        }
+          "enabled": false
+        },
+        "max_hold_bars": 96
       },
       "position_sizing_v2": {
         "method": "adaptive",
@@ -185,7 +166,7 @@
       "name": "BTC v2 Core 5m",
       "symbol": "BTC",
       "timeframe": "5m",
-      "enabled": true,
+      "enabled": false,
       "trade_direction": "long_only",
       "score": {
         "min_score": 0.25,
@@ -678,7 +659,7 @@
       "name": "BTC v3 Experimental 5m",
       "symbol": "BTC",
       "timeframe": "5m",
-      "enabled": true,
+      "enabled": false,
       "trade_direction": "both",
       "direction_mode": "rsi_momentum",
       "direction_config": {
@@ -1290,7 +1271,7 @@
       "name": "BTC Scalp Trend 5m",
       "symbol": "BTC",
       "timeframe": "5m",
-      "enabled": true,
+      "enabled": false,
       "trade_direction": "both",
       "description": "Scalping strategy with tight TP and trailing stop for quick trades on trend changes",
       "score": {
@@ -1423,9 +1404,9 @@
     {
       "id": "htf_divergence_test",
       "name": "HTF Divergence Test Strategy",
-      "symbol": "XAUUSD",
+      "symbol": "XAU",
       "timeframe": "5m",
-      "enabled": true,
+      "enabled": false,
       "trade_direction": "both",
       "description": "Test strategy using HTF candle patterns and RSI divergence for signal confirmation",
       "score": {
