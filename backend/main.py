@@ -206,6 +206,10 @@ async def lifespan(app: FastAPI):
     _strategy_sync_task = asyncio.create_task(strategy_sync_loop())
     log_event("[STRATEGY-SYNC] Background sync started (5 min interval)", "success")
 
+    # Daily digest notification (21:00 local by default, DIGEST_HOUR env)
+    from services.digest import daily_digest_loop
+    _digest_task = asyncio.create_task(daily_digest_loop())
+
     yield  # App runs here
 
     # SHUTDOWN
@@ -250,6 +254,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from services.auth import auth_middleware, is_authorized
+
+app.middleware("http")(auth_middleware)
+
+
+@app.get("/api/auth/check")
+async def auth_check():
+    """Reachable only when authorized (or auth disabled). The frontend token gate probes this."""
+    return {"ok": True}
+
 
 from app import PLN_USD_RATE, event_log
 from services import is_market_open, get_market_hours, update_live_price_cache, get_live_price
