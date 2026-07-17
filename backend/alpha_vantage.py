@@ -26,18 +26,18 @@ class AsyncAlphaVantageClient:
         self.client = httpx.AsyncClient(timeout=10)
         self.price_cache = {}
         self.cache_time = {}
-        self.cache_ttl = 1  # Cache for 1 second (was 60s)
+        self.cache_ttl = 15  # quotes are refreshed by the 3s price loop; 15s absorbs bursts
         self.last_api_call = 0
-        self.min_interval = 0.05  # 50ms between calls
         self._lock = asyncio.Lock()
 
     async def _rate_limit(self):
-        """Async rate limiter."""
-        async with self._lock:
-            elapsed = time.time() - self.last_api_call
-            if elapsed < self.min_interval:
-                await asyncio.sleep(self.min_interval - elapsed)
-            self.last_api_call = time.time()
+        """Global rate limiter - one shared 5/min token bucket for ALL Alpha Vantage calls."""
+        from services.rate_limiter import get_gate
+
+        gate = get_gate("alpha_vantage")
+        if not await gate.acquire():
+            raise RuntimeError("alpha_vantage cooling down after repeated failures")
+        self.last_api_call = time.time()
 
     async def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Fetch current quote for a symbol - ASYNC."""
@@ -218,6 +218,12 @@ def get_client() -> AlphaVantageClient:
 
 
 def get_async_client() -> AsyncAlphaVantageClient:
-    """Get async client (preferred). Creates new instance to avoid cache contamination."""
-    # Create new instance each time to prevent symbol cross-contamination in cache
-    return AsyncAlphaVantageClient()
+    """Get the async client singleton.
+
+    The cache is keyed per symbol, so a shared instance is safe - and required,
+    otherwise the cache and rate-limiter state never survive between calls.
+    """
+    global _async_client
+    if _async_client is None:
+        _async_client = AsyncAlphaVantageClient()
+    return _async_client

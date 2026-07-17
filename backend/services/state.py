@@ -103,27 +103,9 @@ def set_account(new_account: Dict[str, Any]) -> None:
 
 
 def get_open_positions() -> list:
-    """Get open positions from broker - trigger price update synchronously"""
-    positions = broker.get_open_positions() if hasattr(broker, 'get_open_positions') else open_positions
-    
-    # Always trigger price update when positions are requested
-    # This ensures P&L is current
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if not loop.is_running():
-            # Sync context - run async update
-            async def update_and_get():
-                await broker._async_update_prices()
-                return broker.get_open_positions()
-            positions = loop.run_until_complete(update_and_get())
-        else:
-            # Async context - just return positions, they'll be updated by background task
-            pass
-    except Exception as e:
-        print(f"[get_open_positions] Error: {e}")
-    
-    return positions
+    """Open positions from the broker. P&L freshness is the price_cache_loop's job -
+    no synchronous event-loop juggling here."""
+    return broker.get_open_positions() if hasattr(broker, 'get_open_positions') else open_positions
 
 
 def set_open_positions(positions: list) -> None:

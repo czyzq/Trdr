@@ -479,19 +479,13 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         # Get instrument-specific volatility index
         vix_data = None
         try:
-            from historical_data import get_volatility_index
+            from services.candle_store import get_candle_store
 
-            vix_data = get_volatility_index(symbol)
+            # TTL-cached (5 min) and off-thread: one fetch per index per cycle,
+            # not one blocking call per symbol per scan
+            vix_data = await get_candle_store().get_vix(symbol)
             if vix_data:
                 indicators["vix"] = vix_data
-                print(
-                    f"[VIX] {symbol}: {vix_data['value']} ({vix_data['name']}, change: {vix_data['change_pct']:+.1f}%)"
-                )
-            else:
-                # Fallback to standard VIX
-                vix_data = get_volatility_index("SPX")
-                if vix_data:
-                    indicators["vix"] = vix_data
         except Exception as e:
             print(f"[VIX] Could not fetch VIX for {symbol}: {e}")
 
