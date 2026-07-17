@@ -106,7 +106,15 @@ async def notifier_status():
         imessage_available = bool(dispatcher.config.enabled and dispatcher.config.recipient_phone)
     except Exception:
         imessage_available = False
+    push_subscriptions = 0
+    try:
+        from services import web_push
+
+        push_subscriptions = len(web_push.list_subscriptions())
+    except Exception:
+        pass
     return {
         "telegram_configured": telegram_configured,
         "imessage_available": imessage_available,
+        "push_subscriptions": push_subscriptions,
     }

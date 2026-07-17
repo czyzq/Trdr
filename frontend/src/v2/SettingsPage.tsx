@@ -2,10 +2,12 @@ import React, { useEffect, useState } from "react";
 import { apiUrl } from "../api";
 import { setUiVersion } from "../uiVersion";
 import { Card, SectionLabel, Badge } from "./ui";
+import { usePush } from "./usePush";
 
 interface NotifierStatus {
   telegram_configured: boolean;
   imessage_available: boolean;
+  push_subscriptions?: number;
 }
 
 interface Health {
@@ -14,6 +16,52 @@ interface Health {
   version?: string;
   timestamp?: string;
 }
+
+const PushRow: React.FC = () => {
+  const { state, busy, subscribe, unsubscribe, sendTest } = usePush();
+
+  const hint: Record<string, string> = {
+    unsupported: "This browser does not support Web Push",
+    "needs-install": "Add Trdr to your home screen first (Share → Add to Home Screen), then enable here",
+    default: "Native push notifications on this device (iPhone/iPad: home-screen app, iOS 16.4+)",
+    denied: "Notifications are blocked for this site in system settings",
+    subscribed: "This device receives trade and optimizer notifications",
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <div className="text-sm font-medium text-slate-200">Push on this device</div>
+        <div className="text-xs text-slate-500 mt-0.5">{hint[state]}</div>
+      </div>
+      {state === "subscribed" ? (
+        <div className="flex gap-2 shrink-0">
+          <button
+            onClick={sendTest}
+            className="px-3 py-2 rounded-lg border border-white/10 text-xs text-slate-200 hover:bg-white/5 transition-colors"
+          >
+            Test
+          </button>
+          <button
+            onClick={unsubscribe}
+            disabled={busy}
+            className="px-3 py-2 rounded-lg border border-white/10 text-xs text-slate-400 hover:bg-white/5 transition-colors"
+          >
+            Disable
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={subscribe}
+          disabled={busy || state === "unsupported" || state === "denied" || state === "needs-install"}
+          className="px-3 py-2 rounded-lg border border-white/10 text-sm text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-40 whitespace-nowrap shrink-0"
+        >
+          {busy ? "..." : "Enable"}
+        </button>
+      )}
+    </div>
+  );
+};
 
 export const SettingsPage: React.FC = () => {
   const [notifier, setNotifier] = useState<NotifierStatus | null>(null);
@@ -68,6 +116,7 @@ export const SettingsPage: React.FC = () => {
       <Card className="p-4">
         <SectionLabel className="mb-3">Notifications</SectionLabel>
         <div className="space-y-3">
+          <PushRow />
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium text-slate-200">Telegram</div>

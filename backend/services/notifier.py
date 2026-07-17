@@ -89,9 +89,23 @@ class IMessageChannel:
             return False
 
 
+class WebPushChannel:
+    """Web Push to every subscribed browser/PWA (iPhone/iPad home-screen app).
+    No-op when there are no subscriptions."""
+
+    async def send(self, message: str) -> bool:
+        try:
+            from services import web_push
+
+            sent = await asyncio.to_thread(web_push.send_to_all, "Trdr", message)
+            return sent > 0
+        except Exception:
+            return False
+
+
 def _get_channels():
     """Channel list; separate function so tests can monkeypatch it."""
-    return [TelegramChannel(), IMessageChannel()]
+    return [TelegramChannel(), IMessageChannel(), WebPushChannel()]
 
 
 async def notify(event_type: str, message: str, dedupe_key: Optional[str] = None) -> bool:

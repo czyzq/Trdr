@@ -46,4 +46,4 @@ logs/
 # Backtest/runtime artifacts
 backtest_results*/
 backend/signal_cache.json
-backend/data/*.json
+backend/data/
