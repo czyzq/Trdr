@@ -14,7 +14,6 @@ from database import async_save_signal_cache_db, async_sync_account_from_closed_
 from alpha_vantage_news import get_client as get_news_client
 # Import async_timed decorator
 from utils.decorators import async_timed
-from strategies import get_strategy
 from services.strategy_manager import get_symbol_strategy, get_strategy_manager, analyze_with_new_strategy
 # Lazy imports used inside functions to avoid circular dependency
 # (imported from main.py at function call time)

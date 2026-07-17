@@ -18,7 +18,6 @@ from .routes import (
     backtest as backtest_routes,
     root as root_routes,
     settings as settings_routes,
-    rolling_backtest as rolling_backtest_routes,
 )
 from app.logging import log_event
 
@@ -34,6 +33,5 @@ router.include_router(market_routes.router)
 router.include_router(alerts_routes.router)
 router.include_router(status_routes.router)
 router.include_router(backtest_routes.router)
-router.include_router(rolling_backtest_routes.router)
 router.include_router(settings_routes.router)
 router.include_router(signals_routes.router)

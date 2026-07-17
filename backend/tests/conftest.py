@@ -14,10 +14,8 @@ import pytest
 # Ensure backend dir is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backtester import BacktestTrade
 from historical_data import generate_sample_data
 from models import Component, ComponentType, Signal, SignalDirection
-from strategies import BaseStrategy, get_strategy
 
 
 # ── Mock Database Fixtures ──
@@ -286,21 +284,6 @@ def closed_position():
         "status": "closed",
         "close_reason": "take_profit"
     }
-
-
-# ── Strategy Fixtures ──
-
-
-@pytest.fixture
-def adaptive_strategy():
-    """Get the AdaptiveRegimeStrategy."""
-    return get_strategy("adaptive_regime")
-
-
-@pytest.fixture
-def mms_strategy():
-    """Get the MMS strategy."""
-    return get_strategy("mms")
 
 
 # ── Indicator Fixtures ──
