@@ -342,13 +342,40 @@ def check_circuit_breaker() -> bool:
     return allowed
 
 
+_api_semaphore = None
+
+def _get_api_semaphore():
+    global _api_semaphore
+    if _api_semaphore is None:
+        _api_semaphore = asyncio.Semaphore(3)
+    return _api_semaphore
+
+
+def _neutral_signal(symbol: str, price: float = 0.0, timeframe: str = "5") -> Signal:
+    """Neutral no-trade signal. Used for every fallback/error path."""
+    return Signal(
+        symbol=symbol,
+        direction=SignalDirection.NEUTRAL,
+        score=0.0,
+        confidence=0.0,
+        technical_score=0.0,
+        price_action_score=0.0,
+        news_score=0.0,
+        components=[],
+        current_price=price,
+        time_horizon=timeframe,
+        entry_point=price,
+        take_profit=0.0,
+        stop_loss=0.0,
+        risk_reward_ratio=0.0,
+    )
+
+
 async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
     """Analyze a single symbol - runs in parallel for all symbols."""
     # Lazy imports to avoid circular dependency
     from services.state import get_live_price_cache as _price_cache, get_symbol_strategy, broker
     from services.strategy_manager import get_strategy_manager, analyze_with_new_strategy
-    import asyncio
-    _api_semaphore = asyncio.Semaphore(3)
     from services.market_data import get_cached_quote as _get_cached_quote, get_cached_candles as _get_cached_candles
     
     timeframe = "5"
@@ -364,22 +391,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
 
         if not quote:
             # Return neutral signal with last known price if available
-            return Signal(
-                symbol=symbol,
-                direction=SignalDirection.NEUTRAL,
-                score=0.0,
-                confidence=0.0,
-                technical_score=0.0,
-                price_action_score=0.0,
-                news_score=0.0,
-                components=[],
-                current_price=last_known_price,
-                time_horizon=timeframe,
-                entry_point=last_known_price,
-                take_profit=0.0,
-                stop_loss=0.0,
-                risk_reward_ratio=0.0,
-            )
+            return _neutral_signal(symbol, last_known_price, timeframe)
 
         current_price = quote["price"]
 
@@ -390,22 +402,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         manager = get_strategy_manager()
         if not manager or len(manager.strategies) == 0:
             print("[STRATEGY] No strategies available in manager")
-            return Signal(
-                symbol=symbol,
-                direction=SignalDirection.NEUTRAL,
-                score=0.0,
-                confidence=0.0,
-                technical_score=0.0,
-                price_action_score=0.0,
-                news_score=0.0,
-                components=[],
-                current_price=current_price,
-                time_horizon=timeframe,
-                entry_point=current_price,
-                take_profit=0.0,
-                stop_loss=0.0,
-                risk_reward_ratio=0.0,
-            )
+            return _neutral_signal(symbol, current_price, timeframe)
         strategy_obj = manager.strategies.get(selected_strategy)
         
         # Handle both string and TimeFrame enum
@@ -422,44 +419,14 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             timeframe = "5"  # fallback
         
         # Use cached candles with strategy's timeframe
-        async with _api_semaphore:
+        async with _get_api_semaphore():
             candles = await asyncio.wait_for(_get_cached_candles(symbol, timeframe, 100, data_provider), timeout=10.0)
         if not candles or len(candles) < 20:
-            return Signal(
-                symbol=symbol,
-                direction=SignalDirection.NEUTRAL,
-                score=0.0,
-                confidence=0.0,
-                technical_score=0.0,
-                price_action_score=0.0,
-                news_score=0.0,
-                components=[],
-                current_price=current_price,
-                time_horizon=timeframe,
-                entry_point=current_price,
-                take_profit=0.0,
-                stop_loss=0.0,
-                risk_reward_ratio=0.0,
-            )
+            return _neutral_signal(symbol, current_price, timeframe)
 
         indicators = TechnicalIndicators.calculate_all(candles, period=14)
         if not indicators:
-            return Signal(
-                symbol=symbol,
-                direction=SignalDirection.NEUTRAL,
-                score=0.0,
-                confidence=0.0,
-                technical_score=0.0,
-                price_action_score=0.0,
-                news_score=0.0,
-                components=[],
-                current_price=current_price,
-                time_horizon=timeframe,
-                entry_point=current_price,
-                take_profit=0.0,
-                stop_loss=0.0,
-                risk_reward_ratio=0.0,
-            )
+            return _neutral_signal(symbol, current_price, timeframe)
 
         # Filter indicators based on per-symbol settings
         enabled_key = f"INDICATORS_{symbol}"
@@ -490,7 +457,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         # ── Multi-timeframe: fetch daily candles for higher-TF trend ──
         htf_bias = 0.0
         try:
-            async with _api_semaphore:
+            async with _get_api_semaphore():
                 htf_candles = await asyncio.wait_for(_get_cached_candles(symbol, "D", 60, data_provider), timeout=10.0)
             if htf_candles and len(htf_candles) >= 20:
                 htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
@@ -537,7 +504,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         # ── News sentiment (disabled to speed up - optional feature) ──
         news_score = 0.0
         # try:
-        #     async with _api_semaphore:
+        #     async with _get_api_semaphore():
         #         news = await asyncio.wait_for(
         #             news_client_instance.get_news(symbol, 5),
         #             timeout=1.0  # Quick timeout - don't wait for news
@@ -572,22 +539,7 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             min_signal_score = new_result.get("strategy_config", {}).get("score", {}).get("min_score", 0.01)
             if abs(json_score) < min_signal_score:
                 print(f"[SIGNAL] {symbol}: Score {json_score:.3f} below threshold {min_signal_score}, skipping")
-                return Signal(
-                    symbol=symbol,
-                    direction=SignalDirection.NEUTRAL,
-                    score=0.0,
-                    confidence=0.0,
-                    technical_score=0.0,
-                    price_action_score=0.0,
-                    news_score=0.0,
-                    components=[],
-                    current_price=current_price,
-                    time_horizon=timeframe,
-                    entry_point=current_price,
-                    take_profit=0.0,
-                    stop_loss=0.0,
-                    risk_reward_ratio=0.0,
-                )
+                return _neutral_signal(symbol, current_price, timeframe)
             
             return Signal(
                 symbol=symbol,
@@ -646,24 +598,8 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
         return signal
 
     except Exception as e:
-        raise e
         log_event(f"Error analyzing {symbol}: {e}", "error")
-        return Signal(
-            symbol=symbol,
-            direction=SignalDirection.NEUTRAL,
-            score=0.0,
-            confidence=0.0,
-            technical_score=0.0,
-            price_action_score=0.0,
-            news_score=0.0,
-            components=[],
-            current_price=0.0,
-            time_horizon=timeframe,
-            entry_point=0.0,
-            take_profit=0.0,
-            stop_loss=0.0,
-            risk_reward_ratio=0.0,
-        )
+        return _neutral_signal(symbol, 0.0, timeframe)
 
 @async_timed("generate_signals")
 async def generate_signals() -> List[Signal]:
@@ -693,8 +629,16 @@ async def _generate_signals_internal() -> List[Signal]:
     news_client_instance = get_news_client()
 
     # Run all symbol analysis in PARALLEL
+    symbols = list(INSTRUMENTS.keys())
     tasks = [_analyze_single_symbol(symbol, info, news_client_instance) for symbol, info in INSTRUMENTS.items()]
-    signals = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    signals = []
+    for symbol, res in zip(symbols, results):
+        if isinstance(res, BaseException):
+            log_event(f"Error analyzing {symbol}: {res}", "error")
+            signals.append(_neutral_signal(symbol))
+        else:
+            signals.append(res)
 
     # Log results
     # Log results

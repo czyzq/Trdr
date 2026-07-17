@@ -26,7 +26,7 @@ INSTRUMENTS: Dict[str, Dict[str, Any]] = {
         "multiplier": 1,
         "pip_size": 0.001,
         "lot_size": 0.003,
-        "leverage": 20,
+        "leverage": 10,
         "min_score": 0.28,
         "asset_class": "commodity",
         "trailing_stop": True,
@@ -46,7 +46,7 @@ INSTRUMENTS: Dict[str, Dict[str, Any]] = {
         "multiplier": 1,
         "pip_size": 1.0,
         "lot_size": 0.001,
-        "leverage": 5,
+        "leverage": 2,  # IBKR caps crypto CFDs at 2x
         "min_score": 0.20,
         "asset_class": "crypto",
         "trailing_stop": True,

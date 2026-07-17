@@ -410,15 +410,15 @@ def ensure_candle_indexes():
     db = get_db()
     if db is None:
         return
-
-
-def ensure_trades_indexes():
-    db = get_db()
-    if db:
-        db.trades.create_index([("status", 1), ("closed_at", -1)], background=True)
-        db.trades.create_index("status", background=True)
-        db.trades.create_index("opened_at", -1)
-        db.trades.create_index("symbol", background=True)
+    db.candles.create_index(
+        [("symbol", 1), ("resolution", 1), ("timestamp", 1)],
+        unique=True,
+        background=True,
+    )
+    db.candles.create_index(
+        [("symbol", 1), ("resolution", 1)],
+        background=True,
+    )
 
 
 async def async_calc_closed_stats():
@@ -448,16 +448,6 @@ async def async_calc_closed_stats():
         "win_rate": win_rate,
         "closed_trades": stats["total_count"],
     }
-
-    db.candles.create_index(
-        [("symbol", 1), ("resolution", 1), ("timestamp", 1)],
-        unique=True,
-        background=True,
-    )
-    db.candles.create_index(
-        [("symbol", 1), ("resolution", 1)],
-        background=True,
-    )
 
 
 def ensure_trades_indexes():

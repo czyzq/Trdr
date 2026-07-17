@@ -18,12 +18,8 @@ from timezone import now_warsaw
 
 INITIAL_BALANCE_USD = 3000.0
 
-INSTRUMENTS = {
-    "XAU": {"name": "Gold", "multiplier": 1, "pip_size": 0.01, "lot_size": 0.003, "leverage": 20},
-    "XAG": {"name": "Silver", "multiplier": 1, "pip_size": 0.001, "lot_size": 0.003, "leverage": 10},
-    "US100": {"name": "Nasdaq-100", "multiplier": 1, "pip_size": 0.01, "lot_size": 0.003, "leverage": 20},
-    "BTC": {"name": "Bitcoin", "multiplier": 1, "pip_size": 1.0, "lot_size": 0.001, "leverage": 2},
-}
+# Single source of truth for instrument config lives in app.config.
+from app.config import INSTRUMENTS
 
 
 class AsyncSimulatedDataProvider:
@@ -416,11 +412,12 @@ class AsyncSimulatedBroker(Broker):
                 # Last resort fallback
                 exit_price = position.get("current_price", position["entry_price"])
 
-        pos_leverage = position.get("leverage", 1)
+        # P&L convention: size is units of underlying; leverage affects margin only.
+        # Any leverage-based scaling happens exactly once, in position sizing.
         if position["direction"] == "buy":
-            pnl_usd = (exit_price - position["entry_price"]) * position["size"] * pos_leverage
+            pnl_usd = (exit_price - position["entry_price"]) * position["size"]
         else:
-            pnl_usd = (position["entry_price"] - exit_price) * position["size"] * pos_leverage
+            pnl_usd = (position["entry_price"] - exit_price) * position["size"]
 
         self.account["balance_usd"] = round(self.account["balance_usd"] + pnl_usd, 2)
         self.account["used_margin"] = max(0, self.account["used_margin"] - position["margin_usd"])
@@ -505,11 +502,10 @@ class AsyncSimulatedBroker(Broker):
                 print(f"[PRICE-UPDATE] Could not get price for {symbol}")
                 continue
 
-            pos_leverage = pos.get("leverage", 1)
             if pos["direction"] == "buy":
-                pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage
+                pnl = (price - pos["entry_price"]) * pos["size"]
             else:
-                pnl = (pos["entry_price"] - price) * pos["size"] * pos_leverage
+                pnl = (pos["entry_price"] - price) * pos["size"]
 
             pos["current_price"] = price
             pos["unrealized_pnl_usd"] = round(pnl, 2)
@@ -517,12 +513,15 @@ class AsyncSimulatedBroker(Broker):
             # Dynamic TP adjustment based on HTF RSI
             try:
                 from database import get_db
-                db = get_db()
+                # NOTE: keep the pymongo handle on its own name — rebinding `db`
+                # here shadowed the `import database as db` module and silently
+                # broke db.get_setting() for this and the trend-exit block below.
+                mongo = get_db()
                 htf_rsi_enabled = db.get_setting("HTF_RSI_DYNAMIC_TP", 0)
-                if htf_rsi_enabled and htf_rsi_enabled > 0:
+                if htf_rsi_enabled and htf_rsi_enabled > 0 and mongo is not None:
                     # Get HTF candles (e.g., 30 min)
                     htf_res = str(int(htf_rsi_enabled))
-                    htf_candles = list(db.candles.find(
+                    htf_candles = list(mongo.candles.find(
                         {"symbol": symbol, "resolution": htf_res}
                     ).sort("timestamp", -1).limit(20))
                     
@@ -673,11 +672,10 @@ class AsyncSimulatedBroker(Broker):
                     price = quote["price"]
                 else:
                     continue
-                pos_leverage = pos.get("leverage", 1)
                 if pos["direction"] == "buy":
-                    pnl = (price - pos["entry_price"]) * pos["size"] * pos_leverage
+                    pnl = (price - pos["entry_price"]) * pos["size"]
                 else:
-                    pnl = (pos["entry_price"] - price) * pos["size"] * pos_leverage
+                    pnl = (pos["entry_price"] - price) * pos["size"]
                 pos["current_price"] = price
                 pos["unrealized_pnl_usd"] = round(pnl, 2)
 

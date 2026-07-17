@@ -21,52 +21,73 @@ def check_circuit_breaker() -> Tuple[bool, str]:
     - can_trade=False: trading is blocked
     """
     global _circuit_breaker_triggered, _circuit_breaker_reason, _circuit_breaker_since
-    
-    from main import db, account
-    
+
+    import database
+    from database import get_db
+    from services.state import get_account
+
     # Get MAX_DRAWDOWN_PERCENT from settings (default 20%)
     max_drawdown = 20.0
     try:
-        setting = db.get_setting("MAX_DRAWDOWN_PCT", 20.0)
+        setting = database.get_setting("MAX_DRAWDOWN_PCT", 20.0)
         max_drawdown = float(setting) if setting else 20.0
-    except:
+    except Exception:
         pass
-    
+
     # Check if manually triggered
     if _circuit_breaker_triggered:
         # Auto-reset after 1 hour
         if _circuit_breaker_since and datetime.now() - _circuit_breaker_since > timedelta(hours=1):
             reset_circuit_breaker()
-            return True, ""  # FIXED: was False
-        return False, _circuit_breaker_reason  # FIXED: was True
-    
-    # Check consecutive losses
+            return True, ""
+        return False, _circuit_breaker_reason
+
+    # closed_at is stored as an ISO-8601 string (broker_sim uses utcnow().isoformat()),
+    # so compare against an ISO string, not a datetime.
+    now_utc = datetime.utcnow()
     try:
-        recent_trades = list(db.trades.find({
-            "closed_at": {"$gte": datetime.now() - timedelta(hours=24)}
-        }).sort("closed_at", -1).limit(10))
-        
-        if len(recent_trades) >= MAX_CONSECUTIVE_LOSSES:
-            losses = sum(1 for t in recent_trades[:MAX_CONSECUTIVE_LOSSES] if t.get("pnl", 0) < 0)
-            if losses >= MAX_CONSECUTIVE_LOSSES:
-                trigger_circuit_breaker("Too many consecutive losses")
-                return False, _circuit_breaker_reason  # FIXED: trading blocked
+        mongo = get_db()
+        recent_trades = []
+        if mongo is not None:
+            cutoff_iso = (now_utc - timedelta(hours=24)).isoformat()
+            recent_trades = list(mongo.trades.find({
+                "closed_at": {"$gte": cutoff_iso}
+            }).sort("closed_at", -1).limit(50))
+
+        # Truly consecutive losses: walk newest -> oldest until the first winner
+        consecutive_losses = 0
+        for t in recent_trades:
+            if t.get("pnl_usd", t.get("pnl", 0)) < 0:
+                consecutive_losses += 1
+            else:
+                break
+        if consecutive_losses >= MAX_CONSECUTIVE_LOSSES:
+            trigger_circuit_breaker(f"{consecutive_losses} consecutive losses")
+            return False, _circuit_breaker_reason
+
+        # Daily trade limit
+        day_start_iso = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        trades_today = sum(1 for t in recent_trades if (t.get("closed_at") or "") >= day_start_iso)
+        if trades_today >= MAX_DAILY_TRADES:
+            trigger_circuit_breaker(f"Daily trade limit reached ({trades_today}/{MAX_DAILY_TRADES})")
+            return False, _circuit_breaker_reason
     except Exception:
         pass
-    
-    # Check drawdown
+
+    # Check drawdown against the live account, not an import-time snapshot
     try:
+        account = get_account()
         peak = account.get("peak_equity_usd", account.get("balance_usd", 3000))
-        current = account.get("balance_usd", 3000)
+        current = account.get("equity_usd", account.get("balance_usd", 3000))
         if peak > 0:
             drawdown = ((peak - current) / peak) * 100
             if drawdown > max_drawdown:
                 trigger_circuit_breaker(f"Max drawdown exceeded: {drawdown:.1f}%")
-                return False, _circuit_breaker_reason  # FIXED: trading blocked
+                return False, _circuit_breaker_reason
     except Exception:
         pass
-    
-    return True, ""  # FIXED: was False - trading allowed!
+
+    return True, ""
 
 
 def trigger_circuit_breaker(reason: str) -> None:
