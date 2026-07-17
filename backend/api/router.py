@@ -18,6 +18,7 @@ from .routes import (
     backtest as backtest_routes,
     root as root_routes,
     settings as settings_routes,
+    optimizer as optimizer_routes,
 )
 from app.logging import log_event
 
@@ -35,3 +36,4 @@ router.include_router(status_routes.router)
 router.include_router(backtest_routes.router)
 router.include_router(settings_routes.router)
 router.include_router(signals_routes.router)
+router.include_router(optimizer_routes.router)

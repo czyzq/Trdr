@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { apiUrl } from "../api";
 import { themes, ThemeName, getStoredTheme, setStoredTheme } from "../theme";
+import { setUiVersion } from "../uiVersion";
 
 interface Setting {
   key: string;
@@ -182,6 +183,29 @@ export const SettingsTab: React.FC = () => {
               </button>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Interface Version */}
+      <div className="mb-4 p-4 rounded-lg border" style={{ backgroundColor: "var(--bg-secondary)", borderColor: "var(--bg-tertiary)" }}>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Interface</h3>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+              You are using the classic dashboard. The new mobile-first dashboard (v2) is available.
+            </p>
+          </div>
+          <button
+            onClick={() => setUiVersion("v2")}
+            className="px-3 py-1.5 text-xs rounded border transition-all font-medium whitespace-nowrap"
+            style={{
+              backgroundColor: "var(--bg-tertiary)",
+              borderColor: "var(--accent)",
+              color: "var(--text-primary)",
+            }}
+          >
+            Switch to new dashboard (v2)
+          </button>
         </div>
       </div>
 
