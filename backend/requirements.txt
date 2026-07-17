@@ -12,3 +12,5 @@ beautifulsoup4==4.12.2
 pytest==8.3.0
 certifi==2024.2.2
 requests==2.32.3
+optuna==4.9.0
+numpy==2.5.1
