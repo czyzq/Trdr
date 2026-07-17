@@ -32,6 +32,7 @@ import { Sidebar } from "./Sidebar";
 import { SignalsGrid } from "./SignalsGrid";
 import { ConsoleTab } from "./ConsoleTab";
 import { NewsTab } from "./NewsTab";
+import { BoardTab } from "./BoardTab";
 import { ChartsTab } from "./ChartsTab";
 import { MainTab } from "./MainTab";
 import { TradesTab } from "./TradesTab";
@@ -39,7 +40,7 @@ import { SettingsTab } from "./SettingsTab";
 import { apiUrl } from "../api";
 import { getStoredTheme, themes, ThemeName } from "../theme";
 
-type TabType = "main" | "charts" | "trades" | "news" | "console" | "settings" | "backtest";
+type TabType = "main" | "charts" | "trades" | "news" | "board" | "console" | "settings" | "backtest";
 
 interface LogEntry {
   id: string;
@@ -234,6 +235,7 @@ export const Dashboard: React.FC = () => {
     { id: "charts", label: "Charts", shortLabel: "Charts", icon: "◩" },
     { id: "trades", label: "Trades", shortLabel: "Trades", icon: "⇅" },
     { id: "news", label: "News", shortLabel: "News", icon: "◉" },
+    { id: "board", label: "Board", shortLabel: "Board", icon: "▦" },
     { id: "backtest", label: "Backtest", shortLabel: "Back", icon: "⏪" },
     { id: "console", label: "Console", shortLabel: "Log", icon: "▸" },
     { id: "settings", label: "Settings", shortLabel: "Set.", icon: "⚙" },
@@ -360,6 +362,7 @@ export const Dashboard: React.FC = () => {
           {activeTab === "charts" && <ChartsTab />}
           {activeTab === "trades" && <TradesTab />}
           {activeTab === "news" && <NewsTab />}
+          {activeTab === "board" && <BoardTab symbol={selectedSymbol} />}
           {activeTab === "backtest" && (
             <div className="p-4">
               <h2 className="text-lg font-bold mb-4" style={{ color: "var(--text-primary)" }}>Backtest</h2>

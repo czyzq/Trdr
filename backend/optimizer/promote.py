@@ -32,6 +32,16 @@ def auto_promote_enabled() -> bool:
     return _setting("AUTO_PROMOTE_ENABLED", 1)
 
 
+def _notify_sync(event_type: str, message: str, dedupe_key: str = None) -> None:
+    """Best-effort notification; must never crash the promotion pipeline."""
+    try:
+        from services.notifier import notify_sync
+
+        notify_sync(event_type, message, dedupe_key)
+    except Exception:
+        pass
+
+
 def kill_switch(reason: str) -> None:
     """Disable the loop and record why. Demotion of recent promotions is manual review."""
     try:
@@ -40,6 +50,7 @@ def kill_switch(reason: str) -> None:
     except Exception:
         pass
     _audit("kill_switch", {"reason": reason})
+    _notify_sync("kill_switch", f"Optimizer kill switch engaged: {reason}")
 
 
 def _mongo():
@@ -98,6 +109,8 @@ def promote(strategy_id: str, candidate_config: dict, guard_report: dict,
     _apply_to_strategies_json(strategy_id, candidate_config)
     _audit("promoted", {"strategy_id": strategy_id, "version": version,
                         "guard_report": guard_report})
+    _notify_sync("promotion", f"Promoted strategy {strategy_id} to v{version} ({source})",
+                 dedupe_key=f"promotion:{strategy_id}:{version}")
     return doc
 
 
@@ -118,6 +131,8 @@ def rollback(strategy_id: str) -> Optional[dict]:
     mongo.strategy_versions.update_one({"_id": previous["_id"]}, {"$set": {"status": "active"}})
     _apply_to_strategies_json(strategy_id, previous["config"])
     _audit("rollback", {"strategy_id": strategy_id, "to_version": previous["version"]})
+    _notify_sync("rollback", f"Rolled back strategy {strategy_id} to v{previous['version']}",
+                 dedupe_key=f"rollback:{strategy_id}:{previous['version']}")
     return previous
 
 

@@ -355,6 +355,18 @@ class AsyncSimulatedBroker(Broker):
         await async_save_trade(position)
         await async_save_account(self.account)
 
+        # Fire-and-forget notification; must never affect trading flow
+        try:
+            from services.notifier import notify
+
+            asyncio.create_task(notify(
+                "trade_opened",
+                f"Opened {direction.upper()} {symbol} size={size} @ {entry_price}",
+                dedupe_key=f"trade_opened:{position['id']}",
+            ))
+        except Exception:
+            pass
+
         return {"status": "opened", "position": position}
 
     async def close_position(self, position_id: str, exit_price: Optional[float] = None) -> Dict[str, Any]:
@@ -430,6 +442,21 @@ class AsyncSimulatedBroker(Broker):
             print(f"[ERROR] Failed to save closed trade: {e}")
         
         await async_save_account(self.account)
+
+        # Fire-and-forget notification; must never affect trading flow
+        try:
+            from services.notifier import notify
+
+            asyncio.create_task(notify(
+                "trade_closed",
+                (
+                    f"Closed {position['direction'].upper()} {position['symbol']} "
+                    f"size={position['size']} @ {exit_price} pnl=${round(pnl_usd, 2)}"
+                ),
+                dedupe_key=f"trade_closed:{position_id}",
+            ))
+        except Exception:
+            pass
 
         return {"status": "closed", "position": closed_pos}
 

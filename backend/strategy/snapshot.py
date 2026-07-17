@@ -25,6 +25,9 @@ INDICATOR_RANGES: Dict[str, tuple] = {
     "BB_POSITION": (-1, 1),
     "VOLUME_RATIO": (-3, 3),
     "CANDLE_PATTERN": (-1, 1),
+    "STOCH_D": (0, 100),        # smoothed stoch-RSI %D
+    "ATR_REGIME": (-1, 1),      # ATR% vs its recent mean (volatility expansion)
+    "SMA200_TREND": (-10, 10),  # % distance close vs SMA200
 }
 
 
@@ -80,11 +83,43 @@ def _raw_value(name: str, ind: dict, candles: List[dict]) -> Optional[float]:
         return max(-1.0, min(1.0, (close - (upper + lower) / 2) / ((upper - lower) / 2)))
     if name == "VOLUME_RATIO":
         vp = ind.get("volume_profile") or {}
-        ratio = vp.get("ratio") if isinstance(vp, dict) else None
+        ratio = vp.get("vol_ratio") if isinstance(vp, dict) else None
         return (ratio - 1.0) if ratio is not None else None
     if name == "CANDLE_PATTERN":
         cp = ind.get("candlestick_patterns") or {}
         return cp.get("bias") if isinstance(cp, dict) else None
+    if name == "STOCH_D":
+        st = ind.get("stoch_rsi") or {}
+        return st.get("d") if isinstance(st, dict) else None
+    if name == "ATR_REGIME":
+        # Current ATR (last 14 true ranges) vs mean TR of the recent window.
+        # > 0 = volatility expanding, < 0 = contracting. Stateless per window.
+        if len(candles) < 30:
+            return None
+        window = candles[-50:]
+        trs = []
+        for prev, cur in zip(window, window[1:]):
+            h, l, pc = cur.get("high"), cur.get("low"), prev.get("close")
+            if h is None or l is None or pc is None:
+                return None
+            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        if len(trs) < 15:
+            return None
+        baseline = sum(trs) / len(trs)
+        if baseline <= 0:
+            return None
+        current = sum(trs[-14:]) / 14
+        return current / baseline - 1.0
+    if name == "SMA200_TREND":
+        if len(candles) < 200:
+            return None
+        closes = [c.get("close") for c in candles[-200:]]
+        if any(c is None for c in closes):
+            return None
+        sma200 = sum(closes) / 200
+        if sma200 <= 0:
+            return None
+        return (closes[-1] - sma200) / sma200 * 100
     return None
 
 
