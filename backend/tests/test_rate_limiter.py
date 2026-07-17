@@ -9,13 +9,15 @@ from services.rate_limiter import ProviderGate, TokenBucket, get_gate
 
 
 def test_try_acquire_depletes_and_refills():
-    bucket = TokenBucket(capacity=2, refill_per_sec=1000.0)
-    assert bucket.try_acquire()
-    assert bucket.try_acquire()
-    # immediate third call may or may not have refilled at this rate; force empty
-    slow = TokenBucket(capacity=1, refill_per_sec=0.001)
+    # buckets start with at most 1 token so a cold start cannot burst
+    # capacity + refill inside the provider's first rate window
+    slow = TokenBucket(capacity=5, refill_per_sec=0.001)
     assert slow.try_acquire()
     assert not slow.try_acquire()
+    fast = TokenBucket(capacity=2, refill_per_sec=1000.0)
+    assert fast.try_acquire()
+    time.sleep(0.01)  # 1000/s refill: ~10 tokens accrue
+    assert fast.try_acquire()
 
 
 @pytest.mark.asyncio

@@ -50,18 +50,22 @@ def optimize_strategy(base_config: dict, candles_by_tf: Dict[str, list],
     trial_log = []
 
     def objective(trial):
+        # Selection happens on TRAIN folds only. The validation folds are
+        # reserved for the one-shot guard/champion evaluation of the winner -
+        # optimizing directly on them would be selection bias (best-of-75
+        # "validation" numbers would be the search target, not evidence).
         cfg = space.suggest_config(trial, base_config)
-        val_metrics = _run_folds(cfg, folds, "validate")
-        val_pnl = sum(m.get("net_pnl_usd", 0) for m in val_metrics)
+        train_metrics = _run_folds(cfg, folds, "train")
+        train_pnl = sum(m.get("net_pnl_usd", 0) for m in train_metrics)
         # sample-size prior: too few trades scores poorly
-        if any(m.get("trades", 0) < guards.MIN_VAL_TRADES for m in val_metrics):
-            val_pnl -= abs(val_pnl) * 0.5 + 100
-        trial_log.append({"number": trial.number, "value": round(val_pnl, 2),
+        if any(m.get("trades", 0) < guards.MIN_TRAIN_TRADES for m in train_metrics):
+            train_pnl -= abs(train_pnl) * 0.5 + 100
+        trial_log.append({"number": trial.number, "value": round(train_pnl, 2),
                           "config_hash": _config_hash(cfg)})
         if progress_cb:
-            progress_cb(trial.number, n_trials, val_pnl)
+            progress_cb(trial.number, n_trials, train_pnl)
         trial.set_user_attr("config", cfg)
-        return val_pnl
+        return train_pnl
 
     sampler = optuna.samplers.TPESampler(seed=SEED)
     study = optuna.create_study(direction="maximize", sampler=sampler)

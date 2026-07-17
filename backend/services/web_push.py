@@ -22,19 +22,47 @@ VAPID_CLAIMS = {"sub": "mailto:trdr@localhost"}
 
 
 def _get_vapid():
-    """Load or create the VAPID keypair (persisted, gitignored)."""
+    """Load or create the VAPID keypair.
+
+    Order: local PEM file -> Mongo setting (Render's filesystem is ephemeral,
+    so the file vanishes on redeploy) -> generate fresh and persist to BOTH.
+    The PEM file is always (re)written because pywebpush reads the key from
+    the file path in send_to_all.
+    """
     global _vapid
     if _vapid is not None:
         return _vapid
     from py_vapid import Vapid01
 
     _KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    v = Vapid01()
+    v = None
     if _KEY_FILE.exists():
         v = Vapid01.from_file(str(_KEY_FILE))
     else:
-        v.generate_keys()
-        v.save_key(str(_KEY_FILE))
+        # File gone (fresh deploy) - try the PEM persisted in Mongo
+        pem = None
+        try:
+            import database
+
+            pem = database.get_setting("VAPID_PRIVATE_PEM")
+        except Exception:
+            pem = None
+        if isinstance(pem, str) and "-----BEGIN" in pem:
+            v = Vapid01.from_pem(pem.encode("utf8"))
+            try:
+                _KEY_FILE.write_text(pem)
+            except Exception:
+                pass
+        else:
+            v = Vapid01()
+            v.generate_keys()
+            v.save_key(str(_KEY_FILE))
+            try:
+                import database
+
+                database.set_setting("VAPID_PRIVATE_PEM", v.private_pem().decode("utf8"))
+            except Exception:
+                pass
     _vapid = v
     return v
 
@@ -115,6 +143,8 @@ def send_to_all(title: str, body: str, tag: Optional[str] = None) -> int:
     v = _get_vapid()
     payload = json.dumps({"title": title, "body": body, "tag": tag or "trdr"})
     sent = 0
+    failed = 0
+    last_error = None
     for sub in list_subscriptions():
         try:
             webpush(
@@ -128,6 +158,18 @@ def send_to_all(title: str, body: str, tag: Optional[str] = None) -> int:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status in (404, 410):
                 remove_subscription(sub.get("endpoint", ""))
+            else:
+                failed += 1
+                last_error = f"status={status} {e}"
         except Exception:
             pass
+    if failed:
+        # one aggregated line, not one per subscription
+        msg = f"[WEB-PUSH] {failed} push send(s) failed (last: {last_error})"
+        try:
+            from app.logging import log_event
+
+            log_event(msg, "warning")
+        except Exception:
+            print(msg)
     return sent

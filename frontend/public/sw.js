@@ -14,8 +14,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(data.title, {
       body: data.body,
       tag: data.tag,
-      icon: "/icon.svg",
-      badge: "/icon.svg",
+      icon: "icon.svg",
+      badge: "icon.svg",
     })
   );
 });
@@ -27,7 +27,7 @@ self.addEventListener("notificationclick", (event) => {
       for (const client of clients) {
         if ("focus" in client) return client.focus();
       }
-      return self.clients.openWindow("/");
+      return self.clients.openWindow(self.registration.scope);
     })
   );
 });

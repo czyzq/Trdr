@@ -11,6 +11,8 @@ services:
         sync: false
       - key: MONGO_URI
         sync: false
+      - key: DASHBOARD_TOKEN
+        sync: false
       - key: MONGO_DB
         value: cfd_trading_bot
       - key: BROKER_TYPE

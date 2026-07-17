@@ -675,12 +675,13 @@ class AsyncSimulatedBroker(Broker):
                     price = quote["price"]
                 else:
                     continue
-                if pos["direction"] == "buy":
-                    pnl = (price - pos["entry_price"]) * pos["size"]
-                else:
-                    pnl = (pos["entry_price"] - price) * pos["size"]
-                pos["current_price"] = price
-                pos["unrealized_pnl_usd"] = round(pnl, 2)
+            # recalculate with whatever price we ended up with (candle or quote)
+            if pos["direction"] == "buy":
+                pnl = (price - pos["entry_price"]) * pos["size"]
+            else:
+                pnl = (pos["entry_price"] - price) * pos["size"]
+            pos["current_price"] = price
+            pos["unrealized_pnl_usd"] = round(pnl, 2)
 
         unrealized_usd = sum(p.get("unrealized_pnl_usd", 0) for p in self.open_positions)
         self.account["equity_usd"] = round(self.account["balance_usd"] + unrealized_usd, 2)

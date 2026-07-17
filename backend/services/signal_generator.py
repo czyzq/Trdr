@@ -199,14 +199,12 @@ def calculate_position_size(symbol: str, entry_price: float, stop_loss: float, a
     if price_risk == 0:
         return 0.01
     
-    # For commodities (XAU, XAG), lot size is different
-    if symbol in ("XAU", "XAG"):
-        # Gold: $100 per 1.0 lot per $1 move
-        # Silver: $5 per 1.0 lot per $1 move
-        multiplier = 5 if symbol == "XAG" else 100
-        position_size = risk_amount / (price_risk * multiplier)
-    else:
-        # Indices/crypto: simpler calculation
-        position_size = risk_amount / price_risk
-    
-    return max(0.01, min(position_size, 10.0))  # Clamp between 0.01 and 10 lots
+    # ONE convention everywhere: size = units of underlying, P&L = delta_price * size.
+    position_size = risk_amount / price_risk
+
+    # Leverage caps notional (instrument cap from config)
+    from app.config import INSTRUMENTS
+
+    lev = INSTRUMENTS.get(symbol, {}).get("leverage", 10)
+    max_size = account_balance * lev / entry_price if entry_price > 0 else position_size
+    return max(0.0, min(position_size, max_size))

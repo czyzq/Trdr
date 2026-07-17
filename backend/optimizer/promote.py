@@ -100,6 +100,11 @@ def promote(strategy_id: str, candidate_config: dict, guard_report: dict,
     }
     mongo = _mongo()
     if mongo is not None:
+        try:  # duplicate-version guard for concurrent promotions
+            mongo.strategy_versions.create_index(
+                [("strategy_id", 1), ("version", 1)], unique=True, background=True)
+        except Exception:
+            pass
         mongo.strategy_versions.update_many(
             {"strategy_id": strategy_id, "status": "active"},
             {"$set": {"status": "retired", "retired_at": datetime.utcnow().isoformat()}},
@@ -153,7 +158,22 @@ def _apply_to_strategies_json(strategy_id: str, config: dict) -> None:
             break
     if not replaced:
         data.setdefault("strategies", []).append(config)
-    STRATEGIES_JSON.write_text(json.dumps(data, indent=2))
+    # atomic replace: the live server re-reads this file every 5 minutes -
+    # a truncate-then-write race would make it load an empty/partial file
+    import os
+    import tempfile
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(STRATEGIES_JSON.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data, indent=2))
+        os.replace(tmp_path, STRATEGIES_JSON)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
     # hot-reload the in-process manager if it's loaded
     try:
         from services.strategy_manager import get_strategy_manager

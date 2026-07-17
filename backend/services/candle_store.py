@@ -74,6 +74,43 @@ class CandleSeries:
         return CandleSeries(self.symbol, self.timeframe, kept)
 
 
+def aggregate_clock_aligned(base_candles: List[dict], base_tf: TimeFrame, target_tf: TimeFrame) -> List[dict]:
+    """Aggregate base-TF candles into target-TF bars anchored to CLOCK boundaries.
+
+    Buckets by floor(epoch / target_minutes) - a 15m bar always opens at
+    :00/:15/:30/:45 regardless of where the source list starts or has gaps
+    (the old count-based grouping phase-shifted with the data head, producing
+    bars that never matched the clock-aligned bars Yahoo/backtests use).
+    Incomplete buckets (missing base bars) are dropped.
+    """
+    factor = target_tf.minutes // base_tf.minutes
+    if factor <= 1:
+        return list(base_candles)
+    buckets: Dict[int, List[dict]] = {}
+    for c in base_candles:
+        ts = _parse_ts(c.get("timestamp", ""))
+        if ts is None:
+            continue
+        epoch_min = int(ts.timestamp() // 60)
+        buckets.setdefault(epoch_min // target_tf.minutes, []).append((epoch_min, c))
+    out = []
+    for bucket_key in sorted(buckets):
+        members = sorted(buckets[bucket_key])
+        if len(members) < factor:  # partial bucket (gap or forming) - drop
+            continue
+        candles = [m[1] for m in members]
+        open_ts = datetime.utcfromtimestamp(bucket_key * target_tf.minutes * 60)
+        out.append({
+            "timestamp": open_ts.strftime("%Y-%m-%dT%H:%M:%S"),
+            "open": candles[0]["open"],
+            "high": max(c["high"] for c in candles),
+            "low": min(c["low"] for c in candles),
+            "close": candles[-1]["close"],
+            "volume": sum(c.get("volume", 0) for c in candles),
+        })
+    return out
+
+
 # Base TFs hit the network; the rest aggregate locally from a base TF.
 BASE_TIMEFRAMES = (TimeFrame.M5, TimeFrame.M60, TimeFrame.D1)
 AGGREGATED_FROM: Dict[TimeFrame, TimeFrame] = {
@@ -174,10 +211,7 @@ class CandleStore:
         base = await self.get_series(series.symbol, base_tf, min_bars * factor)
         if not base.candles:
             return
-        try:
-            aggregated = database.aggregate_candles(base.candles, series.timeframe.db_resolution)
-        except Exception:
-            aggregated = []
+        aggregated = aggregate_clock_aligned(base.candles, base_tf, series.timeframe)
         if aggregated:
             series.merge(_drop_forming(aggregated, series.timeframe))
 

@@ -43,9 +43,17 @@ def test_guards_reject_deep_drawdown():
     assert not ok and not report["checks"]["max_dd"]
 
 
-def test_walkforward_no_overlap_train_validate():
-    candles = [{"i": i} for i in range(30000)]
-    folds = make_folds({"5m": candles}, "5m")
+def test_walkforward_no_overlap_and_time_alignment():
+    from datetime import datetime, timedelta
+
+    end = datetime(2026, 1, 10, 12, 0, 0)
+    def mk(n, tf_min):
+        return [{"i": i, "timestamp": (end - timedelta(minutes=tf_min * (n - i))).strftime("%Y-%m-%dT%H:%M:%S")}
+                for i in range(n)]
+
+    candles_5m = mk(30000, 5)
+    candles_1h = mk(8000, 60)   # much longer history than the 5m span
+    folds = make_folds({"5m": candles_5m, "1h": candles_1h}, "5m")
     assert len(folds) == 3
     for f in folds:
         train_is = {c["i"] for c in f.train["5m"]}
@@ -53,6 +61,11 @@ def test_walkforward_no_overlap_train_validate():
         assert not train_is & val_is
         # embargo: gap between max(train) and min(validate)
         assert min(val_is) - max(train_is) >= 288
+        # TIME alignment: the 1h slice must not extend past the 5m window's end
+        end_5m = max(c["timestamp"] for c in f.validate["5m"])
+        assert max(c["timestamp"] for c in f.validate["1h"]) <= end_5m
+        # ...and must reach close to it (context is current, not months stale)
+        assert max(c["timestamp"] for c in f.validate["1h"]) >= f.validate["5m"][0]["timestamp"]
 
 
 def test_space_cardinality_cap():

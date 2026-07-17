@@ -106,6 +106,13 @@ async def lifespan(app: FastAPI):
     log_event("[CFD TRADING BOT v0.2.0 - USD SIMULATION]", "event")
     log_event("Instruments: XAU (Gold), XAG (Silver), US100 (Nasdaq), BTC (Bitcoin)", "info")
 
+    if not os.getenv("DASHBOARD_TOKEN"):
+        log_event(
+            "[AUTH] DASHBOARD_TOKEN is not set - API AUTH IS DISABLED. "
+            "Set DASHBOARD_TOKEN in the environment to protect /api routes.",
+            "warning",
+        )
+
     # Database status
     if db.is_connected():
         log_event("MongoDB connected - trades & account persisted", "success")
@@ -225,6 +232,18 @@ async def lifespan(app: FastAPI):
             await _price_cache_task
         except asyncio.CancelledError:
             pass
+    if _strategy_sync_task:
+        _strategy_sync_task.cancel()
+        try:
+            await _strategy_sync_task
+        except asyncio.CancelledError:
+            pass
+    if _digest_task:
+        _digest_task.cancel()
+        try:
+            await _digest_task
+        except asyncio.CancelledError:
+            pass
     await async_save_account(account)
     await async_save_event_log(event_log)
     # Skip news client cleanup - it's not critical
@@ -246,7 +265,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration
+from services.auth import auth_middleware, is_authorized
+
+# Auth middleware registered FIRST so CORS (added after) wraps it as the
+# outermost layer - Starlette runs later-added middleware first. This way
+# 401 responses still carry CORS headers and the browser can read them.
+app.middleware("http")(auth_middleware)
+
+# CORS configuration (must stay OUTERMOST - keep this after the auth middleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -254,10 +280,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-from services.auth import auth_middleware, is_authorized
-
-app.middleware("http")(auth_middleware)
 
 
 @app.get("/api/auth/check")

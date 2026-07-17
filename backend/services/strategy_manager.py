@@ -131,20 +131,22 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
     # Filters still come from the strategy's FilterChain (volatility, VIX, session)
     if atr_percent is None:
         atr_percent = compute_base_atr_percent(snapshot, base_tf)
+    evaluation = engine.evaluate(snapshot)
+    if evaluation.direction == "neutral":
+        return None
+
+    # Filters run AFTER evaluation so direction-sensitive filters see the real
+    # side (the old call hardcoded 'long' for every entry, shorts included)
     base_candles = series.get(base_tf).candles if series.get(base_tf) else list(candles)
     if base_candles:
         filters_passed, failed_filters = strategy.filters.check_all(
-            base_candles[-1], symbol, 'long',
+            base_candles[-1], symbol, evaluation.direction,
             atr_percent=atr_percent,
             vix_value=vix_value
         )
         if not filters_passed:
             print(f"[FILTERS] {symbol}: Failed filters: {failed_filters}")
             return None
-
-    evaluation = engine.evaluate(snapshot)
-    if evaluation.direction == "neutral":
-        return None
 
     per_tf_components = [{
         'type': 'technical',

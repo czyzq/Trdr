@@ -15,8 +15,8 @@ INDICATOR_RANGES: Dict[str, tuple] = {
     "RSI": (0, 100),
     "STOCH": (0, 100),
     "STOCH_RSI": (0, 100),
-    "ADX": (0, 100),
-    "MACD": (-20, 20),
+    "ADX": (-100, 100),  # signed by DI dominance
+    "MACD": (-1, 1),     # histogram as % of price
     "MOMENTUM": (-10, 10),
     "DIVERGENCE": (-1, 1),
     "CANDLE_DIR": (-1, 1),
@@ -47,13 +47,31 @@ def _raw_value(name: str, ind: dict, candles: List[dict]) -> Optional[float]:
     if name == "RSI":
         return ind.get("rsi_14")
     if name == "MACD":
+        # histogram as % of price - scale-invariant across BTC (~60k) and XAG (~30)
         macd = ind.get("macd") or {}
-        return macd.get("histogram") if isinstance(macd, dict) else macd
+        hist = macd.get("histogram") if isinstance(macd, dict) else macd
+        close = candles[-1].get("close") if candles else None
+        if hist is None or not close:
+            return None
+        return hist / close * 100
     if name == "MOMENTUM":
-        return ind.get("momentum_10")
+        # momentum_10 is an absolute price change; normalize to % of price
+        mom = ind.get("momentum_10")
+        close = candles[-1].get("close") if candles else None
+        if mom is None or not close:
+            return None
+        return mom / close * 100
     if name == "ADX":
+        # ADX alone is non-directional strength; sign it by DI dominance so it
+        # contributes direction * strength instead of a constant bearish drift
         adx = ind.get("adx") or {}
-        return adx.get("adx") if isinstance(adx, dict) else adx
+        if not isinstance(adx, dict):
+            return None
+        strength = adx.get("adx")
+        if strength is None:
+            return None
+        plus_di, minus_di = adx.get("plus_di", 0) or 0, adx.get("minus_di", 0) or 0
+        return strength if plus_di >= minus_di else -strength
     if name in ("STOCH", "STOCH_RSI"):
         st = ind.get("stoch_rsi") or {}
         return st.get("k") if isinstance(st, dict) else st
@@ -87,7 +105,7 @@ def _raw_value(name: str, ind: dict, candles: List[dict]) -> Optional[float]:
         return (ratio - 1.0) if ratio is not None else None
     if name == "CANDLE_PATTERN":
         cp = ind.get("candlestick_patterns") or {}
-        return cp.get("bias") if isinstance(cp, dict) else None
+        return cp.get("net_bias") if isinstance(cp, dict) else None
     if name == "STOCH_D":
         st = ind.get("stoch_rsi") or {}
         return st.get("d") if isinstance(st, dict) else None

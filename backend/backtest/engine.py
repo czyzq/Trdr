@@ -31,7 +31,8 @@ SERIES_WINDOW = 150  # bars per TF handed to the engine each step
 class _OpenPosition:
     direction: str          # buy | sell
     size: float
-    entry_price: float      # actual fill
+    entry_price: float      # actual fill (spread included)
+    entry_mid: float        # mid price at entry (bar close)
     entry_ts: datetime
     entry_bar: int
     tp_price: Optional[float]
@@ -53,9 +54,9 @@ def _position_size(balance: float, entry: float, sl: Optional[float], config: di
     per_unit_risk = abs(entry - sl) if sl else entry * 0.02
     if per_unit_risk <= 0:
         per_unit_risk = entry * 0.02
-    size = risk_amount / per_unit_risk * leverage
-    # cap notional at balance * leverage (margin sanity)
-    max_size = balance * max_lev / entry
+    # size in units so an SL hit loses ~risk_pct of balance; leverage only caps notional
+    size = risk_amount / per_unit_risk
+    max_size = balance * leverage / entry
     return max(0.0, min(size, max_size))
 
 
@@ -121,16 +122,19 @@ def run_backtest(
     trades: List[TradeRecord] = []
     equity_curve: List[float] = []
 
-    def close_position(pos: _OpenPosition, fill: float, ts: datetime, bar_i: int, reason: str) -> None:
+    def close_position(pos: _OpenPosition, fill: float, ts: datetime, bar_i: int,
+                       reason: str, exit_mid: float) -> None:
         nonlocal balance, position
-        raw_edge = pos.entry_price if pos.direction == "buy" else pos.entry_price
-        gross = (fill - pos.entry_price) * pos.size if pos.direction == "buy" else (pos.entry_price - fill) * pos.size
+        # net = what the account actually gains: fill-to-fill P&L plus financing
+        fill_pnl = (fill - pos.entry_price) * pos.size if pos.direction == "buy" \
+            else (pos.entry_price - fill) * pos.size
         swap = cost_model.swap_cost(pos.entry_price * pos.size, pos.direction, pos.entry_ts, ts)
-        # spread/slippage cost is already inside the fills; report it explicitly
-        mid_entry = pos.entry_price - cost_model.half_spread(pos.entry_price) if pos.direction == "buy" \
-            else pos.entry_price + cost_model.half_spread(pos.entry_price)
-        spread_cost = abs(pos.entry_price - mid_entry) * pos.size + cost_model.half_spread(fill) * pos.size
-        net = gross + swap
+        net = fill_pnl + swap
+        # gross = mid-to-mid P&L; costs = gross - net (spread+slippage+swap), so the
+        # identity net == gross - costs holds by construction
+        gross = (exit_mid - pos.entry_mid) * pos.size if pos.direction == "buy" \
+            else (pos.entry_mid - exit_mid) * pos.size
+        costs = gross - net
         balance += net
         trades.append(TradeRecord(
             symbol=symbol,
@@ -141,7 +145,7 @@ def run_backtest(
             exit_price=round(fill, 6),
             size=round(pos.size, 6),
             gross_pnl_usd=round(gross, 2),
-            costs_usd=round(spread_cost + abs(min(swap, 0.0)), 2),
+            costs_usd=round(costs, 2),
             net_pnl_usd=round(net, 2),
             exit_reason=reason,
             bars_held=bar_i - pos.entry_bar,
@@ -165,14 +169,15 @@ def run_backtest(
             if position.tp_price:
                 hit_tp = bar["high"] >= position.tp_price if direction == "buy" else bar["low"] <= position.tp_price
             if hit_sl:  # worst-case: SL before TP when both hit in one bar
+                mid = min(position.sl_price, bar["open"]) if direction == "buy" else max(position.sl_price, bar["open"])
                 fill = cost_model.stop_fill(position.sl_price, bar["open"], direction)
-                close_position(position, fill, bar_close_ts, i, "sl")
+                close_position(position, fill, bar_close_ts, i, "sl", exit_mid=mid)
             elif hit_tp:
                 fill = cost_model.tp_fill(position.tp_price, bar["open"], direction)
-                close_position(position, fill, bar_close_ts, i, "tp")
+                close_position(position, fill, bar_close_ts, i, "tp", exit_mid=position.tp_price)
             elif i - position.entry_bar >= max_hold_bars:
                 fill = cost_model.exit_fill(bar["close"], direction)
-                close_position(position, fill, bar_close_ts, i, "timeout")
+                close_position(position, fill, bar_close_ts, i, "timeout", exit_mid=bar["close"])
 
         # ── entries ──
         if position is None:
@@ -184,10 +189,11 @@ def run_backtest(
             )
             base_series = snapshot.series[base_tf]
             atr_pct = compute_atr_percent(base_series.candles)
-            passed, _failed = filters.check_all(bar, symbol, "long", atr_percent=atr_pct, vix_value=None)
-            if passed:
-                evaluation = engine.evaluate(snapshot)
-                if evaluation.direction != "neutral":
+            evaluation = engine.evaluate(snapshot)
+            if evaluation.direction != "neutral":
+                passed, _failed = filters.check_all(
+                    bar, symbol, evaluation.direction, atr_percent=atr_pct, vix_value=None)
+                if passed:
                     direction = "buy" if evaluation.direction == "long" else "sell"
                     entry = cost_model.entry_fill(bar["close"], direction)
                     exits = evaluation.exits or {}
@@ -198,6 +204,7 @@ def run_backtest(
                             direction=direction,
                             size=size,
                             entry_price=entry,
+                            entry_mid=bar["close"],
                             entry_ts=bar_close_ts,
                             entry_bar=i,
                             tp_price=tp,
@@ -212,13 +219,17 @@ def run_backtest(
             mid = bar["close"]
             unrealized = (mid - position.entry_price) * position.size if position.direction == "buy" \
                 else (position.entry_price - mid) * position.size
+            # accrue financing so multi-night holds show it in drawdown, not as an exit jump
+            unrealized += cost_model.swap_cost(
+                position.entry_price * position.size, position.direction, position.entry_ts, bar_close_ts)
         equity_curve.append(round(balance + unrealized, 2))
 
     # force-close whatever is still open at the last bar
     if position is not None:
         last_bar = base_candles[-1]
         fill = cost_model.exit_fill(last_bar["close"], position.direction)
-        close_position(position, fill, base_closes[-1], len(base_candles) - 1, "end_of_data")
+        close_position(position, fill, base_closes[-1], len(base_candles) - 1, "end_of_data",
+                       exit_mid=last_bar["close"])
         if equity_curve:
             equity_curve[-1] = round(balance, 2)
 

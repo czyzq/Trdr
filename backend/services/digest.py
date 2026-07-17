@@ -6,7 +6,7 @@ Disable with the DAILY_DIGEST_ENABLED setting (Mongo settings collection).
 
 import asyncio
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 def _digest_hour() -> int:
@@ -24,6 +24,17 @@ def seconds_until_next_run(now: datetime, hour: int) -> float:
     return (target - now).total_seconds()
 
 
+def _today_window_utc(now_local: datetime = None) -> tuple:
+    """Local midnight -> now, expressed as UTC ISO strings (trades store
+    closed_at as UTC ISO). Keeps the 'today' boundary consistent with the
+    scheduler and dedupe key, which both use local time."""
+    now_local = (now_local or datetime.now()).astimezone()
+    start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = now_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return start_utc.isoformat(timespec="seconds"), end_utc.isoformat(timespec="seconds")
+
+
 def build_digest() -> str:
     """Compose the digest message from broker state. Cheap - no network calls."""
     from services.state import broker
@@ -32,8 +43,10 @@ def build_digest() -> str:
     positions = broker.get_open_positions() if hasattr(broker, "get_open_positions") else []
     closed = broker.get_closed_positions(100) if hasattr(broker, "get_closed_positions") else []
 
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    todays = [t for t in closed if (t.get("closed_at") or "").startswith(today)]
+    start_utc, end_utc = _today_window_utc()
+    # compare on the first 19 chars ("YYYY-MM-DDTHH:MM:SS") to tolerate
+    # trailing "Z"/microseconds in stored timestamps
+    todays = [t for t in closed if start_utc <= (t.get("closed_at") or "")[:19] <= end_utc]
     day_pnl = sum(t.get("pnl_usd", 0) for t in todays)
     wins = sum(1 for t in todays if t.get("pnl_usd", 0) > 0)
 

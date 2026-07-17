@@ -1,6 +1,6 @@
 """Tests for the shared-token auth middleware and the daily digest."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -60,6 +60,17 @@ def test_wrong_token_rejected(monkeypatch):
     assert client.get("/api/auth/check").status_code == 401
 
 
+def test_401_response_carries_cors_headers(monkeypatch):
+    """CORS must be the outermost middleware: an unauthorized cross-origin
+    request still gets access-control-allow-origin so the browser can read
+    the 401 instead of reporting an opaque network error."""
+    monkeypatch.setenv("DASHBOARD_TOKEN", "s3cret")
+    client = _client()
+    res = client.get("/api/auth/check", headers={"Origin": "http://localhost:5173"})
+    assert res.status_code == 401
+    assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
 # ── digest ──
 
 
@@ -72,16 +83,24 @@ def test_seconds_until_next_run_today_and_tomorrow():
     assert seconds_until_next_run(now_late, 21) == pytest.approx(23 * 3600)
 
 
+def _utc_ts_in_local_today(frac: float) -> str:
+    """A UTC ISO timestamp at `frac` of the way through the local day so far.
+    Always inside build_digest's window (local midnight -> now, in UTC)."""
+    now_local = datetime.now().astimezone()
+    start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    t = start_local + (now_local - start_local) * frac
+    return t.astimezone(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
+
+
 def test_build_digest_message():
     from services import digest
 
     broker = MagicMock()
     broker.get_account.return_value = {
         "equity_usd": 3120.5, "balance_usd": 3100.0, "total_pnl_usd": 100.0}
-    today = datetime.utcnow().strftime("%Y-%m-%d")
     broker.get_closed_positions.return_value = [
-        {"pnl_usd": 40.0, "closed_at": f"{today}T10:00:00"},
-        {"pnl_usd": -15.0, "closed_at": f"{today}T12:00:00"},
+        {"pnl_usd": 40.0, "closed_at": _utc_ts_in_local_today(0.25)},
+        {"pnl_usd": -15.0, "closed_at": _utc_ts_in_local_today(0.5)},
         {"pnl_usd": 99.0, "closed_at": "2020-01-01T00:00:00"},  # not today
     ]
     broker.get_open_positions.return_value = [

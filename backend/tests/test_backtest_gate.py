@@ -80,12 +80,14 @@ def test_entry_pays_half_spread():
 
 def test_gap_through_stop_fills_at_open():
     cm = _costs()
-    # long SL at 1990, bar opens at 1980 (gapped through) -> fill from 1980, minus slippage
+    hs = cm.half_spread(1990.0)  # stops cross the spread like any market exit
+    # long SL at 1990, bar opens at 1980 (gapped through) -> fill from the open,
+    # minus half-spread and slippage
     fill = cm.stop_fill(1990.0, 1980.0, "buy")
-    assert fill == pytest.approx(1980.0 * (1 - 10 / 10_000))
-    # no gap: bar opens above the stop -> fill at the stop level minus slippage
+    assert fill == pytest.approx((1980.0 - hs) * (1 - 10 / 10_000))
+    # no gap: bar opens above the stop -> fill at the stop level (spread+slippage adjusted)
     fill2 = cm.stop_fill(1990.0, 2000.0, "buy")
-    assert fill2 == pytest.approx(1990.0 * (1 - 10 / 10_000))
+    assert fill2 == pytest.approx((1990.0 - hs) * (1 - 10 / 10_000))
 
 
 def test_swap_nights_triple_wednesday_and_weekend():
@@ -107,15 +109,18 @@ def test_swap_cost_sign_and_magnitude():
     assert cost == pytest.approx(10_000 * -10 / 10_000)  # -10 USD
 
 
-def test_net_equals_gross_plus_swap():
-    """In the engine, net = gross(from actual fills) + swap. Verified end-to-end."""
+def test_net_gross_costs_identity():
+    """gross = mid-to-mid P&L, net = fill-to-fill + swap, and net == gross - costs."""
     data = {"5m": _candles(800, 5)}
     report = run_backtest(CFG, data, initial_balance=3000.0)
     assert len(report.trades) > 0
     for t in report.trades:
-        expected_gross = (t.exit_price - t.entry_price) * t.size if t.direction == "buy" \
+        # identity holds by construction
+        assert t.net_pnl_usd == pytest.approx(t.gross_pnl_usd - t.costs_usd, abs=0.03)
+        # fill-to-fill P&L plus financing is what the account actually gained
+        fill_pnl = (t.exit_price - t.entry_price) * t.size if t.direction == "buy" \
             else (t.entry_price - t.exit_price) * t.size
-        assert t.gross_pnl_usd == pytest.approx(expected_gross, abs=0.02)
+        assert abs(t.net_pnl_usd - fill_pnl) < max(abs(fill_pnl) * 0.05 + 1.0, 5.0)  # swap-sized gap only
     assert report.final_balance == pytest.approx(
         report.initial_balance + sum(t.net_pnl_usd for t in report.trades), abs=0.5)
 

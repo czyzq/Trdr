@@ -145,10 +145,10 @@ async def auto_trade_loop():
                         continue
 
                     sym = signal.symbol
-                    info = INSTRUMENTS.get(sym, {})
-                    min_score = info.get("min_score", 0.15) + min_score_boost
-
-                    if abs(signal.score) < min_score:
+                    # The strategy's min_score gate already ran inside SignalEngine.evaluate
+                    # (backtest applies the identical gate - no live/backtest divergence).
+                    # Only the circuit-breaker recovery boost adds an extra hurdle here.
+                    if min_score_boost > 0 and abs(signal.score) < min_score_boost:
                         continue
 
                     if signal.direction in (SignalDirection.BUY, SignalDirection.STRONG_BUY):
@@ -184,8 +184,8 @@ async def auto_trade_loop():
                     entry_price = quote["price"]
 
                     # Recalculate TP/SL from fresh ATR
+                    fresh_candles = None
                     try:
-                        
                         fresh_candles = await get_cached_candles(sym, "60", 50, data_provider)
                         if fresh_candles and len(fresh_candles) >= 20:
                             ind = TechnicalIndicators.calculate_all(fresh_candles, period=14)
@@ -620,28 +620,24 @@ def calculate_dynamic_position_size(
     - Number of open positions (more positions = smaller size)
     - Volatility (higher volatility = smaller size)
     """
+    from app.config import INSTRUMENTS as _INSTRUMENTS
     from services.signal_generator import calculate_position_size
-    
+
+    symbol = strategy_config.get('symbol', 'XAU')
     sizing_v2 = strategy_config.get('position_sizing_v2', {})
-    
+
     if not sizing_v2 or sizing_v2.get('method') != 'adaptive':
-        # Fallback to simple calculation
-        return calculate_position_size("XAU", entry_price, stop_loss_price)
-    
-    # Get base risk
+        # Simple fallback: same convention (units of underlying), real symbol and balance
+        return calculate_position_size(symbol, entry_price, stop_loss_price, account_balance)
+
     base_risk_percent = sizing_v2.get('base_risk_percent', 1.5)
     max_leverage = sizing_v2.get('max_leverage', 10)
     min_leverage = sizing_v2.get('min_leverage', 5)
     modifiers = sizing_v2.get('modifiers', {})
-    
-    # Modifier 1: Signal Score (0-1 scale)
-    # Higher score = larger position
-    score_modifier = abs(signal_score)  # Use absolute value (both buy/sell)
-    
-    # Modifier 2: Confidence (0-1 scale)
+
+    # Modifier 1: signal score, 2: confidence, 3: open positions, 4: volatility
+    score_modifier = abs(signal_score)
     confidence_modifier = signal_confidence
-    
-    # Modifier 3: Open positions
     pos_modifiers = modifiers.get('by_open_positions', {})
     if open_positions_count == 0:
         pos_mod = pos_modifiers.get('0', 1.0)
@@ -651,48 +647,30 @@ def calculate_dynamic_position_size(
         pos_mod = pos_modifiers.get('2', 0.6)
     else:
         pos_mod = pos_modifiers.get('3+', 0.4)
-    
-    # Modifier 4: Volatility (ATR %)
-    # Higher volatility = smaller position
     if volatility > 2.0:
         vol_mod = modifiers.get('by_volatility', {}).get('high', 0.5)
     elif volatility > 1.0:
         vol_mod = modifiers.get('by_volatility', {}).get('medium', 0.75)
     else:
         vol_mod = modifiers.get('by_volatility', {}).get('low', 1.0)
-    
-    # Combine all modifiers
+
     combined_modifier = score_modifier * confidence_modifier * pos_mod * vol_mod
-    
-    # Apply modifier to base risk
-    adjusted_risk = base_risk_percent * combined_modifier
-    
-    # Ensure minimum risk (0.5%)
-    adjusted_risk = max(adjusted_risk, 0.5)
-    
-    # Calculate position size with adjusted risk
+    adjusted_risk = max(base_risk_percent * combined_modifier, 0.5)  # floor 0.5%
+
+    # Risk-based size in UNITS of the underlying: if SL is hit, loss ~= adjusted_risk% of
+    # balance. Same convention as broker P&L (delta_price * size) and the backtester.
     risk_amount = account_balance * (adjusted_risk / 100)
-    risk_per_lot = abs(entry_price - stop_loss_price)
-    symbol = strategy_config.get('symbol', 'XAU')  # Default to XAU if not specified
-    print(f"[POSITION SIZE] {symbol}: Base Risk: {base_risk_percent}% | Adjusted Risk: {adjusted_risk:.2f}% | Score Mod: {score_modifier:.2f} | Conf Mod: {confidence_modifier:.2f} | Pos Mod: {pos_mod:.2f} | Vol Mod: {vol_mod:.2f}")
-    # Commodity multiplier: XAU=$100/lot/$1, XAG=$5/lot/$1
-    # For XAG we need to divide by 5 instead of 100 to get larger lot size
-    commodity_multiplier = 5 if symbol == "XAG" else 100
-    
-    if risk_per_lot > 0:
-        size = risk_amount / (risk_per_lot * commodity_multiplier)
-    else:
-        size = risk_amount / (entry_price * commodity_multiplier)
-    
-    # Apply leverage (capped by instrument max)
-    instrument_leverage = {"XAU": 20, "XAG": 10, "US100": 20, "BTC": 2}.get(symbol, 10)
-    max_allowed_leverage = min(max_leverage, instrument_leverage)
-    leverage = max_leverage * combined_modifier
-    leverage = max(min_leverage, min(max_allowed_leverage, leverage))
-    
-    size = size * leverage
-    
-    # Round to reasonable precision
-    size = round(size, 4)
-    
-    return max(0.01, size)  # Minimum 0.01 lot
+    risk_per_unit = abs(entry_price - stop_loss_price)
+    if risk_per_unit <= 0:
+        risk_per_unit = entry_price * 0.02
+    size = risk_amount / risk_per_unit
+
+    # Leverage caps NOTIONAL, it never multiplies size. Instrument cap always wins.
+    instrument_cap = _INSTRUMENTS.get(symbol, {}).get("leverage", 10)
+    leverage = max(min_leverage, max_leverage * combined_modifier)
+    leverage = min(leverage, max_leverage, instrument_cap)  # cap wins over the floor
+    max_size = account_balance * leverage / entry_price
+    size = min(size, max_size)
+
+    print(f"[POSITION SIZE] {symbol}: risk {adjusted_risk:.2f}% | size {size:.4f} units | lev cap {leverage:.1f}x")
+    return max(round(size, 6), 0.0)

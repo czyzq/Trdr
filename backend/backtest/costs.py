@@ -74,11 +74,12 @@ class CostModel:
 
     def stop_fill(self, stop_price: float, bar_open: float, direction: str) -> float:
         """A stop triggered inside a bar fills at the stop unless the bar OPENED
-        through it (gap) - then you get the open. Adverse slippage on top."""
-        if direction == "buy":  # long being stopped out (selling)
-            base = min(stop_price, bar_open)
+        through it (gap) - then you get the open. The exit crosses the spread
+        like any market order, plus adverse slippage."""
+        if direction == "buy":  # long being stopped out (selling at the bid)
+            base = min(stop_price, bar_open) - self.half_spread(stop_price)
             return base * (1 - self.costs.slippage_bps / 10_000)
-        base = max(stop_price, bar_open)
+        base = max(stop_price, bar_open) + self.half_spread(stop_price)
         return base * (1 + self.costs.slippage_bps / 10_000)
 
     def tp_fill(self, tp_price: float, bar_open: float, direction: str) -> float:

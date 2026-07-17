@@ -15,9 +15,11 @@ class TokenBucket:
     def __init__(self, capacity: float, refill_per_sec: float):
         self.capacity = float(capacity)
         self.refill_per_sec = float(refill_per_sec)
-        self._tokens = float(capacity)
+        # start below capacity so cold start can't do capacity + a full refill
+        # inside the provider's first rate window (5/min means FIVE, not ten)
+        self._tokens = min(1.0, float(capacity))
         self._updated = time.monotonic()
-        self._lock: Optional[asyncio.Lock] = None  # created lazily in a running loop
+        self._locks: dict = {}  # one lock per event loop (module-global gates)
 
     def _refill(self) -> None:
         now = time.monotonic()
@@ -25,9 +27,14 @@ class TokenBucket:
         self._updated = now
 
     def _get_lock(self) -> asyncio.Lock:
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
+        # asyncio.Lock binds to a loop; gates are process-global and legacy
+        # sync wrappers may spin up a second loop - key the lock per loop
+        loop = asyncio.get_running_loop()
+        lock = self._locks.get(id(loop))
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[id(loop)] = lock
+        return lock
 
     def try_acquire(self, n: float = 1.0) -> bool:
         self._refill()

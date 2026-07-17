@@ -36,7 +36,12 @@ def suggest_config(trial, base_config: dict) -> dict:
                 active += 1
         if new_indicators:
             block["indicators"] = new_indicators
-        # else: keep the base block's indicators so the config stays valid
+        else:
+            # all weights suggested 0: turn the TF off EXPLICITLY - silently
+            # keeping the base indicators would teach the sampler a corrupted
+            # mapping around the w=0 region
+            block["weight"] = 0.0
+            block["indicators"] = []
 
     combine = cfg.setdefault("combine", {})
     combine["min_score"] = trial.suggest_float("min_score", 0.05, 0.5, step=0.05)
@@ -44,9 +49,20 @@ def suggest_config(trial, base_config: dict) -> dict:
         combine["min_agreement"] = trial.suggest_float("min_agreement", 0.4, 1.0, step=0.1)
         combine["conflict_policy"] = trial.suggest_categorical("conflict_policy", ["dampen", "veto"])
 
+    # if every scoring TF ended up empty the config is untradeable - prune the trial
+    if not any(b.get("indicators") for b in tfs.values() if b.get("role") != "veto"):
+        import optuna
+
+        raise optuna.TrialPruned()
+
     exits = cfg.setdefault("exits", {})
     exits.setdefault("stop_loss", {})["value"] = trial.suggest_float("sl_pct", -4.0, -0.5, step=0.25)
-    exits.setdefault("take_profit", {})["value"] = trial.suggest_float("tp_pct", 0.5, 8.0, step=0.25)
+    tp = trial.suggest_float("tp_pct", 0.5, 8.0, step=0.25)
+    exits.setdefault("take_profit", {})["value"] = tp
+    # dynamic TP overrides take_profit.value when enabled, making tp_pct a dead
+    # parameter - the optimizer explores static TP only
+    exits["dynamic_tp"] = {"enabled": False}
+    exits.setdefault("take_profit", {})["value"] = tp
 
     risk = cfg.setdefault("risk", {})
     risk["leverage"] = min(trial.suggest_float("leverage", 1.0, 10.0, step=1.0),

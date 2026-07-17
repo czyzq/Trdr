@@ -18,6 +18,20 @@ function urlB64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+/* Resolve the service worker URL relative to where the app is deployed.
+   Vite's base is "./", so BASE_URL is relative - normalize it against the
+   current path's directory so this works at both / and /cfd/ deployments. */
+function swUrl(): string {
+  // no vite-env.d.ts in this project, so import.meta.env needs a cast
+  let base: string = ((import.meta as any).env?.BASE_URL as string | undefined) || "/";
+  if (!base.startsWith("/")) {
+    // relative base ("./") - use the directory of the current page
+    base = window.location.pathname.replace(/[^/]*$/, "");
+  }
+  if (!base.endsWith("/")) base += "/";
+  return `${base}sw.js`;
+}
+
 function isIosBrowserTab(): boolean {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const standalone = window.matchMedia("(display-mode: standalone)").matches
@@ -47,7 +61,7 @@ export function usePush() {
   const subscribe = useCallback(async () => {
     setBusy(true);
     try {
-      const reg = await navigator.serviceWorker.register("/sw.js");
+      const reg = await navigator.serviceWorker.register(swUrl());
       const permission = await Notification.requestPermission();
       if (permission !== "granted") return refresh();
       const { key } = await fetch(apiUrl("push/vapid-public-key")).then((r) => r.json());

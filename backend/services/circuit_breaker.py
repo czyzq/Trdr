@@ -96,14 +96,36 @@ def trigger_circuit_breaker(reason: str) -> None:
     _circuit_breaker_triggered = True
     _circuit_breaker_reason = reason
     _circuit_breaker_since = datetime.now()
+    # Recovery posture for when the breaker auto-resets: halve position sizes
+    # and demand stronger signals until things prove healthy again.
+    try:
+        from services.state import get_account
+
+        account = get_account()
+        account["_risk_multiplier"] = 0.5
+        account["_min_score_boost"] = 0.1
+    except Exception:
+        pass
 
 
 def reset_circuit_breaker() -> None:
-    """Reset circuit breaker."""
+    """Reset circuit breaker (risk adjustments stay until cleared)."""
     global _circuit_breaker_triggered, _circuit_breaker_reason, _circuit_breaker_since
     _circuit_breaker_triggered = False
     _circuit_breaker_reason = ""
     _circuit_breaker_since = None
+
+
+def clear_risk_adjustments() -> None:
+    """Back to full size/thresholds after a healthy recovery period."""
+    try:
+        from services.state import get_account
+
+        account = get_account()
+        account.pop("_risk_multiplier", None)
+        account.pop("_min_score_boost", None)
+    except Exception:
+        pass
 
 
 def get_circuit_breaker_status() -> dict:
