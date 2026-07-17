@@ -42,6 +42,9 @@ def optimize_strategy(base_config: dict, candles_by_tf: Dict[str, list],
     Returns {best_config, guard_report, passed, study_summary}."""
     from strategy.engine import normalize_strategy_config
 
+    from strategy.snapshot import clear_snapshot_cache
+
+    clear_snapshot_cache()  # fresh windows per study; trials 2..N hit the memo
     base_tf = normalize_strategy_config(dict(base_config))["base_timeframe"]
     folds = make_folds(candles_by_tf, base_tf)
     if not folds:

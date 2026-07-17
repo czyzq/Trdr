@@ -6,6 +6,7 @@ candles in -> same values out, in live, backtest and the optimizer alike. No
 streaming state, so nothing can be corrupted by re-feeding.
 """
 
+from collections import OrderedDict
 from typing import Dict, List, Optional
 
 from indicators import TechnicalIndicators
@@ -30,6 +31,49 @@ INDICATOR_RANGES: Dict[str, tuple] = {
     "ATR_REGIME": (-1, 1),      # ATR% vs its recent mean (volatility expansion)
     "SMA200_TREND": (-10, 10),  # % distance close vs SMA200
 }
+
+
+# Every indicator the snapshot layer knows how to compute. The memo below
+# computes the WHOLE catalog once per unique candle window, so an optimizer
+# study evaluating 75 configs over identical folds pays for indicators once
+# (Phase A) and each trial reduces to score arithmetic (Phase B).
+CATALOG_ALL = list(INDICATOR_RANGES.keys())
+
+_SNAP_CACHE: "OrderedDict[tuple, dict]" = OrderedDict()
+_SNAP_CACHE_MAX = 400_000
+
+
+def _window_key(candles: List[dict]) -> tuple:
+    first, last = candles[0], candles[-1]
+    return (
+        first.get("timestamp"), last.get("timestamp"), len(candles),
+        first.get("open"), last.get("close"),
+    )
+
+
+def clear_snapshot_cache() -> None:
+    _SNAP_CACHE.clear()
+
+
+def _catalog_values(candles: List[dict]) -> dict:
+    """All catalog indicators (raw+normalized) for this window, memoized."""
+    key = _window_key(candles)
+    hit = _SNAP_CACHE.get(key)
+    if hit is not None:
+        _SNAP_CACHE.move_to_end(key)
+        return hit
+    ind = TechnicalIndicators.calculate_all(candles, period=14) or {}
+    values = {}
+    for name in CATALOG_ALL:
+        raw = _raw_value(name, ind, candles)
+        values[name] = {"raw": raw, "normalized": _normalize(name, raw)}
+    atr = ind.get("atr_14")
+    close = candles[-1].get("close")
+    values["__atr_pct"] = (atr / close * 100) if (atr is not None and close) else None
+    _SNAP_CACHE[key] = values
+    if len(_SNAP_CACHE) > _SNAP_CACHE_MAX:
+        _SNAP_CACHE.popitem(last=False)
+    return values
 
 
 def _normalize(name: str, raw: Optional[float]) -> Optional[float]:
@@ -154,16 +198,22 @@ def compute_indicator_snapshot(candles: List[dict], specs: List[dict]) -> Dict[s
     """
     if not candles:
         return {}
-    ind = TechnicalIndicators.calculate_all(candles, period=14) or {}
+    values = _catalog_values(candles)
+    ind = None  # computed lazily only for names outside the catalog
     out: Dict[str, dict] = {}
     for spec in specs:
         name = (spec.get("name") or "").upper()
         if not name:
             continue
-        raw = _raw_value(name, ind, candles)
+        cached = values.get(name)
+        if cached is None:
+            if ind is None:
+                ind = TechnicalIndicators.calculate_all(candles, period=14) or {}
+            raw = _raw_value(name, ind, candles)
+            cached = {"raw": raw, "normalized": _normalize(name, raw)}
         out[name] = {
-            "raw": raw,
-            "normalized": _normalize(name, raw),
+            "raw": cached["raw"],
+            "normalized": cached["normalized"],
             "weight": spec.get("weight", 0.0),
         }
     return out
@@ -173,9 +223,4 @@ def compute_atr_percent(candles: List[dict]) -> Optional[float]:
     """ATR as % of last close - used by filters and exit sizing."""
     if not candles or len(candles) < 15:
         return None
-    ind = TechnicalIndicators.calculate_all(candles, period=14) or {}
-    atr = ind.get("atr_14")
-    close = candles[-1].get("close")
-    if atr is None or not close:
-        return None
-    return atr / close * 100
+    return _catalog_values(candles).get("__atr_pct")

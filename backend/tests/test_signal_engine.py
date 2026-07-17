@@ -248,3 +248,30 @@ def test_insufficient_data_yields_neutral():
     ev = engine.evaluate(_snapshot({TimeFrame.M5: _series("BTC", TimeFrame.M5, n=5)}))
     assert ev.direction == "neutral"
     assert "insufficient" in ev.reason
+
+
+def test_snapshot_cache_identical_to_uncached():
+    """The Phase-A memo must never change results - only speed."""
+    from strategy.snapshot import clear_snapshot_cache, compute_indicator_snapshot
+
+    candles = _candles(120, 5, trend=0.3)
+    specs = [{"name": "RSI", "weight": 2.0}, {"name": "MOMENTUM", "weight": 1.0},
+             {"name": "SMA_CROSS", "weight": 1.0}]
+    clear_snapshot_cache()
+    cold = compute_indicator_snapshot(candles, specs)
+    warm = compute_indicator_snapshot(candles, specs)   # served from memo
+    assert cold == warm
+    clear_snapshot_cache()
+    fresh = compute_indicator_snapshot(candles, specs)
+    assert fresh == cold
+
+
+def test_snapshot_cache_distinguishes_windows():
+    from strategy.snapshot import clear_snapshot_cache, compute_indicator_snapshot
+
+    clear_snapshot_cache()
+    a = _candles(120, 5, trend=0.3)
+    b = _candles(120, 5, trend=-0.3)
+    snap_a = compute_indicator_snapshot(a, [{"name": "MOMENTUM", "weight": 1.0}])
+    snap_b = compute_indicator_snapshot(b, [{"name": "MOMENTUM", "weight": 1.0}])
+    assert snap_a["MOMENTUM"]["raw"] != snap_b["MOMENTUM"]["raw"]
