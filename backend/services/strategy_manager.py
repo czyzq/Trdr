@@ -53,7 +53,7 @@ def get_strategy_manager(force_reload: bool = False):
 
 def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
                               requested_strategy: str = None, atr_percent: float = None,
-                              vix_value: float = None) -> dict:
+                              vix_value: float = None, series: dict = None) -> dict:
     """
     Analyze using new JSON-based strategy module.
     Returns dict with direction, score, confidence, etc. or None if not available.
@@ -99,101 +99,83 @@ def analyze_with_new_strategy(symbol: str, candles: list, current_price: float,
     if not strategy:
         return None
 
-    # Update indicators with latest candles
-    for candle in candles[-50:]:  # Last 50 candles for warmup
-        candle_data = {
-            "open": candle.get("open"),
-            "high": candle.get("high"),
-            "low": candle.get("low"),
-            "close": candle.get("close"),
-            "volume": candle.get("volume", 0),
-            "timestamp": candle.get("timestamp"),
-        }
-        for ind in strategy.indicators.values():
-            ind.update(candle_data)
-
-    # Get current candle
     if not candles:
         return None
-    current_candle = candles[-1]
-    candle_data = {
-        "open": current_candle.get("open"),
-        "high": current_candle.get("high"),
-        "low": current_candle.get("low"),
-        "close": current_candle.get("close"),
-        "volume": current_candle.get("volume", 0),
-        "timestamp": current_candle.get("timestamp"),
-    }
 
-    # Check if we have enough indicator data
-    has_data = all(ind.value() is not None for ind in strategy.indicators.values())
-    if not has_data:
-        print(f"[DEBUG] {symbol}: Not enough indicator data for {strategy.name}")
-        return None
+    # ── SignalEngine path: stateless, deterministic, multi-timeframe ──
+    # No streaming indicator re-feeding here anymore: indicators are computed
+    # from the candle window itself, so live and backtest cannot drift.
+    from datetime import datetime
 
-    # Check filters (includes volatility and VIX from strategy config)
-    filters_passed, failed_filters = strategy.filters.check_all(
-        candle_data, symbol, 'long',
-        atr_percent=atr_percent,
-        vix_value=vix_value
-    )
-    if not filters_passed:
-        print(f"[FILTERS] {symbol}: Failed filters: {failed_filters}")
-        return None
+    from services.candle_store import CandleSeries, _drop_forming  # noqa: PLC0415
+    from strategy.engine import MarketSnapshot, SignalEngine, compute_base_atr_percent
+    from timeframes import TimeFrame
 
-    # Get signal - get_signal() already applies min_score threshold internally (ONCE)
-    signal = strategy.score_engine.get_signal()
-    if not signal:
-        # Signal did not pass min_score - no trade
-        return None
+    engine = SignalEngine(strategy.config)
+    base_tf = engine.base_timeframe()
 
-    # Get raw score - already in [-1, 1] after weight normalization in compute_score()
-    raw_score = strategy.score_engine.compute_score()
+    if series is None:
+        # Single-TF callers (backtester CLI, legacy API) pass a plain candle list
+        base_series = CandleSeries(symbol, base_tf, list(candles))
+        series = {base_tf: base_series}
 
-    # Clamp to [-1, 1] as a safety guard (should already be in range)
-    raw_score = max(-1.0, min(1.0, raw_score))
-    abs_score = abs(raw_score)
-
-    # Direction from signal (reliable - uses RSI/Momentum logic or score sign)
-    direction = 1 if signal == 'buy' else -1
-
-    # Confidence = how strongly the score exceeds the min_score threshold
-    # Maps [min_score, 1.0] -> [0.0, 1.0] so:
-    #   - score just at threshold -> confidence ~ 0 (weak signal)
-    #   - score at max (1.0)      -> confidence = 1.0 (strong signal)
-    min_score = strategy.score_engine.min_score
-    score_range = max(1.0 - min_score, 1e-6)  # avoid division by zero
-    confidence = max(0.0, min(1.0, (abs_score - min_score) / score_range))
-
-    # Returned score keeps full [-1, 1] range - direction_sign * abs_score
-    # This gives meaningful spread in the UI (not squashed to +-1)
-    returned_score = direction * abs_score
-
-    print(
-        f"[DEBUG] {symbol}: signal={signal}, raw_score={raw_score:.3f}, "
-        f"abs_score={abs_score:.3f}, min_score={min_score}, "
-        f"confidence={confidence:.3f}, returned_score={returned_score:.3f}"
+    ts = datetime.utcnow()
+    snapshot = MarketSnapshot(
+        symbol=symbol,
+        ts=ts,
+        price=current_price,
+        series=series,
+        vix=vix_value,
     )
 
-    # Calculate exits
-    exits = strategy.exit_engine.initialize_position(
-        position_id=f"live_{symbol}",
-        entry_price=current_price,
-        direction=direction,
-    )
+    # Filters still come from the strategy's FilterChain (volatility, VIX, session)
+    if atr_percent is None:
+        atr_percent = compute_base_atr_percent(snapshot, base_tf)
+    base_candles = series.get(base_tf).candles if series.get(base_tf) else list(candles)
+    if base_candles:
+        filters_passed, failed_filters = strategy.filters.check_all(
+            base_candles[-1], symbol, 'long',
+            atr_percent=atr_percent,
+            vix_value=vix_value
+        )
+        if not filters_passed:
+            print(f"[FILTERS] {symbol}: Failed filters: {failed_filters}")
+            return None
+
+    evaluation = engine.evaluate(snapshot)
+    if evaluation.direction == "neutral":
+        return None
+
+    per_tf_components = [{
+        'type': 'technical',
+        'name': f'{tf} score',
+        'value': t.score if t.score is not None else 0.0,
+        'description': f'{tf}: score={t.score:.3f} weight={t.weight}' if t.score is not None else f'{tf}: no data',
+        'confidence': evaluation.confidence,
+    } for tf, t in evaluation.per_timeframe.items()]
 
     return {
-        'direction': 'long' if direction > 0 else 'short',
-        'score': returned_score,          # [-1, 1] with full spread
-        'confidence': confidence,          # [0, 1] relative to min_score threshold
-        'technical_score': returned_score,
+        'direction': evaluation.direction,
+        'score': evaluation.score,                  # [-1, 1] with full spread
+        'confidence': evaluation.confidence,        # [0, 1]
+        'technical_score': evaluation.score,
+        'agreement': evaluation.agreement,
         'components': [{
             'type': 'technical',
             'name': f'JSON Strategy ({strategy.id})',
-            'value': returned_score,
-            'description': f'Score: {returned_score:.3f}, Signal: {signal}, Conf: {confidence:.2f}',
-            'confidence': confidence
-        }],
-        'exits': exits,
+            'value': evaluation.score,
+            'description': (
+                f'Score: {evaluation.score:.3f}, Dir: {evaluation.direction}, '
+                f'Conf: {evaluation.confidence:.2f}, TF agreement: {evaluation.agreement:.2f}'
+            ),
+            'confidence': evaluation.confidence
+        }] + per_tf_components,
+        'exits': evaluation.exits,
+        'per_timeframe': {
+            tf: {'score': t.score, 'weight': t.weight, 'bars': t.bars,
+                 'indicators': {n: {'raw': d['raw'], 'normalized': d['normalized']}
+                                for n, d in t.indicators.items()}}
+            for tf, t in evaluation.per_timeframe.items()
+        },
         'strategy_id': strategy.id,
     }

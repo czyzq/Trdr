@@ -1,6 +1,186 @@
 {
   "strategies": [
     {
+      "id": "btc_mtf_v1",
+      "name": "BTC Multi-Timeframe v1",
+      "symbol": "BTC",
+      "enabled": true,
+      "base_timeframe": "5m",
+      "timeframes": {
+        "5m": {
+          "weight": 0.4,
+          "indicators": [
+            {
+              "name": "RSI",
+              "weight": 1.0
+            },
+            {
+              "name": "MACD",
+              "weight": 1.5
+            },
+            {
+              "name": "MOMENTUM",
+              "weight": 1.5
+            }
+          ]
+        },
+        "15m": {
+          "weight": 0.15,
+          "indicators": [
+            {
+              "name": "RSI",
+              "weight": 1.0
+            },
+            {
+              "name": "MACD",
+              "weight": 1.0
+            }
+          ]
+        },
+        "1h": {
+          "weight": 0.25,
+          "indicators": [
+            {
+              "name": "RSI",
+              "weight": 1.0
+            },
+            {
+              "name": "SMA_CROSS",
+              "weight": 1.0
+            },
+            {
+              "name": "ADX",
+              "weight": 0.5
+            }
+          ]
+        },
+        "4h": {
+          "weight": 0.2,
+          "indicators": [
+            {
+              "name": "MACD",
+              "weight": 1.0
+            },
+            {
+              "name": "SMA_CROSS",
+              "weight": 1.0
+            }
+          ]
+        },
+        "1d": {
+          "weight": 0.0,
+          "role": "veto",
+          "veto": {
+            "indicator": "SMA_CROSS",
+            "long_requires": "> -0.5",
+            "short_requires": "< 0.5"
+          }
+        }
+      },
+      "combine": {
+        "method": "weighted_sum",
+        "min_score": 0.2,
+        "min_agreement": 0.6,
+        "conflict_policy": "dampen"
+      },
+      "filters": {
+        "volume": {
+          "enabled": true,
+          "lookback_bars": 20,
+          "min_ratio_to_average": 0.75
+        },
+        "position_already_open": {
+          "enabled": true
+        },
+        "symbol_enabled_flag": {
+          "enabled": true,
+          "key_pattern": "TRADE_ENABLED_{SYMBOL}"
+        },
+        "htf_trend": {
+          "enabled": true,
+          "indicator": "RSI",
+          "htf_timeframe": "1H",
+          "source": "close",
+          "use_closed_candles_only": true,
+          "long_condition": {
+            "operator": ">",
+            "value": 50
+          },
+          "short_condition": null
+        },
+        "vix": {
+          "enabled": false,
+          "max_vix": 30
+        }
+      },
+      "risk": {
+        "risk_per_trade_pct": 2.0,
+        "max_total_risk_pct": 2.0,
+        "leverage": 20,
+        "max_notional_exposure_multiple": 1.0
+      },
+      "exits": {
+        "stop_loss": {
+          "type": "percent_from_entry",
+          "value": -2.0
+        },
+        "take_profit": {
+          "type": "percent_from_entry",
+          "value": 5.0
+        },
+        "trailing_stop": {
+          "enabled": false
+        },
+        "dynamic_tp": {
+          "enabled": true,
+          "htf_indicator": "RSI",
+          "htf_timeframe": "1H",
+          "use_closed_candles_only": true,
+          "rules": [
+            {
+              "condition": {
+                "operator": ">",
+                "value": 65
+              },
+              "tp_percent": 3.0
+            },
+            {
+              "condition": {
+                "operator": "<",
+                "value": 40
+              },
+              "tp_percent": 7.0
+            }
+          ],
+          "default_tp_percent": 5.0
+        }
+      },
+      "position_sizing_v2": {
+        "method": "adaptive",
+        "base_risk_percent": 2.0,
+        "modifiers": {
+          "by_open_positions": {
+            "0": 1.0,
+            "1": 0.8,
+            "2": 0.6,
+            "3+": 0.4
+          },
+          "by_equity": {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.5
+          },
+          "by_volatility": {
+            "low": 1.0,
+            "medium": 0.75,
+            "high": 0.5
+          }
+        },
+        "max_leverage": 20,
+        "min_leverage": 5
+      }
+    },
+    {
       "id": "btc_v2_core",
       "name": "BTC v2 Core 5m",
       "symbol": "BTC",

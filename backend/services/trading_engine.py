@@ -372,15 +372,16 @@ def _neutral_signal(symbol: str, price: float = 0.0, timeframe: str = "5") -> Si
 
 
 async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) -> Signal:
-    """Analyze a single symbol - runs in parallel for all symbols."""
+    """Analyze one symbol: quote -> multi-timeframe candle series -> SignalEngine -> Signal."""
     # Lazy imports to avoid circular dependency
-    from services.state import get_live_price_cache as _price_cache, get_symbol_strategy, broker
+    from services.state import get_live_price_cache as _price_cache, get_symbol_strategy
     from services.strategy_manager import get_strategy_manager, analyze_with_new_strategy
-    from services.market_data import get_cached_quote as _get_cached_quote, get_cached_candles as _get_cached_candles
-    
+    from services.market_data import get_cached_quote as _get_cached_quote
+    from services.candle_store import get_candle_store
+    from strategy.engine import SignalEngine
+    from timeframes import TimeFrame
+
     timeframe = "5"
-    account = broker.get_account()
-    
     try:
         quote = _get_cached_quote(symbol)
 
@@ -390,210 +391,85 @@ async def _analyze_single_symbol(symbol: str, info: dict, news_client_instance) 
             last_known_price = price_cache[symbol].get('price', 0)
 
         if not quote:
-            # Return neutral signal with last known price if available
             return _neutral_signal(symbol, last_known_price, timeframe)
-
         current_price = quote["price"]
 
-        # Get timeframe from selected strategy (convert to db_resolution for compatibility)
-        selected_strategy = get_symbol_strategy(symbol)
-        
-        # Use StrategyManager from JSON (supports timeframe)
         manager = get_strategy_manager()
         if not manager or len(manager.strategies) == 0:
             print("[STRATEGY] No strategies available in manager")
             return _neutral_signal(symbol, current_price, timeframe)
-        strategy_obj = manager.strategies.get(selected_strategy)
-        
-        # Handle both string and TimeFrame enum
-        tf_value = strategy_obj.timeframe if strategy_obj and hasattr(strategy_obj, 'timeframe') else "5m"
-        print(f"[STRATEGY] {symbol}: Using strategy '{selected_strategy}' with timeframe '{tf_value}'")
-        if hasattr(tf_value, 'value'):
-            tf_value = tf_value.value
-        
-        # Convert to db_resolution (e.g., "5m" -> "5")
-        try:
-            tf_enum = TimeFrame(tf_value)
-            timeframe = tf_enum.db_resolution
-        except ValueError:
-            timeframe = "5"  # fallback
-        
-        # Use cached candles with strategy's timeframe
-        async with _get_api_semaphore():
-            candles = await asyncio.wait_for(_get_cached_candles(symbol, timeframe, 100, data_provider), timeout=10.0)
-        if not candles or len(candles) < 20:
-            return _neutral_signal(symbol, current_price, timeframe)
 
-        indicators = TechnicalIndicators.calculate_all(candles, period=14)
-        if not indicators:
-            return _neutral_signal(symbol, current_price, timeframe)
-
-        # Filter indicators based on per-symbol settings
-        enabled_key = f"INDICATORS_{symbol}"
-        enabled_indicators = db.get_setting(enabled_key)
-        if enabled_indicators:
-            # Map indicator names to their keys in the indicators dict
-            indicator_map = {
-                "RSI": ["rsi_14"],
-                "MACD": ["macd", "macd_signal", "macd_hist"],
-                "BB": ["bb_upper", "bb_lower", "bb_middle"],
-                "SMA": ["sma_20", "sma_50", "sma_200"],
-                "ADX": ["adx"],
-                "STOCH": ["stoch_k", "stoch_d"],
-                "MOMENTUM": ["momentum"],
-                "WILLIAMS_R": ["williams_r"],
-            }
-            # Filter indicators dict to only include enabled ones
-            filtered = {"_closes": indicators.get("_closes", [])}
-            for ind_name in enabled_indicators:
-                keys = indicator_map.get(ind_name, [])
-                for key in keys:
-                    if key in indicators:
-                        filtered[key] = indicators[key]
-            indicators = filtered
-
-        indicators["_closes"] = [c["close"] for c in candles]
-
-        # ── Multi-timeframe: fetch daily candles for higher-TF trend ──
-        htf_bias = 0.0
-        try:
-            async with _get_api_semaphore():
-                htf_candles = await asyncio.wait_for(_get_cached_candles(symbol, "D", 60, data_provider), timeout=10.0)
-            if htf_candles and len(htf_candles) >= 20:
-                htf_ind = TechnicalIndicators.calculate_all(htf_candles, period=14)
-                if htf_ind:
-                    htf_sma20 = htf_ind.get("sma_20")
-                    htf_sma50 = htf_ind.get("sma_50")
-                    htf_adx = htf_ind.get("adx")
-                    htf_price = htf_candles[-1]["close"]
-                    if htf_sma20 and htf_sma50 and htf_sma50 > 0:
-                        sma_diff = ((htf_sma20 - htf_sma50) / htf_sma50) * 100
-                        htf_bias = max(-1, min(1, sma_diff / 3))
-                    if htf_adx and htf_adx["adx"] > 30 and abs(htf_bias) > 0.1:
-                        htf_bias *= 1.3
-                        htf_bias = max(-1, min(1, htf_bias))
-        except Exception:
-            pass  # MTF is optional
-
-        # ── VIX Filter (v2) ──
-        # Get instrument-specific volatility index
-        vix_data = None
-        try:
-            from services.candle_store import get_candle_store
-
-            # TTL-cached (5 min) and off-thread: one fetch per index per cycle,
-            # not one blocking call per symbol per scan
-            vix_data = await get_candle_store().get_vix(symbol)
-            if vix_data:
-                indicators["vix"] = vix_data
-        except Exception as e:
-            print(f"[VIX] Could not fetch VIX for {symbol}: {e}")
-
-        # ── Volatility filter ──
-        # NOTE: Volatility check now handled by Strategy's filter config
-        # The strategy.json defines volatility filter per-strategy
-        atr = indicators.get("atr_14", current_price * 0.01)
-        atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
-
-        # ── News sentiment (disabled to speed up - optional feature) ──
-        news_score = 0.0
-        # try:
-        #     async with _get_api_semaphore():
-        #         news = await asyncio.wait_for(
-        #             news_client_instance.get_news(symbol, 5),
-        #             timeout=1.0  # Quick timeout - don't wait for news
-        #         )
-        #     if news and len(news) > 0:
-        #         sentiments = [article.get('sentiment', 0) for article in news]
-        #         news_score = sum(sentiments) / len(sentiments) if sentiments else 0
-        # except Exception:
-        #     pass  # News is optional
-
-        # ── Get selected strategy from DB ──
+        # Resolve the strategy config to learn which timeframes it needs
         selected_strategy = get_symbol_strategy(symbol)
-        
-        # ── Try JSON-based strategy (if selected or default) ──
-        # If user selected a JSON strategy, use that one. Otherwise use any available JSON strategy for this symbol
+        strategy_obj = manager.strategies.get(selected_strategy.replace("JSON:", ""))
+        if strategy_obj is None:
+            for cand in manager.get_enabled_strategies():
+                if cand.symbol.upper() == symbol.upper():
+                    strategy_obj = cand
+                    break
+        if strategy_obj is None:
+            return _neutral_signal(symbol, current_price, timeframe)
+
+        engine = SignalEngine(strategy_obj.config)
+        base_tf = engine.base_timeframe()
+        timeframe = base_tf.db_resolution
+
+        # One CandleStore fetch per required timeframe; closed candles only.
+        store = get_candle_store()
+        series = {}
+        for tf in engine.required_timeframes():
+            tf_series = await store.get_series(symbol, tf, min_bars=120)
+            if tf_series.candles:
+                series[tf] = tf_series
+
+        base_series = series.get(base_tf)
+        if base_series is None or len(base_series.candles) < 20:
+            return _neutral_signal(symbol, current_price, timeframe)
+
+        # VIX: TTL-cached, one fetch per index per cycle
+        vix_value = None
+        try:
+            vix_data = await store.get_vix(symbol)
+            vix_value = vix_data.get("value") if vix_data else None
+        except Exception:
+            pass
+
         new_result = analyze_with_new_strategy(
-            symbol, 
-            candles, 
-            current_price, 
+            symbol,
+            base_series.candles,
+            current_price,
             requested_strategy=selected_strategy if selected_strategy.startswith("JSON:") else None,
-            atr_percent=atr_pct,
-            vix_value=vix_data.get('value') if vix_data else None
-        )
-        
-        if new_result:
-            print(f"[STRATEGY] Using NEW JSON strategy for {symbol}: {new_result.get('strategy_id')}")
-            # Clamp scores to valid range [-1, 1]
-            json_score = max(-1.0, min(1.0, new_result["score"]))
-            json_technical = max(-1.0, min(1.0, new_result["technical_score"]))
-            
-            # Filter out weak signals - require minimum score threshold from strategy config
-            min_signal_score = new_result.get("strategy_config", {}).get("score", {}).get("min_score", 0.01)
-            if abs(json_score) < min_signal_score:
-                print(f"[SIGNAL] {symbol}: Score {json_score:.3f} below threshold {min_signal_score}, skipping")
-                return _neutral_signal(symbol, current_price, timeframe)
-            
-            return Signal(
-                symbol=symbol,
-                direction=SignalDirection.BUY if new_result["direction"] == "long" else SignalDirection.SELL,
-                score=json_score,
-                confidence=new_result["confidence"],
-                technical_score=json_technical,
-                price_action_score=0.0,
-                news_score=0.0,
-                components=new_result["components"],
-                current_price=current_price,
-                time_horizon=timeframe,
-                entry_point=current_price,
-                take_profit=new_result.get("exits", {}).get("tp_price", 0) or 0,
-                stop_loss=new_result.get("exits", {}).get("sl_price", 0) or 0,
-                risk_reward_ratio=new_result.get("risk_reward_ratio") or 0,
-            )
-
-        # ── Fallback: OLD strategy (DEPRECATED - see strategies.py) ──
-        # ⚠️ DEPRECATED: Old strategy code - migrate to JSON-based strategies
-        strategy_id = get_symbol_strategy(symbol)
-        strategy = get_strategy(strategy_id)
-        indicators["_closes"] = [c["close"] for c in candles]
-
-        result = strategy.score(
-            candles=candles,
-            indicators=indicators,
-            symbol=symbol,
-            instrument_info=info,
-            current_price=current_price,
-            htf_bias=htf_bias,
-            news_score=news_score,
+            vix_value=vix_value,
+            series=series,
         )
 
-        # Clamp scores to valid range [-1, 1] - safety guard
-        safe_score = max(-1.0, min(1.0, result["score"]))
-        safe_technical = max(-1.0, min(1.0, result["technical_score"]))
-        
-        signal = Signal(
+        if not new_result:
+            return _neutral_signal(symbol, current_price, timeframe)
+
+        json_score = max(-1.0, min(1.0, new_result["score"]))
+        json_technical = max(-1.0, min(1.0, new_result["technical_score"]))
+
+        return Signal(
             symbol=symbol,
-            direction=result["direction"],
-            score=safe_score,
-            confidence=result["confidence"],
-            technical_score=safe_technical,
+            direction=SignalDirection.BUY if new_result["direction"] == "long" else SignalDirection.SELL,
+            score=json_score,
+            confidence=new_result["confidence"],
+            technical_score=json_technical,
             price_action_score=0.0,
-            news_score=news_score,
-            components=result["components"],
+            news_score=0.0,
+            components=new_result["components"],
             current_price=current_price,
             time_horizon=timeframe,
             entry_point=current_price,
-            take_profit=result["take_profit"],
-            stop_loss=result["stop_loss"],
-            risk_reward_ratio=result["risk_reward_ratio"],
+            take_profit=new_result.get("exits", {}).get("tp_price", 0) or 0,
+            stop_loss=new_result.get("exits", {}).get("sl_price", 0) or 0,
+            risk_reward_ratio=new_result.get("risk_reward_ratio") or 0,
         )
-
-        return signal
 
     except Exception as e:
         log_event(f"Error analyzing {symbol}: {e}", "error")
         return _neutral_signal(symbol, 0.0, timeframe)
+
 
 @async_timed("generate_signals")
 async def generate_signals() -> List[Signal]:
