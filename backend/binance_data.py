@@ -2,6 +2,7 @@
 import requests
 from typing import List, Dict, Optional
 import time
+from datetime import datetime, timezone
 
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
@@ -82,6 +83,97 @@ def fetch_binance_candles(
     except Exception as e:
         print(f"[Binance] Error fetching {symbol}: {e}")
         return []
+
+
+def fetch_binance_history(
+    symbol: str = "BTCUSDT",
+    interval: str = "5m",
+    days: int = 730,
+    start_ms: Optional[int] = None,
+    end_ms: Optional[int] = None,
+    page_limit: int = 1000,
+    sleep_seconds: float = 0.15,
+) -> List[Dict]:
+    """Fetch YEARS of kline history by paginating GET /api/v3/klines.
+
+    Walks startTime forward from (now - days) to now, 1000 candles per request,
+    sleeping between pages to respect public rate limits. Each page gets one
+    retry on failure; on repeated failure the candles collected so far are
+    returned. Output is ascending and deduped on the kline OPEN time, in the
+    same dict shape used across the codebase.
+    """
+    binance_symbol = get_binance_symbol(symbol)
+    url = f"{BINANCE_BASE}/klines"
+
+    if end_ms is None:
+        end_ms = int(time.time() * 1000)
+    if start_ms is None:
+        start_ms = end_ms - days * 24 * 60 * 60 * 1000
+
+    candles: List[Dict] = []
+    seen_opens = set()
+    current = start_ms
+    page = 0
+
+    while current < end_ms:
+        params = {
+            "symbol": binance_symbol,
+            "interval": interval,
+            "startTime": current,
+            "endTime": end_ms,
+            "limit": page_limit,
+        }
+
+        data = None
+        for attempt in range(2):
+            try:
+                response = requests.get(url, params=params, timeout=15)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except Exception as e:
+                print(f"[Binance] {binance_symbol} {interval} page {page + 1} "
+                      f"attempt {attempt + 1}/2 failed: {e}")
+                if attempt == 0:
+                    time.sleep(1.0)
+        if data is None:
+            print(f"[Binance] giving up on {binance_symbol} {interval} - "
+                  f"returning {len(candles)} candles collected so far")
+            break
+        if not data:
+            break
+
+        for k in data:
+            open_ms = int(k[0])
+            if open_ms in seen_opens:
+                continue
+            seen_opens.add(open_ms)
+            ts = datetime.fromtimestamp(open_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            candles.append({
+                "timestamp": ts,
+                "open": float(k[1]),
+                "high": float(k[2]),
+                "low": float(k[3]),
+                "close": float(k[4]),
+                "volume": float(k[5]),
+            })
+
+        page += 1
+        if page % 50 == 0:
+            print(f"[Binance] {binance_symbol} {interval}: page {page}, "
+                  f"{len(candles)} candles, up to {candles[-1]['timestamp'] if candles else '?'}")
+
+        newest_open = int(data[-1][0])
+        if newest_open + 1 <= current:
+            break  # no forward progress - avoid infinite loop
+        current = newest_open + 1
+        if len(data) < page_limit:
+            break  # short page = reached the present
+
+        time.sleep(sleep_seconds)
+
+    candles.sort(key=lambda c: c["timestamp"])
+    return candles
 
 
 def fetch_binance_historical(
