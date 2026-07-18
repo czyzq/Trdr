@@ -22,7 +22,7 @@ class Fold:
 FOLD_SPECS = {
     "5m": (6048, 288, 2016),    # 21d / 1d / 7d of 5m bars
     "15m": (2016, 96, 672),
-    "1h": (2160, 24, 720),      # 90d / 1d / 30d
+    "1h": (2160, 24, 1080),     # 90d / 1d / 45d - reversion needs sample room
     "1d": (365, 5, 90),
 }
 N_FOLDS = 3

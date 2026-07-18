@@ -1505,6 +1505,146 @@
           "enabled": false
         }
       }
+    },
+    {
+      "id": "btc_1h_trend",
+      "name": "BTC 1h Trend Following",
+      "symbol": "BTC",
+      "enabled": true,
+      "base_timeframe": "1h",
+      "timeframes": {
+        "1h": {
+          "weight": 0.5,
+          "indicators": [
+            {
+              "name": "MOMENTUM",
+              "weight": 1.5
+            },
+            {
+              "name": "SMA_CROSS",
+              "weight": 1.5
+            },
+            {
+              "name": "MACD",
+              "weight": 1.0
+            }
+          ]
+        },
+        "4h": {
+          "weight": 0.3,
+          "indicators": [
+            {
+              "name": "SMA_CROSS",
+              "weight": 1.0
+            },
+            {
+              "name": "MACD",
+              "weight": 1.0
+            }
+          ]
+        },
+        "1d": {
+          "weight": 0.2,
+          "indicators": [
+            {
+              "name": "SMA_CROSS",
+              "weight": 1.0
+            }
+          ]
+        }
+      },
+      "combine": {
+        "method": "weighted_sum",
+        "min_score": 0.12,
+        "min_agreement": 0.6,
+        "conflict_policy": "dampen"
+      },
+      "risk": {
+        "risk_per_trade_percent": 1.5,
+        "leverage": 2
+      },
+      "exits": {
+        "stop_loss": {
+          "value": -2.5
+        },
+        "take_profit": {
+          "value": 5.0
+        },
+        "dynamic_tp": {
+          "enabled": false
+        },
+        "max_hold_bars": 120
+      }
+    },
+    {
+      "id": "xau_1h_reversion",
+      "name": "XAU 1h Mean Reversion",
+      "symbol": "XAU",
+      "enabled": true,
+      "base_timeframe": "1h",
+      "timeframes": {
+        "1h": {
+          "weight": 0.6,
+          "indicators": [
+            {
+              "name": "RSI_REVERSION",
+              "weight": 1.5
+            },
+            {
+              "name": "BB_POSITION",
+              "weight": 1.0
+            },
+            {
+              "name": "STOCH",
+              "weight": 0.5
+            }
+          ]
+        },
+        "4h": {
+          "weight": 0.4,
+          "indicators": [
+            {
+              "name": "RSI_REVERSION",
+              "weight": 1.0
+            },
+            {
+              "name": "BB_POSITION",
+              "weight": 1.0
+            }
+          ]
+        },
+        "1d": {
+          "weight": 0.0,
+          "role": "veto",
+          "veto": {
+            "indicator": "SMA_CROSS",
+            "long_requires": "> -0.6",
+            "short_requires": "< 0.6"
+          }
+        }
+      },
+      "combine": {
+        "method": "weighted_sum",
+        "min_score": 0.1,
+        "min_agreement": 0.5,
+        "conflict_policy": "dampen"
+      },
+      "risk": {
+        "risk_per_trade_percent": 1.5,
+        "leverage": 5
+      },
+      "exits": {
+        "stop_loss": {
+          "value": -1.5
+        },
+        "take_profit": {
+          "value": 2.5
+        },
+        "dynamic_tp": {
+          "enabled": false
+        },
+        "max_hold_bars": 72
+      }
     }
   ],
   "metadata": {
